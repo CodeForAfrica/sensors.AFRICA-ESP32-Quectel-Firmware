@@ -254,9 +254,9 @@ bool GPRS_init()
     //     GPRS_CONNECTED = false;
     //     return GPRS_CONNECTED;
     // }
-    if (fona.sendCheckReply(F("AT+CGATT?"), F("0"), 140000)) // equivalent to fona.GPRSstate()
+    if (fona.sendCheckReply(F("AT+CGATT?"), F("0"), 65000)) // equivalent to fona.GPRSstate()
     {
-        if (!fona.sendCheckReply(F("AT+CGATT=1"), F("OK"), 140000))
+        if (!fona.sendCheckReply(F("AT+CGATT=1"), F("OK"), 65000))
         {
             err = "Failed to attach GPRS service";
             GSM_INIT_ERROR = err;
@@ -278,7 +278,7 @@ bool GPRS_init()
         return GPRS_CONNECTED;
     }
 
-    if (!fona.sendCheckReply(F("AT+QIACT=1"), F("OK"), 150000))
+    if (!fona.sendCheckReply(F("AT+QIACT=1"), F("OK"), (uint16_t)150000))
     {
         err = "Failed to activate GPRS PDP context";
         GSM_INIT_ERROR = err;
@@ -289,7 +289,7 @@ bool GPRS_init()
 
 #else
     String res = handle_AT_CMD("AT+SAPBR=1,1"); // Enable GPRS
-    String res = handle_AT_CMD("AT+QCFG=\"gprsattach\",1");
+    res = handle_AT_CMD("AT+QCFG=\"gprsattach\",1");
     if (res.indexOf("OK") == -1)
     {
         err = "Failed to enable GPRS";

@@ -3,23 +3,11 @@
 #include <SoftwareSerial.h>
 #include "GSM_handler.h"
 
-static const char HOST_CFA[] PROGMEM = "staging.api.sensors.africa";
-static const char URL_CFA[] PROGMEM = "/v1/push-sensor-data/";
-#define PMS_LED 3
-#define PORT_CFA 80
 bool send_now = false;
-bool gsm_capable = false;
 
-#define SOFTWARE_VERSION_STR "NRZ-2020-129"
-
-const char data_first_part[] PROGMEM = "{\"software_version\": \"" SOFTWARE_VERSION_STR "\", \"sensordatavalues\":[";
-
-constexpr unsigned SMALL_STR = 64 - 1;
-constexpr unsigned MED_STR = 256 - 1;
-constexpr unsigned LARGE_STR = 512 - 1;
-constexpr unsigned XLARGE_STR = 1024 - 1;
 bool airrohr_selftest_failed = false;
 String esp_chipid;
+String my_espchid;
 
 #define RESERVE_STRING(name, size)    \
   String name((const char *)nullptr); \
@@ -33,13 +21,19 @@ constexpr std::size_t array_num_elements(const T (&)[N])
   return N;
 }
 
-int sampling_interval = 15 * 60 * 1000;
+int sampling_interval = 30000;
 int sending_interval = 12 * 60 * 60 * 1000;
-const unsigned long WARMUPTIME_SDS_MS = 15000;
+unsigned long last_read_pms = 0;
+const unsigned long WARMUPTIME_SDS_MS = 15000; // time needed to "warm up" the sensor before we can take the first measurement
+const unsigned long SAMPLETIME_SDS_MS = 1000;  // time between two measurements of the SDS011, PMSx003, Honeywell PM sensor
+const unsigned long READINGTIME_SDS_MS = 5000; // how long we read data from the PM sensors
 int start_time = 0;
 unsigned long act_milli;
 unsigned long starttime = 0;
 unsigned sending_intervall_ms = 145000;
+unsigned long starttime_SDS;
+unsigned long sending_time = 0;
+unsigned long count_sends = 0;
 
 int pms_pm1_sum = 0;
 int pms_pm10_sum = 0;
@@ -55,20 +49,26 @@ float last_value_PMS_P0 = -1.0;
 float last_value_PMS_P1 = -1.0;
 float last_value_PMS_P2 = -1.0;
 
+#if defined(ESP8266)
 SoftwareSerial serialSDS;
-
-// define serial interface pins for particle sensors
-// Serial confusion: These definitions are based on SoftSerial
-// TX (transmitting) pin on one side goes to RX (receiving) pin on other side
-// SoftSerial RX PIN is D1 and goes to SDS TX
-// SoftSerial TX PIN is D2 and goes to SDS RX
-#define PM_SERIAL_RX D1
-#define PM_SERIAL_TX D2
+#endif
+#if defined(ESP32)
+#include <HardwareSerial.h>
+#define serialSDS (Serial2)
+// SoftwareSerial serialSDS(PM_SERIAL_RX, PM_SERIAL_TX);
+#endif
 
 bool is_PMS_running = true;
 
+// Function declarations
+static void fetchSensorPMS(String &s);
+static void powerOnTestSensors();
+static unsigned long sendData(const String &data, const int pin, const char *host, const char *url);
+static unsigned long sendCFA(const String &data, const int pin, const __FlashStringHelper *sensorname, const char *replace_str);
+
 void setup()
 {
+  delay(5000);
 #if defined(ESP8266)
   Serial.begin(9600); // Output to Serial at 9600 baud
 #endif
@@ -79,12 +79,13 @@ void setup()
   serialSDS.begin(9600, SWSERIAL_8N1, PM_SERIAL_RX, PM_SERIAL_TX);
 #endif
 #if defined(ESP32)
+  Serial.println("Serial SDS begin");
+  // serialSDS.begin(9600);
   serialSDS.begin(9600, SERIAL_8N1, PM_SERIAL_RX, PM_SERIAL_TX);
+  Serial.println("Serial SDS already began");
 #endif
-  serialSDS.enableIntTx(true);
+  // serialSDS.enableIntTx(true);
   serialSDS.setTimeout((12 * 9 * 1000) / 9600);
-
-  Wire.begin(I2C_PIN_SDA, I2C_PIN_SCL);
   pinMode(PMS_LED, OUTPUT);
 
 #if defined(ESP8266)
@@ -95,15 +96,17 @@ void setup()
   chipid_num = ESP.getEfuseMac();
   esp_chipid = String((uint16_t)(chipid_num >> 32), HEX);
   esp_chipid += String((uint32_t)chipid_num, HEX);
+  my_espchid = String((uint64_t)chipid_num, HEX);
 #endif
 
-  if ((airrohr_selftest_failed = !ESP.checkFlashConfig(true) /* after 2.7.0 update: || !ESP.checkFlashCRC() */))
-  {
-    Serial.println("ERROR: SELF TEST FAILED!");
-    // SOFTWARE_VERSION += F("-STF");
-  }
+  // if ((airrohr_selftest_failed = !ESP.checkFlashConfig(true) /* after 2.7.0 update: || !ESP.checkFlashCRC() */))
+  // {
+  //   Serial.println("ERROR: SELF TEST FAILED!");
+  //   // SOFTWARE_VERSION += F("-STF");
+  // }
 
   Serial.println("\nChipId: " + esp_chipid);
+  Serial.println("My ChipId: " + my_espchid);
 
   if (gsm_capable)
   {
@@ -111,6 +114,8 @@ void setup()
     Serial.println("Attempting to setup GSM connection");
 
     pinMode(QUECTEL_PWR_KEY, OUTPUT);
+    digitalWrite(QUECTEL_PWR_KEY, HIGH);
+    delay(10000);
 
     if (!GSM_init(fonaSerial))
     {
@@ -126,7 +131,8 @@ void setup()
   // }
   else
   {
-    connectWifi();
+    // connectWifi();
+    Serial.println("Support for other network connections not yet implemented");
   }
 
   // setupNetworkTime();
@@ -143,14 +149,82 @@ void setup()
 #endif
 #endif
 
-  starttime = millis(); // store the start time
+  starttime = starttime_SDS = millis(); // store the start time
 }
 
 void loop()
 {
   // put your main code here, to run repeatedly:
 
-  String result_PMS;
+  static String result_PMS;
+  unsigned sum_send_time = 0;
+  act_milli = millis();
+
+  send_now = msSince(starttime) > sending_intervall_ms;
+
+  // if ((msSince(starttime_SDS) > SAMPLETIME_SDS_MS) || send_now)
+  // {
+  //   starttime_SDS = act_milli;
+
+  //   fetchSensorPMS(result_PMS);
+  //   Serial.print("PMS_Readings: ");
+  //   Serial.println(result_PMS);
+  // }
+
+  if (act_milli - last_read_pms > sampling_interval)
+  {
+    starttime_SDS = act_milli;
+    Serial.println("Act_milli: " + String(act_milli));
+    result_PMS = "";
+    fetchSensorPMS(result_PMS);
+    Serial.print("PMS_Readings: ");
+    Serial.println(result_PMS);
+    last_read_pms = millis();
+    Serial.println("Last read PMS: " + String(last_read_pms));
+    // delay(15000);
+  }
+  if (send_now)
+  {
+    RESERVE_STRING(data, LARGE_STR);
+    data = FPSTR(data_first_part);
+    RESERVE_STRING(result, MED_STR);
+
+    data += result_PMS;
+    Serial.println("Data: " + data);
+    sum_send_time += sendCFA(result_PMS, PMS_API_PIN, FPSTR(SENSORS_PMSx003), "PMS_");
+
+    if ((unsigned)(data.lastIndexOf(',') + 1) == data.length())
+    {
+      data.remove(data.length() - 1);
+    }
+    data += "]}";
+
+    yield();
+
+    // https://en.wikipedia.org/wiki/Moving_average#Cumulative_moving_average
+    sending_time = (3 * sending_time + sum_send_time) / 4;
+    if (sum_send_time > 0)
+    {
+      Serial.println("Time for Sending (ms): " + String(sending_time));
+    }
+
+    // Resetting for next sampling
+    sum_send_time = 0;
+    count_sends++;
+    Serial.println("Sent data counts: " + count_sends);
+    starttime = millis(); // store the start time
+  }
+  // yield();
+  //  #if defined(ESP8266)
+  //    MDNS.update();
+  //    serialSDS.perform_work();
+  //  #endif
+
+  //   if (sample_count % 500 == 0)
+  //   {
+  //     	Serial.println(ESP.getFreeHeap(),DEC);
+  //   }
+  // starttime = millis(); // store the start time
 }
 
 /*****************************************************************
@@ -179,10 +253,6 @@ enum class PmSensorCmd
   Stop,
   ContinuousMode
 };
-
-const unsigned long SAMPLETIME_SDS_MS = 1000;  // time between two measurements of the SDS011, PMSx003, Honeywell PM sensor
-const unsigned long WARMUPTIME_SDS_MS = 15000; // time needed to "warm up" the sensor before we can take the first measurement
-const unsigned long READINGTIME_SDS_MS = 5000; // how long we read data from the PM sensors
 
 /*****************************************************************
  * send Plantower PMS sensor command start, stop, cont. mode     *
@@ -232,195 +302,207 @@ static void fetchSensorPMS(String &s)
 
   Serial.print("Start reading PMS503 sensor: ");
 
-  if (msSince(starttime) < (sending_intervall_ms - (WARMUPTIME_SDS_MS + READINGTIME_SDS_MS)))
+  // if (msSince(starttime) < (sending_intervall_ms - (WARMUPTIME_SDS_MS + READINGTIME_SDS_MS)))
+  // {
+  //   if (is_PMS_running)
+  //   {
+  //     Serial.println("PMS cmd stop");
+  //     is_PMS_running = PMS_cmd(PmSensorCmd::Stop);
+  //   }
+  // }
+  // else
+  // {
+  if (!is_PMS_running)
   {
-    if (is_PMS_running)
-    {
-      is_PMS_running = PMS_cmd(PmSensorCmd::Stop);
-    }
+    Serial.println("PMS cmd start");
+    is_PMS_running = PMS_cmd(PmSensorCmd::Start);
+    delay(WARMUPTIME_SDS_MS + READINGTIME_SDS_MS);
   }
-  else
+  Serial.println("Checking for data...");
+  while (serialSDS.available() > 0)
   {
-    if (!is_PMS_running)
+    buffer = serialSDS.read();
+    // Serial.println(String(len) + " - " + String(buffer, DEC) + " - " + String(buffer, HEX) + " - " + int(buffer) + " .");
+    //			"aa" = 170, "ab" = 171, "c0" = 192
+    value = int(buffer);
+    switch (len)
     {
-      is_PMS_running = PMS_cmd(PmSensorCmd::Start);
-    }
-
-    while (serialSDS.available() > 0)
-    {
-      buffer = serialSDS.read();
-      Serial.println(String(len) + " - " + String(buffer, DEC) + " - " + String(buffer, HEX) + " - " + int(buffer) + " .");
-      //			"aa" = 170, "ab" = 171, "c0" = 192
-      value = int(buffer);
-      switch (len)
+    case 0:
+      if (value != 66)
       {
-      case 0:
-        if (value != 66)
-        {
-          len = -1;
-        };
-        break;
-      case 1:
-        if (value != 77)
-        {
-          len = -1;
-        };
-        break;
-      case 2:
-        checksum_is = value;
-        break;
-      case 3:
-        frame_len = value + 4;
-        break;
-      case 10:
-        pm1_serial += (value << 8);
-        break;
-      case 11:
-        pm1_serial += value;
-        break;
-      case 12:
-        pm25_serial = (value << 8);
-        break;
-      case 13:
-        pm25_serial += value;
-        break;
-      case 14:
-        pm10_serial = (value << 8);
-        break;
-      case 15:
-        pm10_serial += value;
-        break;
-      case 22:
-        if (frame_len == 24)
-        {
-          checksum_should = (value << 8);
-        };
-        break;
-      case 23:
-        if (frame_len == 24)
-        {
-          checksum_should += value;
-        };
-        break;
-      case 30:
+        len = -1;
+      };
+      break;
+    case 1:
+      if (value != 77)
+      {
+        len = -1;
+      };
+      break;
+    case 2:
+      checksum_is = value;
+      break;
+    case 3:
+      frame_len = value + 4;
+      break;
+    case 10:
+      pm1_serial += (value << 8);
+      break;
+    case 11:
+      pm1_serial += value;
+      break;
+    case 12:
+      pm25_serial = (value << 8);
+      break;
+    case 13:
+      pm25_serial += value;
+      break;
+    case 14:
+      pm10_serial = (value << 8);
+      break;
+    case 15:
+      pm10_serial += value;
+      break;
+    case 22:
+      if (frame_len == 24)
+      {
         checksum_should = (value << 8);
-        break;
-      case 31:
+      };
+      break;
+    case 23:
+      if (frame_len == 24)
+      {
         checksum_should += value;
-        break;
-      }
-      if ((len > 2) && (len < (frame_len - 2)))
-      {
-        checksum_is += value;
-      }
-      len++;
-      if (len == frame_len)
-      {
-        Serial.print("Checksum is: ");
-        Serial.print(String(checksum_is + 143));
-        Serial.print("\tChecksum should be: ");
-        Serial.println(String(checksum_should));
+      };
+      break;
+    case 30:
+      checksum_should = (value << 8);
+      break;
+    case 31:
+      checksum_should += value;
+      break;
+    }
+    if ((len > 2) && (len < (frame_len - 2)))
+    {
+      checksum_is += value;
+    }
+    len++;
+    if (len == frame_len)
+    {
+      // Serial.print("Checksum is: ");
+      // Serial.print(String(checksum_is + 143));
+      // Serial.print("\tChecksum should be: ");
+      // Serial.println(String(checksum_should));
 
-        if (checksum_should == (checksum_is + 143))
+      if (checksum_should == (checksum_is + 143))
+      {
+        checksum_ok = true;
+      }
+      else
+      {
+        len = 0;
+      };
+      if (checksum_ok && (msSince(starttime) > (sending_intervall_ms - READINGTIME_SDS_MS)))
+      {
+        if ((!isnan(pm1_serial)) && (!isnan(pm10_serial)) && (!isnan(pm25_serial)))
         {
-          checksum_ok = true;
-        }
-        else
-        {
-          len = 0;
-        };
-        if (checksum_ok && (msSince(starttime) > (sending_intervall_ms - READINGTIME_SDS_MS)))
-        {
-          if ((!isnan(pm1_serial)) && (!isnan(pm10_serial)) && (!isnan(pm25_serial)))
+          pms_pm1_sum += pm1_serial;
+          pms_pm10_sum += pm10_serial;
+          pms_pm25_sum += pm25_serial;
+          if (pms_pm1_min > pm1_serial)
           {
-            pms_pm1_sum += pm1_serial;
-            pms_pm10_sum += pm10_serial;
-            pms_pm25_sum += pm25_serial;
-            if (pms_pm1_min > pm1_serial)
-            {
-              pms_pm1_min = pm1_serial;
-            }
-            if (pms_pm1_max < pm1_serial)
-            {
-              pms_pm1_max = pm1_serial;
-            }
-            if (pms_pm25_min > pm25_serial)
-            {
-              pms_pm25_min = pm25_serial;
-            }
-            if (pms_pm25_max < pm25_serial)
-            {
-              pms_pm25_max = pm25_serial;
-            }
-            if (pms_pm10_min > pm10_serial)
-            {
-              pms_pm10_min = pm10_serial;
-            }
-            if (pms_pm10_max < pm10_serial)
-            {
-              pms_pm10_max = pm10_serial;
-            }
-
-            Serial.print("PM1 (sec.): ");
-            Serial.println(String(pm1_serial));
-            Serial.print("PM2.5 (sec.): ");
-            Serial.println(String(pm25_serial));
-            Serial.print("PM10 (sec.) : ");
-            Serial.println(String(pm10_serial));
-
-            pms_val_count++;
+            pms_pm1_min = pm1_serial;
           }
-          len = 0;
-          checksum_ok = false;
-          pm1_serial = 0;
-          pm10_serial = 0;
-          pm25_serial = 0;
-          checksum_is = 0;
+          if (pms_pm1_max < pm1_serial)
+          {
+            pms_pm1_max = pm1_serial;
+          }
+          if (pms_pm25_min > pm25_serial)
+          {
+            pms_pm25_min = pm25_serial;
+          }
+          if (pms_pm25_max < pm25_serial)
+          {
+            pms_pm25_max = pm25_serial;
+          }
+          if (pms_pm10_min > pm10_serial)
+          {
+            pms_pm10_min = pm10_serial;
+          }
+          if (pms_pm10_max < pm10_serial)
+          {
+            pms_pm10_max = pm10_serial;
+          }
+
+          Serial.print("PM1 (sec.): ");
+          Serial.println(String(pm1_serial));
+          Serial.print("PM2.5 (sec.): ");
+          Serial.println(String(pm25_serial));
+          Serial.print("PM10 (sec.) : ");
+          Serial.println(String(pm10_serial));
+
+          pms_val_count++;
         }
+        len = 0;
+        checksum_ok = false;
+        pm1_serial = 0;
+        pm10_serial = 0;
+        pm25_serial = 0;
+        checksum_is = 0;
       }
-      yield();
     }
+    // yield();
   }
-  if (send_now)
-  {
-    last_value_PMS_P0 = -1;
-    last_value_PMS_P1 = -1;
-    last_value_PMS_P2 = -1;
-    if (pms_val_count > 2)
-    {
-      pms_pm1_sum = pms_pm1_sum - pms_pm1_min - pms_pm1_max;
-      pms_pm10_sum = pms_pm10_sum - pms_pm10_min - pms_pm10_max;
-      pms_pm25_sum = pms_pm25_sum - pms_pm25_min - pms_pm25_max;
-      pms_val_count = pms_val_count - 2;
-    }
-    if (pms_val_count > 0)
-    {
-      last_value_PMS_P0 = float(pms_pm1_sum) / float(pms_val_count);
-      last_value_PMS_P1 = float(pms_pm10_sum) / float(pms_val_count);
-      last_value_PMS_P2 = float(pms_pm25_sum) / float(pms_val_count);
-      add_Value2Json(s, F("PMS_P0"), F("PM1:   "), last_value_PMS_P0);
-      add_Value2Json(s, F("PMS_P1"), F("PM10:  "), last_value_PMS_P1);
-      add_Value2Json(s, F("PMS_P2"), F("PM2.5: "), last_value_PMS_P2);
-      Serial.println("----");
-    }
-    pms_pm1_sum = 0;
-    pms_pm10_sum = 0;
-    pms_pm25_sum = 0;
-    pms_val_count = 0;
-    pms_pm1_max = 0;
-    pms_pm1_min = 20000;
-    pms_pm10_max = 0;
-    pms_pm10_min = 20000;
-    pms_pm25_max = 0;
-    pms_pm25_min = 20000;
-    if (sending_intervall_ms > (WARMUPTIME_SDS_MS + READINGTIME_SDS_MS))
-    {
-      is_PMS_running = PMS_cmd(PmSensorCmd::Stop);
-    }
-    digitalWrite(PMS_LED, HIGH);
-    delay(5000);
-    digitalWrite(PMS_LED, LOW);
-  }
+
+  is_PMS_running = PMS_cmd(PmSensorCmd::Stop);
+  add_Value2Json(s, F("PMS_P0"), F("PM1:   "), pm1_serial);
+  add_Value2Json(s, F("PMS_P1"), F("PM10:  "), pm10_serial);
+  add_Value2Json(s, F("PMS_P2"), F("PM2.5: "), pm25_serial);
+
+  digitalWrite(PMS_LED, HIGH);
+  delay(5000);
+  digitalWrite(PMS_LED, LOW);
+  //}
+  // if (send_now)
+  // {
+  //   last_value_PMS_P0 = -1;
+  //   last_value_PMS_P1 = -1;
+  //   last_value_PMS_P2 = -1;
+  //   if (pms_val_count > 2)
+  //   {
+  //     pms_pm1_sum = pms_pm1_sum - pms_pm1_min - pms_pm1_max;
+  //     pms_pm10_sum = pms_pm10_sum - pms_pm10_min - pms_pm10_max;
+  //     pms_pm25_sum = pms_pm25_sum - pms_pm25_min - pms_pm25_max;
+  //     pms_val_count = pms_val_count - 2;
+  //   }
+  //   if (pms_val_count > 0)
+  //   {
+  //     last_value_PMS_P0 = float(pms_pm1_sum) / float(pms_val_count);
+  //     last_value_PMS_P1 = float(pms_pm10_sum) / float(pms_val_count);
+  //     last_value_PMS_P2 = float(pms_pm25_sum) / float(pms_val_count);
+  //     add_Value2Json(s, F("PMS_P0"), F("PM1:   "), last_value_PMS_P0);
+  //     add_Value2Json(s, F("PMS_P1"), F("PM10:  "), last_value_PMS_P1);
+  //     add_Value2Json(s, F("PMS_P2"), F("PM2.5: "), last_value_PMS_P2);
+  //     Serial.println("----");
+  //   }
+  //   pms_pm1_sum = 0;
+  //   pms_pm10_sum = 0;
+  //   pms_pm25_sum = 0;
+  //   pms_val_count = 0;
+  //   pms_pm1_max = 0;
+  //   pms_pm1_min = 20000;
+  //   pms_pm10_max = 0;
+  //   pms_pm10_min = 20000;
+  //   pms_pm25_max = 0;
+  //   pms_pm25_min = 20000;
+  //   if (sending_intervall_ms > (WARMUPTIME_SDS_MS + READINGTIME_SDS_MS))
+  //   {
+  //     is_PMS_running = PMS_cmd(PmSensorCmd::Stop);
+  //   }
+  //   digitalWrite(PMS_LED, HIGH);
+  //   delay(5000);
+  //   digitalWrite(PMS_LED, LOW);
+  // }
 
   Serial.println("End reading PMS503 sensor");
 }
@@ -448,7 +530,7 @@ static unsigned long sendData(const String &data, const int pin, const char *hos
   int result = 0;
   int port;
 
-  if (cfg::gsm_capable)
+  if (gsm_capable)
   {
 
     if (!GPRS_CONNECTED)
@@ -501,23 +583,22 @@ static unsigned long sendData(const String &data, const int pin, const char *hos
       char gprs_data[strlen(data_copy)];
       strcpy(gprs_data, data_copy);
 
-      String post_url = String(s_Host);
-      post_url += String(s_url);
+      String post_url = String(host);
+      post_url += String(url);
       const char *url_copy = post_url.c_str();
       char gprs_url[strlen(url_copy)];
       strcpy(gprs_url, url_copy);
 
       Serial.println("POST URL  " + String(gprs_url));
 
-      debug_out(F("Sending data via gsm"), DEBUG_MIN_INFO);
-      debug_out(F("http://"), DEBUG_MIN_INFO);
-      debug_out(gprs_url, DEBUG_MIN_INFO);
-      debug_out(gprs_data, DEBUG_MIN_INFO);
+      Serial.print("Sending data via gsm");
+      Serial.print("\thttp://");
+      Serial.println(gprs_url);
+      Serial.println(gprs_data);
       Serial.println("GPRS REQUEST HEAD:");
       Serial.println(gprs_request_head);
       Serial.println();
       flushSerial();
-      debug_out(F("## Sending via gsm\n\n"), DEBUG_MIN_INFO);
 
 #ifdef QUECTEL
       QUECTEL_POST((char *)gprs_url, Quectel_headers, header_size, data, data.length());
@@ -541,14 +622,16 @@ static unsigned long sendData(const String &data, const int pin, const char *hos
             break;
         }
       }
-      debug_out(F("\n\n## End sending via gsm \n\n"), DEBUG_MIN_INFO);
+      Serial.println("\n\n## End sending via gsm \n\n");
       fona.HTTP_POST_end();
       disableGPRS();
 #endif
     }
   }
 
+#if defined(ESP8266)
   wdt_reset();
+#endif
   yield();
   return millis() - start_send;
 }
@@ -560,7 +643,7 @@ static unsigned long sendCFA(const String &data, const int pin, const __FlashStr
 {
   unsigned long sum_send_time = 0;
 
-  if (cfg::send2cfa && data.length())
+  if (data.length())
   {
     RESERVE_STRING(data_CFA, LARGE_STR);
     data_CFA = FPSTR(data_first_part);
@@ -570,6 +653,7 @@ static unsigned long sendCFA(const String &data, const int pin, const __FlashStr
     data_CFA.remove(data_CFA.length() - 1);
     data_CFA.replace(replace_str, emptyString);
     data_CFA += "]}";
+    Serial.print("\nCFA Data to send: ");
     Serial.println(data_CFA);
 
     sum_send_time = sendData(data_CFA, pin, HOST_CFA, URL_CFA);
