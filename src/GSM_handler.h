@@ -19,7 +19,7 @@ String GSM_INIT_ERROR = "";
 String NETWORK_NAME = "";
 
 /**** Function Declacrations **/
-bool GSM_init(SoftwareSerial *gsm_serial);
+bool GSM_init();
 static void unlock_pin(char *PIN);
 String handle_AT_CMD(String cmd, int _delay = 1000);
 void SIM_PIN_Setup();
@@ -33,27 +33,45 @@ void QUECTEL_POST(char *url, String headers[], int header_size, const String &da
 int GPRS_INIT_FAIL_COUNT = 0;
 int HTTP_POST_FAIL = 0;
 // Set a decent delay before this to warm up the GSM module
-bool GSM_init(SoftwareSerial *gsm_serial)
-{ // Pass a ptr to SoftwareSerial GSM instance
-    gsm_serial->begin(115200);
-    String error_msg = "";
-    // Check if there is serial communication with a GSM module
-    /* if (!fona.begin(*gsm_serial)) */
-    fona.begin(*gsm_serial);
-    // digitalWrite(QUECTEL_PWR_KEY, LOW);
-    // delay(3000);
-    // digitalWrite(QUECTEL_PWR_KEY, HIGH);
-    // delay(5000);
-    if (!fona.sendCheckReply(F("AT"), F("OK")))
+
+bool validate_GSM_serial_communication()
+{
+
+    Serial.println("Attempting to setup GSM connection...");
+
+    pinMode(QUECTEL_PWR_KEY, OUTPUT);
+    digitalWrite(QUECTEL_PWR_KEY, HIGH);
+    delay(5000);
+    fonaSerial->begin(115200);
+
+    const uint8_t GSM_RETRY_ATTEMPTS = 3;
+    uint8_t retry_count = 1;
+    while (retry_count <= GSM_RETRY_ATTEMPTS)
     {
-        error_msg = "Could not find GSM module";
-        GSM_INIT_ERROR = error_msg;
-        Serial.println(error_msg);
-        GSM_CONNECTED = false;
-        return false;
+
+        Serial.println("ATTEMPT: " + String(retry_count));
+        if (fona.begin(*fonaSerial))
+        {
+            Serial.println("GSM module found!");
+            GSM_CONNECTED = true;
+            return true;
+        }
+        retry_count++;
+        if (retry_count == GSM_RETRY_ATTEMPTS)
+        {
+            Serial.println("Exceeded maximum number of attempts to connect to GSM module. Exiting retries...");
+        }
     }
 
-    Serial.print("GSM module found!");
+    Serial.println("Could not find GSM module");
+
+    return false;
+}
+
+bool GSM_init()
+{
+
+    String error_msg = "";
 
     // Check if SIM is inserted
     if (!is_SIMCID_valid())
@@ -107,15 +125,15 @@ bool GSM_init(SoftwareSerial *gsm_serial)
     // fona.setGPRSNetworkSettings(F(GPRS_APN), F(GPRS_USERNAME), F(GPRS_PASSWORD));
 
     // Attempt to enable GPRS
-    Serial.println("Attempting to enable GPRS");
-    // delay(2000);
+    // Serial.println("Attempting to enable GPRS");
+    // // delay(2000);
 
-    if (!GPRS_init())
-        return false;
+    // if (!GPRS_init())
+    //     return false;
 
-    Serial.println("GPRS enabled!");
+    // Serial.println("GPRS enabled!");
 
-    GPRS_CONNECTED = true;
+    // GPRS_CONNECTED = true;
     // ToDo: Attempt to do a ping test to determine whether we can communicate with the internet
 
     return true;
@@ -223,7 +241,7 @@ bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR
     // fona.getSIMCCID(res);
     // Serial.println(res);
     // String ccid = String(res);
-    String ccid = handle_AT_CMD("AT+CCID");
+    String ccid = handle_AT_CMD("AT+CCID", 10000);
     if (ccid.indexOf("ERROR") > -1) // Means string has the word error
     {
         SIM_AVAILABLE = false;
@@ -356,7 +374,7 @@ void restart_GSM()
     //     return;
     // }
 
-    if (!GSM_init(fonaSerial))
+    if (!GSM_init())
     {
         Serial.println("GSM not fully configured");
         Serial.print("Failure point: ");
@@ -391,8 +409,8 @@ void disableGPRS()
 /*****************************************************************/
 void flushSerial()
 {
-    while (fonaSS.available())
-        fonaSS.read();
+    while (fona.available())
+        fona.read();
 }
 
 /// @brief Easy implementation of Quectel HTTP functionality

@@ -8,6 +8,14 @@ bool send_now = false;
 bool airrohr_selftest_failed = false;
 String esp_chipid;
 String my_espchid;
+char time_buff[23];
+
+// Define the maximum number of sensor data and the maximum length of each string
+const int MAX_STRINGS = 48; // 12*60/15 units of minutes
+// const int MAX_STRING_LENGTH = 100;
+// String sensor_data[20] = {};
+uint8_t sensor_data_log_count = 0;
+String sensor_data[MAX_STRINGS]; // ? Change this to char array
 
 #define RESERVE_STRING(name, size)    \
   String name((const char *)nullptr); \
@@ -111,24 +119,28 @@ void setup()
   if (gsm_capable)
   {
 
-    Serial.println("Attempting to setup GSM connection");
+    if (!validate_GSM_serial_communication())
+    {
+      Serial.println("GSM not detected. Restarting ESP");
+      // ESP.sleep();
+      delay(2000);
+      ESP.restart();
+    }
 
-    pinMode(QUECTEL_PWR_KEY, OUTPUT);
-    digitalWrite(QUECTEL_PWR_KEY, HIGH);
-    delay(10000);
-
-    if (!GSM_init(fonaSerial))
+    if (!GSM_init())
     {
       Serial.println("GSM not fully configured");
       Serial.print("Failure point: ");
       Serial.println(GSM_INIT_ERROR);
       Serial.println();
+      delay(10000);
+      ESP.restart();
     }
+
+    fona.getTime(time_buff, 23);
+    Serial.println("Time: " + String(time_buff));
   }
-  // if (!GPRS_CONNECTED)
-  // {
-  // 	connectWifi();
-  // }
+
   else
   {
     // connectWifi();
@@ -182,38 +194,61 @@ void loop()
     last_read_pms = millis();
     Serial.println("Last read PMS: " + String(last_read_pms));
     // delay(15000);
-  }
-  if (send_now)
-  {
-    RESERVE_STRING(data, LARGE_STR);
-    data = FPSTR(data_first_part);
-    RESERVE_STRING(result, MED_STR);
-
-    data += result_PMS;
-    Serial.println("Data: " + data);
-    sum_send_time += sendCFA(result_PMS, PMS_API_PIN, FPSTR(SENSORS_PMSx003), "PMS_");
-
-    if ((unsigned)(data.lastIndexOf(',') + 1) == data.length())
+    if (sensor_data_log_count < MAX_STRINGS)
     {
-      data.remove(data.length() - 1);
+
+      // Save data to array
+      RESERVE_STRING(data, LARGE_STR);
+      data = FPSTR(data_first_part);
+      data += result_PMS;
+      if ((unsigned)(data.lastIndexOf(',') + 1) == data.length())
+      {
+        data.remove(data.length() - 1);
+      }
+      data += "]}";
+      sensor_data[sensor_data_log_count] = data;
+      Serial.println("Sensor data:" + sensor_data[sensor_data_log_count]);
+      sensor_data[sensor_data_log_count] = result_PMS;
+      sensor_data_log_count++;
     }
-    data += "]}";
-
-    yield();
-
-    // https://en.wikipedia.org/wiki/Moving_average#Cumulative_moving_average
-    sending_time = (3 * sending_time + sum_send_time) / 4;
-    if (sum_send_time > 0)
+    else
     {
-      Serial.println("Time for Sending (ms): " + String(sending_time));
+      Serial.println("Sensor data log count exceeded");
+      // Save data to SD and empty array;
     }
-
-    // Resetting for next sampling
-    sum_send_time = 0;
-    count_sends++;
-    Serial.println("Sent data counts: " + count_sends);
-    starttime = millis(); // store the start time
   }
+
+  // if (send_now)
+  // {
+  //   RESERVE_STRING(data, LARGE_STR);
+  //   data = FPSTR(data_first_part);
+  //   RESERVE_STRING(result, MED_STR);
+
+  //   data += result_PMS;
+  //   Serial.println("Data: " + data);
+  //   sum_send_time += sendCFA(result_PMS, PMS_API_PIN, FPSTR(SENSORS_PMSx003), "PMS_");
+
+  //   if ((unsigned)(data.lastIndexOf(',') + 1) == data.length())
+  //   {
+  //     data.remove(data.length() - 1);
+  //   }
+  //   data += "]}";
+
+  //   yield();
+
+  //   // https://en.wikipedia.org/wiki/Moving_average#Cumulative_moving_average
+  //   sending_time = (3 * sending_time + sum_send_time) / 4;
+  //   if (sum_send_time > 0)
+  //   {
+  //     Serial.println("Time for Sending (ms): " + String(sending_time));
+  //   }
+
+  //   // Resetting for next sampling
+  //   sum_send_time = 0;
+  //   count_sends++;
+  //   Serial.println("Sent data counts: " + count_sends);
+  //   starttime = millis(); // store the start time
+  // }
   // yield();
   //  #if defined(ESP8266)
   //    MDNS.update();
@@ -458,6 +493,13 @@ static void fetchSensorPMS(String &s)
   add_Value2Json(s, F("PMS_P0"), F("PM1:   "), pm1_serial);
   add_Value2Json(s, F("PMS_P1"), F("PM10:  "), pm10_serial);
   add_Value2Json(s, F("PMS_P2"), F("PM2.5: "), pm25_serial);
+  fona.getTime(time_buff, 23);
+  if (String(time_buff) != "")
+  {
+    s += "timestamp:";
+    s += String(time_buff);
+    s += ",";
+  }
 
   digitalWrite(PMS_LED, HIGH);
   delay(5000);
@@ -553,7 +595,7 @@ static unsigned long sendData(const String &data, const int pin, const char *hos
         { //! RESET COUNTER
           GPRS_INIT_FAIL_COUNT = 0;
           GSM_soft_reset();
-          GSM_init(fonaSerial);
+          GSM_init();
         }
       }
     }
