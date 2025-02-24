@@ -41,16 +41,14 @@ bool validate_GSM_serial_communication()
 
     pinMode(QUECTEL_PWR_KEY, OUTPUT);
     digitalWrite(QUECTEL_PWR_KEY, HIGH);
-    delay(5000);
-    fonaSerial->begin(115200);
-
+    delay(10000); // Give module enough time to boot up  //! fona timeout does not behave as expected
     const uint8_t GSM_RETRY_ATTEMPTS = 3;
     uint8_t retry_count = 1;
     while (retry_count <= GSM_RETRY_ATTEMPTS)
     {
 
         Serial.println("ATTEMPT: " + String(retry_count));
-        if (fona.begin(*fonaSerial))
+        if (fona.begin(fonaSS))
         {
             Serial.println("GSM module found!");
             GSM_CONNECTED = true;
@@ -70,7 +68,7 @@ bool validate_GSM_serial_communication()
 
 bool GSM_init()
 {
-
+    Serial.println("GSM INITIALIZATION....");
     String error_msg = "";
 
     // Check if SIM is inserted
@@ -174,14 +172,14 @@ String handle_AT_CMD(String cmd, int _delay)
         Serial.read();
     }
     String RESPONSE = "";
-    fona.println(cmd);
+    fonaSS.println(cmd);
     int sendStartMillis = millis();
     // delay(_delay); // Avoid putting any code that might delay the receiving all contents from the serial buffer as it is quickly filled up
     do
     {
-        if (fona.available())
+        if (fonaSS.available())
         {
-            RESPONSE += fona.readString();
+            RESPONSE += fonaSS.readString();
         }
 
         delay(2);

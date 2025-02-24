@@ -2,6 +2,7 @@
 #include "global_configs.h"
 #include <SoftwareSerial.h>
 #include "GSM_handler.h"
+#include <TimeLib.h>
 
 bool send_now = false;
 
@@ -38,7 +39,7 @@ const unsigned long READINGTIME_SDS_MS = 5000; // how long we read data from the
 int start_time = 0;
 unsigned long act_milli;
 unsigned long starttime = 0;
-unsigned sending_intervall_ms = 145000;
+unsigned sending_intervall_ms = 5 * 60 * 1000; // 145000;
 unsigned long starttime_SDS;
 unsigned long sending_time = 0;
 unsigned long count_sends = 0;
@@ -59,11 +60,13 @@ float last_value_PMS_P2 = -1.0;
 
 #if defined(ESP8266)
 SoftwareSerial serialSDS;
+#define SENSOR_PREFIX "esp8266-"
 #endif
 #if defined(ESP32)
 #include <HardwareSerial.h>
 #define serialSDS (Serial2)
 // SoftwareSerial serialSDS(PM_SERIAL_RX, PM_SERIAL_TX);
+#define SENSOR_PREFIX "esp32-"
 #endif
 
 bool is_PMS_running = true;
@@ -73,6 +76,9 @@ static void fetchSensorPMS(String &s);
 static void powerOnTestSensors();
 static unsigned long sendData(const String &data, const int pin, const char *host, const char *url);
 static unsigned long sendCFA(const String &data, const int pin, const __FlashStringHelper *sensorname, const char *replace_str);
+String convertToISO8601(String datetime);
+String extractDateTime(String datetimeStr);
+String formatDateTime(time_t t, String timezone);
 
 void setup()
 {
@@ -118,7 +124,7 @@ void setup()
 
   if (gsm_capable)
   {
-
+    fonaSS.begin(115200);
     if (!validate_GSM_serial_communication())
     {
       Serial.println("GSM not detected. Restarting ESP");
@@ -127,7 +133,7 @@ void setup()
       ESP.restart();
     }
 
-    if (!GSM_init())
+    if (!GSM_init()) // ! Why hang here after ESP restart?
     {
       Serial.println("GSM not fully configured");
       Serial.print("Failure point: ");
@@ -137,7 +143,11 @@ void setup()
       ESP.restart();
     }
 
-    fona.getTime(time_buff, 23);
+    while (!fona.getTime(time_buff, 23))
+    {
+      Serial.println("Failed to fetch time from network");
+      delay(1000);
+    };
     Serial.println("Time: " + String(time_buff));
   }
 
@@ -189,12 +199,19 @@ void loop()
     Serial.println("Act_milli: " + String(act_milli));
     result_PMS = "";
     fetchSensorPMS(result_PMS);
+    char read_time[23];
+    fona.getTime(read_time, 23);
     Serial.print("PMS_Readings: ");
     Serial.println(result_PMS);
     last_read_pms = millis();
     Serial.println("Last read PMS: " + String(last_read_pms));
-    // delay(15000);
-    if (sensor_data_log_count < MAX_STRINGS)
+
+    String datetime = "";
+    if (String(read_time) != "")
+    {
+      datetime = extractDateTime(String(read_time));
+    }
+    if (sensor_data_log_count < MAX_STRINGS && datetime != "")
     {
 
       // Save data to array
@@ -205,7 +222,16 @@ void loop()
       {
         data.remove(data.length() - 1);
       }
-      data += "]}";
+      data += "],";
+
+      data += "\"timestamp\":\"";
+      data += String(datetime);
+
+      if ((unsigned)(data.lastIndexOf(',') + 1) == data.length())
+      {
+        data.remove(data.length() - 1);
+      }
+      data += "}";
       sensor_data[sensor_data_log_count] = data;
       Serial.println("Sensor data:" + sensor_data[sensor_data_log_count]);
       sensor_data[sensor_data_log_count] = result_PMS;
@@ -218,48 +244,27 @@ void loop()
     }
   }
 
-  // if (send_now)
-  // {
-  //   RESERVE_STRING(data, LARGE_STR);
-  //   data = FPSTR(data_first_part);
-  //   RESERVE_STRING(result, MED_STR);
+  if (send_now)
+  {
 
-  //   data += result_PMS;
-  //   Serial.println("Data: " + data);
-  //   sum_send_time += sendCFA(result_PMS, PMS_API_PIN, FPSTR(SENSORS_PMSx003), "PMS_");
+    // Read data from array and send to server
+    for (int i = 0; i < sensor_data_log_count; i++)
+    {
+      sum_send_time += sendData(sensor_data[i], PMS_API_PIN, HOST_CFA, URL_CFA);
+      // Remove data from array
+      sensor_data[i] = "";
+    }
 
-  //   if ((unsigned)(data.lastIndexOf(',') + 1) == data.length())
-  //   {
-  //     data.remove(data.length() - 1);
-  //   }
-  //   data += "]}";
+    Serial.println("Time for Sending (ms): " + String(sum_send_time));
 
-  //   yield();
+    // Resetting for next sampling
+    sum_send_time = 0;
+    sensor_data_log_count = 0;
 
-  //   // https://en.wikipedia.org/wiki/Moving_average#Cumulative_moving_average
-  //   sending_time = (3 * sending_time + sum_send_time) / 4;
-  //   if (sum_send_time > 0)
-  //   {
-  //     Serial.println("Time for Sending (ms): " + String(sending_time));
-  //   }
-
-  //   // Resetting for next sampling
-  //   sum_send_time = 0;
-  //   count_sends++;
-  //   Serial.println("Sent data counts: " + count_sends);
-  //   starttime = millis(); // store the start time
-  // }
-  // yield();
-  //  #if defined(ESP8266)
-  //    MDNS.update();
-  //    serialSDS.perform_work();
-  //  #endif
-
-  //   if (sample_count % 500 == 0)
-  //   {
-  //     	Serial.println(ESP.getFreeHeap(),DEC);
-  //   }
-  // starttime = millis(); // store the start time
+    count_sends++;
+    Serial.println("Sent data counts: " + count_sends);
+    starttime = millis(); // store the start time
+  }
 }
 
 /*****************************************************************
@@ -417,11 +422,13 @@ static void fetchSensorPMS(String &s)
       checksum_should += value;
       break;
     }
+
     if ((len > 2) && (len < (frame_len - 2)))
     {
       checksum_is += value;
     }
     len++;
+
     if (len == frame_len)
     {
       // Serial.print("Checksum is: ");
@@ -437,7 +444,8 @@ static void fetchSensorPMS(String &s)
       {
         len = 0;
       };
-      if (checksum_ok && (msSince(starttime) > (sending_intervall_ms - READINGTIME_SDS_MS)))
+      // if (checksum_ok && (msSince(starttime) > (sending_intervall_ms - READINGTIME_SDS_MS)))
+      if (checksum_ok)
       {
         if ((!isnan(pm1_serial)) && (!isnan(pm10_serial)) && (!isnan(pm25_serial)))
         {
@@ -490,17 +498,9 @@ static void fetchSensorPMS(String &s)
   }
 
   is_PMS_running = PMS_cmd(PmSensorCmd::Stop);
-  add_Value2Json(s, F("PMS_P0"), F("PM1:   "), pm1_serial);
-  add_Value2Json(s, F("PMS_P1"), F("PM10:  "), pm10_serial);
-  add_Value2Json(s, F("PMS_P2"), F("PM2.5: "), pm25_serial);
-  fona.getTime(time_buff, 23);
-  if (String(time_buff) != "")
-  {
-    s += "timestamp:";
-    s += String(time_buff);
-    s += ",";
-  }
-
+  add_Value2Json(s, F("P0"), F("PM1:   "), pm1_serial);
+  add_Value2Json(s, F("P1"), F("PM10:  "), pm10_serial);
+  add_Value2Json(s, F("P2"), F("PM2.5: "), pm25_serial);
   digitalWrite(PMS_LED, HIGH);
   delay(5000);
   digitalWrite(PMS_LED, LOW);
@@ -607,13 +607,16 @@ static unsigned long sendData(const String &data, const int pin, const char *hos
 
       String gprs_request_head = F("X-PIN: ");
       gprs_request_head += String(pin) + "\\r\\n";
-      gprs_request_head += F("X-Sensor: esp8266-");
+      gprs_request_head += F("X-Sensor: ");
+      gprs_request_head += SENSOR_PREFIX;
       gprs_request_head += esp_chipid;
 
 #ifdef QUECTEL
       String Quectel_headers[3];
       Quectel_headers[0] = "X-PIN: " + String(pin);
-      Quectel_headers[1] = "X-Sensor: esp8266-" + esp_chipid;
+      Quectel_headers[1] = "X-Sensor: ";
+      Quectel_headers[1] += SENSOR_PREFIX;
+      Quectel_headers[1] += esp_chipid;
       // Quectel_headers[1] = "X-Sensor: esp8266-quectel-test";       // testing node, comment and insert desired testing node ID
       Quectel_headers[2] = "Content-Type: " + contentType; // 30
 
@@ -702,4 +705,88 @@ static unsigned long sendCFA(const String &data, const int pin, const __FlashStr
   }
 
   return sum_send_time;
+}
+
+String convertToISO8601(String datetime)
+{
+  // Extract date and time components from the input string
+  String year = "20" + datetime.substring(0, 2); // Assuming the year is in the 21st century
+  String month = datetime.substring(3, 5);
+  String day = datetime.substring(6, 8);
+  String time = datetime.substring(9, 17);
+  String timezone = datetime.substring(17, 20);
+
+  // Construct the ISO 8601 formatted string
+  String iso8601 = year + "-" + month + "-" + day + "T" + time + timezone + ":00";
+
+  return iso8601;
+}
+
+String extractDateTime(String datestring)
+{
+
+  Serial.println("Received date string: " + datestring);
+  // Parse the datetime string
+
+  String datetimeStr = datestring;
+
+  int day = datetimeStr.substring(0, 2).toInt();
+  int month = datetimeStr.substring(3, 5).toInt();
+  int year = datetimeStr.substring(6, 8).toInt();
+  int hour = datetimeStr.substring(9, 11).toInt();
+  int minute = datetimeStr.substring(12, 14).toInt();
+  int second = datetimeStr.substring(15, 17).toInt();
+  String timezone = datetimeStr.substring(17); // +00
+
+  Serial.println("Day: " + String(day));
+  Serial.println("Month: " + String(month));
+  Serial.println("Year: " + String(year));
+  Serial.println("Hour: " + String(hour));
+  Serial.println("Minute: " + String(minute));
+  Serial.println("Second: " + String(second));
+
+  // Adjust year for TimeLib (TimeLib expects years since 1970)
+  year += 2000; // Assuming 24 is 2024
+  year -= 1970;
+
+  // Create a tmElements_t struct
+  tmElements_t tm;
+  tm.Second = second;
+  tm.Minute = minute;
+  tm.Hour = hour;
+  tm.Day = day;
+  tm.Month = month;
+  tm.Year = year;
+
+  // Create a time_t value
+  time_t t = makeTime(tm);
+
+  // Format the time_t value to YYYY-MM-DDThh:mm:ss+HH:MM
+  String formattedDateTime = formatDateTime(t, timezone);
+  Serial.print("Formatted DateTime: ");
+  Serial.println(formattedDateTime);
+  return formattedDateTime;
+}
+String formatDateTime(time_t t, String timezone)
+{
+  String yearStr = String(year(t)); // Adjust year back to 20xx
+  String monthStr = String(month(t));
+  String dayStr = String(day(t));
+  String hourStr = String(hour(t));
+  String minuteStr = String(minute(t));
+  String secondStr = String(second(t));
+
+  // Pad with leading zeros if necessary
+  if (monthStr.length() == 1)
+    monthStr = "0" + monthStr;
+  if (dayStr.length() == 1)
+    dayStr = "0" + dayStr;
+  if (hourStr.length() == 1)
+    hourStr = "0" + hourStr;
+  if (minuteStr.length() == 1)
+    minuteStr = "0" + minuteStr;
+  if (secondStr.length() == 1)
+    secondStr = "0" + secondStr;
+
+  return yearStr + "-" + monthStr + "-" + dayStr + "T" + hourStr + ":" + minuteStr + ":" + secondStr + timezone;
 }
