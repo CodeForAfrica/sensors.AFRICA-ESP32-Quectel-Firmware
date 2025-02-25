@@ -294,13 +294,22 @@ bool GPRS_init()
         return GPRS_CONNECTED;
     }
 
-    if (!fona.sendCheckReply(F("AT+QIACT=1"), F("OK"), (uint16_t)150000))
+    // Check if QIACT is already active
+    if (!fona.sendCheckReply(F("AT+QIACT?"), F("1"), 3000))
     {
-        err = "Failed to activate GPRS PDP context";
-        GSM_INIT_ERROR = err;
-        Serial.println(err);
-        GPRS_CONNECTED = false;
-        return GPRS_CONNECTED;
+        Serial.println("Activating GPRS PDP context");
+        if (!fona.sendCheckReply(F("AT+QIACT=1"), F("OK"), (uint16_t)150000))
+        {
+            err = "Failed to activate GPRS PDP context";
+            GSM_INIT_ERROR = err;
+            Serial.println(err);
+            GPRS_CONNECTED = false;
+            return GPRS_CONNECTED;
+        }
+    }
+    else
+    {
+        Serial.println("GPRS PDP context already active");
     }
 
 #else
