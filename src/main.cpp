@@ -210,36 +210,43 @@ void loop()
     {
       datetime = extractDateTime(String(read_time));
     }
-    if (sensor_data_log_count < MAX_STRINGS && datetime != "")
+    if (datetime == "")
     {
-
-      // Save data to array
-      RESERVE_STRING(data, LARGE_STR);
-      data = FPSTR(data_first_part);
-      data += result_PMS;
-      if ((unsigned)(data.lastIndexOf(',') + 1) == data.length())
-      {
-        data.remove(data.length() - 1);
-      }
-      data += "],";
-
-      data += "\"timestamp\":\"";
-      data += String(datetime);
-
-      if ((unsigned)(data.lastIndexOf(',') + 1) == data.length())
-      {
-        data.remove(data.length() - 1);
-      }
-      data += "}";
-      sensor_data[sensor_data_log_count] = data;
-      Serial.println("Sensor data:" + sensor_data[sensor_data_log_count]);
-      sensor_data[sensor_data_log_count] = result_PMS;
-      sensor_data_log_count++;
+      Serial.println("Datetime is empty...discarding data point");
     }
     else
     {
-      Serial.println("Sensor data log count exceeded");
-      // Save data to SD and empty array;
+      if (sensor_data_log_count < MAX_STRINGS)
+      {
+
+        // Save data to array
+        RESERVE_STRING(data, LARGE_STR);
+        data = FPSTR(data_first_part);
+        data += result_PMS;
+        if ((unsigned)(data.lastIndexOf(',') + 1) == data.length())
+        {
+          data.remove(data.length() - 1);
+        }
+        data += "],";
+
+        data += "\"timestamp\":\"";
+        data += String(datetime);
+
+        if ((unsigned)(data.lastIndexOf(',') + 1) == data.length())
+        {
+          data.remove(data.length() - 1);
+        }
+        data += "}";
+        sensor_data[sensor_data_log_count] = data;
+        Serial.println("Sensor data:" + sensor_data[sensor_data_log_count]);
+        sensor_data[sensor_data_log_count] = result_PMS;
+        sensor_data_log_count++;
+      }
+      else
+      {
+        Serial.println("Sensor data log count exceeded");
+        // Save data to SD and empty array;
+      }
     }
   }
 
