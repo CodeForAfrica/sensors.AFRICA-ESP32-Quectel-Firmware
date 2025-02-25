@@ -15,8 +15,11 @@ bool GPRS_CONNECTED = false;
 bool SIM_PIN_SET = false;
 bool SIM_USABLE = false;
 char SIM_CID[21] = "";
-String GSM_INIT_ERROR = "";
+// String GSM_INIT_ERROR = "";
 String NETWORK_NAME = "";
+
+const int error_buff_size = 256;
+char error_buffer[error_buff_size];
 
 /**** Function Declacrations **/
 bool GSM_init();
@@ -69,29 +72,30 @@ bool validate_GSM_serial_communication()
 bool GSM_init()
 {
     Serial.println("GSM INITIALIZATION....");
-    String error_msg = "";
 
     // Check if SIM is inserted
     if (!is_SIMCID_valid())
     {
-        error_msg = "Could not get SIM CID";
-        GSM_INIT_ERROR = error_msg;
-        Serial.println(error_msg);
+        memset(error_buffer, '\0', error_buff_size);
+
+        const char *data = "Could not get SIM CID";
+        strncpy(error_buffer, data, error_buff_size - 1);
+        Serial.println(error_buffer);
         return false;
     }
 
     // SIM setup
-    Serial.println("SIM card available");
-    Serial.println("Setting up SIM..");
+    Serial.println("Setting up SIM PIN..");
 
     SIM_PIN_Setup();
 
     if (!SIM_PIN_SET)
     {
-        error_msg = "Unable to set SIM PIN";
-        GSM_INIT_ERROR = error_msg;
-        Serial.println(error_msg);
+        memset(error_buffer, '\0', error_buff_size);
 
+        const char *data = "Unable to set SIM PIN";
+        strncpy(error_buffer, data, error_buff_size - 1);
+        Serial.println(error_buffer);
         return false;
     }
     // Set if SIM is usable flag
@@ -111,9 +115,11 @@ bool GSM_init()
 
     if (!registered_to_network)
     {
-        error_msg = "Could not register to network";
-        GSM_INIT_ERROR = error_msg;
-        Serial.println(error_msg);
+        memset(error_buffer, '\0', error_buff_size);
+
+        const char *data = "Could not register to network";
+        strncpy(error_buffer, data, error_buff_size - 1);
+        Serial.println(error_buffer);
         return false;
     }
 
@@ -239,6 +245,7 @@ bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR
     // fona.getSIMCCID(res);
     // Serial.println(res);
     // String ccid = String(res);
+
     String ccid = handle_AT_CMD("AT+CCID", 10000);
     if (ccid.indexOf("ERROR") > -1) // Means string has the word error
     {
@@ -250,6 +257,7 @@ bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR
     {
         // strcpy(SIM_CID, res);
         SIM_AVAILABLE = true;
+        Serial.println("SIM card available");
         Serial.print("SIM CCID: ");
         Serial.println(ccid);
         return true;
@@ -274,9 +282,11 @@ bool GPRS_init()
     {
         if (!fona.sendCheckReply(F("AT+CGATT=1"), F("OK"), 65000))
         {
-            err = "Failed to attach GPRS service";
-            GSM_INIT_ERROR = err;
-            Serial.println(err);
+            memset(error_buffer, '\0', error_buff_size);
+
+            const char *data = "Failed to attach GPRS service";
+            strncpy(error_buffer, data, error_buff_size - 1);
+            Serial.println(error_buffer);
             GPRS_CONNECTED = false;
             return GPRS_CONNECTED;
         }
@@ -287,9 +297,12 @@ bool GPRS_init()
 
     if (!fona.sendCheckReply(F("AT+QICSGP=1,1"), F("OK"), 3000))
     {
-        err = "Failed to config GPRS PDP context";
-        GSM_INIT_ERROR = err;
-        Serial.println(err);
+        memset(error_buffer, '\0', error_buff_size);
+
+        const char *data = "Failed to config GPRS PDP context";
+        strncpy(error_buffer, data, error_buff_size - 1);
+        Serial.println(error_buffer);
+
         GPRS_CONNECTED = false;
         return GPRS_CONNECTED;
     }
@@ -300,9 +313,12 @@ bool GPRS_init()
         Serial.println("Activating GPRS PDP context");
         if (!fona.sendCheckReply(F("AT+QIACT=1"), F("OK"), (uint16_t)150000))
         {
-            err = "Failed to activate GPRS PDP context";
-            GSM_INIT_ERROR = err;
-            Serial.println(err);
+            memset(error_buffer, '\0', error_buff_size);
+
+            const char *data = "Failed to activate GPRS PDP context";
+            strncpy(error_buffer, data, error_buff_size - 1);
+            Serial.println(error_buffer);
+
             GPRS_CONNECTED = false;
             return GPRS_CONNECTED;
         }
@@ -385,7 +401,7 @@ void restart_GSM()
     {
         Serial.println("GSM not fully configured");
         Serial.print("Failure point: ");
-        Serial.println(GSM_INIT_ERROR);
+        Serial.println(error_buffer);
         Serial.println();
     }
 }

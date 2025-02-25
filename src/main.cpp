@@ -136,7 +136,7 @@ void setup()
     {
       Serial.println("GSM not fully configured");
       Serial.print("Failure point: ");
-      Serial.println(GSM_INIT_ERROR);
+      Serial.println(error_buffer);
       Serial.println();
       delay(10000);
       ESP.restart();
