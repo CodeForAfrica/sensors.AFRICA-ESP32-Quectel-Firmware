@@ -18,9 +18,9 @@ char SIM_CID[21] = "";
 // String GSM_INIT_ERROR = "";
 String NETWORK_NAME = "";
 
-const uint8_t error_buff_size = 256;
+const int error_buff_size = 256;
 char error_buffer[error_buff_size];
-const uint8_t gsm_buff_size = 1024;
+const int gsm_buff_size = 1024;
 char raw_gsm_response[gsm_buff_size];
 
 /**** Function Declacrations **/
@@ -38,6 +38,8 @@ void QUECTEL_POST(char *url, String headers[], int header_size, const String &da
 int GPRS_INIT_FAIL_COUNT = 0;
 int HTTP_POST_FAIL = 0;
 // Set a decent delay before this to warm up the GSM module
+
+char get_raw_response(const char *cmd, char *res_buff, int timeout = 3000);
 
 bool validate_GSM_serial_communication()
 {
@@ -125,7 +127,11 @@ bool GSM_init()
         return false;
     }
 
-    fona.sendCheckReply(F("AT+COPS?"), F("OK"));
+    // fona.sendCheckReply(F("AT+CREG?"), F("+CREG: "));
+    get_raw_response("AT+CREG?", raw_gsm_response, 3000);
+    get_raw_response("AT+COPS?", raw_gsm_response, 3000);
+
+    // fona.sendCheckReply(F("AT+COPS?"), F("OK"));
 
     // Set GPRS APN details
     // fona.setGPRSNetworkSettings(F(GPRS_APN), F(GPRS_USERNAME), F(GPRS_PASSWORD));
@@ -173,27 +179,32 @@ static void unlock_pin(char *PIN)
     }
 }
 
-char get_raw_response(char &cmd, char *res_buff, int timeout)
+char get_raw_response(const char *cmd, char *res_buff, int timeout)
 {
 
-    memset(res_buff, '\0', gsm_buff_size);
-    while (fonaSS.available())
-    {
-        fonaSS.read();
-    }
-
+    // while (fonaSS.available())
+    // {
+    //     fonaSS.read();
+    // }
+    flushSerial();
+    delay(100);
+    Serial.print("Received Command in get raw: ");
+    Serial.println(cmd);
     fonaSS.println(cmd);
     int sendStartMillis = millis();
     do
     {
         if (fonaSS.available())
         {
+            memset(res_buff, '\0', gsm_buff_size);
             fonaSS.readBytes(res_buff, gsm_buff_size - 1);
+            break;
         }
 
         delay(2);
     } while (res_buff == "" || (millis() - sendStartMillis < timeout));
-    Serial.print("\n-------\nGSM RAW RESPONSE:\n" + *res_buff);
+    Serial.println("\n-------\nGSM RAW RESPONSE:\n");
+    Serial.println(res_buff);
     Serial.println("-------");
 
     return *res_buff;
@@ -252,7 +263,12 @@ void SIM_PIN_Setup()
     //     return;
     // }
 
-    if (fona.sendCheckReply(F("AT+CPIN?"), F("+CPIN: READY"), 15000))
+    char pin_status[64] = "";
+    get_raw_response("AT+CPIN?", raw_gsm_response, 15000);
+    strncpy(pin_status, raw_gsm_response, 63);
+
+    // if (fona.sendCheckReply(F("AT+CPIN?"), F("+CPIN: READY"), 15000))
+    if (String(pin_status).indexOf("ERROR") > -1)
     {
         Serial.println("SIM PIN READY");
         SIM_PIN_SET = true;
@@ -272,9 +288,13 @@ bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR
     // fona.getSIMCCID(res);
     // Serial.println(res);
     // String ccid = String(res);
+    char cmd[] = "AT+QCCID";
+    get_raw_response(cmd, raw_gsm_response, 10000);
+    char ccid[65];
+    strncpy(ccid, raw_gsm_response, 64);
 
-    String ccid = handle_AT_CMD("AT+CCID", 10000);
-    if (ccid.indexOf("ERROR") > -1) // Means string has the word error
+    // String ccid = handle_AT_CMD("AT+CCID", 10000);
+    if (String(ccid).indexOf("ERROR") > -1) // Means string has the word error
     {
         SIM_AVAILABLE = false;
         return false;
@@ -295,7 +315,7 @@ bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR
 bool GPRS_init()
 {
 
-    String err = "";
+    // String err = "";
 
     // if (!fona.sendCheckReply(F("AT+CGATT=1"), F("OK"), 10000))
     // {
@@ -305,41 +325,61 @@ bool GPRS_init()
     //     GPRS_CONNECTED = false;
     //     return GPRS_CONNECTED;
     // }
-    if (fona.sendCheckReply(F("AT+CGATT?"), F("0"), 65000)) // equivalent to fona.GPRSstate()
-    {
-        if (!fona.sendCheckReply(F("AT+CGATT=1"), F("OK"), 65000))
-        {
-            memset(error_buffer, '\0', error_buff_size);
+    // if (fona.sendCheckReply(F("AT+CGATT?"), F("0"), 65000)) // equivalent to fona.GPRSstate()
+    // {
+    //     if (!fona.sendCheckReply(F("AT+CGATT=1"), F("OK"), 65000))
+    //     {
+    //         memset(error_buffer, '\0', error_buff_size);
 
-            const char *data = "Failed to attach GPRS service";
-            strncpy(error_buffer, data, error_buff_size - 1);
-            Serial.println(error_buffer);
-            GPRS_CONNECTED = false;
-            return GPRS_CONNECTED;
-        }
-    }
+    //         const char *data = "Failed to attach GPRS service";
+    //         strncpy(error_buffer, data, error_buff_size - 1);
+    //         Serial.println(error_buffer);
+    //         GPRS_CONNECTED = false;
+    //         return GPRS_CONNECTED;
+    //     }
+    // }
 
 #ifdef QUECTEL
     Serial.println("Quectel GPRS init...");
 
-    if (!fona.sendCheckReply(F("AT+QICSGP=1,1"), F("OK"), 3000))
-    {
-        memset(error_buffer, '\0', error_buff_size);
+    // if (!fona.sendCheckReply(F("AT+QICSGP=1,1"), F("OK"), 10000))
+    // {
+    //     memset(error_buffer, '\0', error_buff_size);
 
-        const char *data = "Failed to config GPRS PDP context";
-        strncpy(error_buffer, data, error_buff_size - 1);
-        Serial.println(error_buffer);
+    //     const char *data = "Failed to config GPRS PDP context";
+    //     strncpy(error_buffer, data, error_buff_size - 1);
+    //     Serial.println(error_buffer);
 
-        GPRS_CONNECTED = false;
-        return GPRS_CONNECTED;
-    }
+    //     GPRS_CONNECTED = false;
+    //     return GPRS_CONNECTED;
+    // }
 
+    // char cmd[] = "AT+QICSGP=1,1";
+    char cmd[] = "AT+QICSGP=?";
+    get_raw_response(cmd, raw_gsm_response, 10000);
+
+    char qiscgp[] = "AT+QICSGP=1,1";
+
+    get_raw_response(qiscgp, raw_gsm_response, 10000);
     // Check if QIACT is already active
-    if (!fona.sendCheckReply(F("AT+QIACT?"), F("1"), 3000))
+
+    get_raw_response("AT+QIACT?", raw_gsm_response, 10000);
+
+    if (String(raw_gsm_response).indexOf("1") > 1)
     {
-        Serial.println("Activating GPRS PDP context");
-        if (!fona.sendCheckReply(F("AT+QIACT=1"), F("OK"), (uint16_t)150000))
+        Serial.println("GPRS PDP context already activated");
+    }
+    else
+    {
+        get_raw_response("AT+QIACT=1", raw_gsm_response, 10000);
+
+        if (String(raw_gsm_response).indexOf("OK") > 1)
         {
+            Serial.println("GPRS PDP context has been activated");
+        }
+        else
+        {
+
             memset(error_buffer, '\0', error_buff_size);
 
             const char *data = "Failed to activate GPRS PDP context";
@@ -350,10 +390,27 @@ bool GPRS_init()
             return GPRS_CONNECTED;
         }
     }
-    else
-    {
-        Serial.println("GPRS PDP context already active");
-    }
+
+    // if (!fona.sendCheckReply(F("AT+QIACT?"), F("1"), 3000))
+    // {
+    //     Serial.println("Activating GPRS PDP context");
+    //     flushSerial();
+    //     if (!fona.sendCheckReply(F("AT+QIACT=1"), F("OK"), (uint16_t)150000))
+    //     {
+    //         memset(error_buffer, '\0', error_buff_size);
+
+    //         const char *data = "Failed to activate GPRS PDP context";
+    //         strncpy(error_buffer, data, error_buff_size - 1);
+    //         Serial.println(error_buffer);
+
+    //         GPRS_CONNECTED = false;
+    //         return GPRS_CONNECTED;
+    //     }
+    // }
+    // else
+    // {
+    //     Serial.println("GPRS PDP context already active");
+    // }
 
 #else
     String res = handle_AT_CMD("AT+SAPBR=1,1"); // Enable GPRS
@@ -459,8 +516,14 @@ void disableGPRS()
 /*****************************************************************/
 void flushSerial()
 {
-    while (fona.available())
-        fona.read();
+    Serial.print("\nEmptying fona serial if any..");
+    while (fonaSS.available())
+    {
+
+        Serial.print(fonaSS.read());
+        delay(10);
+    }
+    Serial.println();
 }
 
 /// @brief Easy implementation of Quectel HTTP functionality
@@ -483,28 +546,56 @@ void QUECTEL_POST(char *url, String headers[], int header_size, const String &da
     // String HTTP_SETUP = "AT+QHTTPURL=" + String(strlen(url), DEC) + ",10,60";
 
     String HTTP_CFG = "AT+QHTTPCFG=\"url\",\"http://" + String(url) + "\""; // protocol must be set before URL
-    Serial.print("Quectel URL config: ");
-    Serial.println(HTTP_CFG);
-    handle_AT_CMD(HTTP_CFG);
+    char httpcfg[1024] = "AT+QHTTPCFG=\"url\",\"http://";
+    strcat(httpcfg, url);
+    strcat(httpcfg, "\"");
 
-    fona.sendCheckReply(F("AT+QHTTPCFG=\"contextid\",1"), F("OK"));      // set context id
-    fona.sendCheckReply(F("AT+QHTTPCFG=\"requestheader\",0"), F("OK"));  // disable request headers
-    fona.sendCheckReply(F("AT+QHTTPCFG=\"responseheader\",1"), F("OK")); // enable response headers
-    fona.sendCheckReply(F("AT+QHTTPCFG=\"rspout/auto\",1"), F("OK"));    // enable auto response and "disable" HTTTPREAD
+    Serial.print("Quectel URL config: ");
+    Serial.println(httpcfg);
+    // handle_AT_CMD(HTTP_CFG);
+    get_raw_response(httpcfg, raw_gsm_response, 3000);
+    get_raw_response("AT+QHTTPCFG=\"contextid\",1", raw_gsm_response, 3000);
+    get_raw_response("AT+QHTTPCFG=\"requestheader\",0", raw_gsm_response, 3000);
+    get_raw_response("AT+QHTTPCFG=\"responseheader\",1", raw_gsm_response, 3000);
+    get_raw_response("AT+QHTTPCFG=\"rspout/auto\",1", raw_gsm_response, 3000);
+
+    // fona.sendCheckReply(F("AT+QHTTPCFG=\"contextid\",1"), F("OK"), 5000); // set context id
+    // fona.sendCheckReply(F("AT+QHTTPCFG=\"requestheader\",0"), F("OK"), 5000); // disable request headers
+    // fona.sendCheckReply(F("AT+QHTTPCFG=\"responseheader\",1"), F("OK"), 5000); // enable response headers
+    // fona.sendCheckReply(F("AT+QHTTPCFG=\"rspout/auto\",1"), F("OK"), 5000); // enable auto response and "disable" HTTTPREAD
 
     for (int i = 0; i < header_size; i++)
     {
-        HTTP_CFG = "AT+QHTTPCFG=\"header\",\"" + headers[i] + "\"";
-        Serial.println(HTTP_CFG);
+
+        memset(httpcfg, '\0', sizeof(httpcfg));
+        // HTTP_CFG = "AT+QHTTPCFG=\"header\",\"" + headers[i] + "\"";
+        const char *header = headers[i].c_str();
+        char header_data[strlen(header)];
+        strcpy(header_data, header);
+
+        strncpy(httpcfg, "AT+QHTTPCFG=\"header\",\"", 64);
+        strcat(httpcfg, header);
+        strcat(httpcfg, "\"");
+
+        // Serial.println(HTTP_CFG);
         // fonaSerial->println(HTTP_CFG);
-        handle_AT_CMD(HTTP_CFG);
+        // handle_AT_CMD(HTTP_CFG);
+        get_raw_response(httpcfg, raw_gsm_response, 3000);
     }
 
     // POST data
-    HTTP_CFG = "AT+QHTTPPOST=" + String(data_length) + ",30,60";
-    Serial.println(HTTP_CFG);
+    memset(httpcfg, '\0', sizeof(httpcfg));
+    // HTTP_CFG = "AT+QHTTPPOST=" + String(data_length) + ",30,60";
+    strncpy(httpcfg, "AT+QHTTPPOST=", 64);
+    char len[8];
+    itoa(data_length, len, 10);
+    strcat(httpcfg, len);
+    strcat(httpcfg, ",30,60");
+    // Serial.println(HTTP_CFG);
+    Serial.println(httpcfg);
     // fonaSerial->println(HTTP_CFG);
-    String res = handle_AT_CMD(HTTP_CFG);
+    // String res = handle_AT_CMD(HTTP_CFG);
+    get_raw_response(httpcfg, raw_gsm_response, 3000);
     // if (res.indexOf("OK") == -1)
     // {
     //     HTTP_POST_FAIL += 1;
@@ -515,8 +606,13 @@ void QUECTEL_POST(char *url, String headers[], int header_size, const String &da
     //     }
     // }
     Serial.print("Quectel post body: ");
-    Serial.println(data);
-    res = handle_AT_CMD(data, 10000);
+    // Serial.println(data);
+    const char *data_copy = data.c_str();
+    char my_data[strlen(data_copy)];
+    strcpy(my_data, data_copy);
+    Serial.println(my_data);
+    get_raw_response(my_data, raw_gsm_response, 10000);
+    // res = handle_AT_CMD(data, 10000);
     // if (res.indexOf("OK") == -1)
     // {
     //     HTTP_POST_FAIL += 1;

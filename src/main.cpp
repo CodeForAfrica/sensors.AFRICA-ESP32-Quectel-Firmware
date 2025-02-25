@@ -39,7 +39,7 @@ const unsigned long READINGTIME_SDS_MS = 5000; // how long we read data from the
 int start_time = 0;
 unsigned long act_milli;
 unsigned long starttime = 0;
-unsigned sending_intervall_ms = 5 * 60 * 1000; // 145000;
+unsigned sending_intervall_ms = 1 * 60 * 1000; // 145000;
 unsigned long starttime_SDS;
 unsigned long sending_time = 0;
 unsigned long count_sends = 0;
@@ -138,16 +138,16 @@ void setup()
       Serial.print("Failure point: ");
       Serial.println(error_buffer);
       Serial.println();
-      delay(10000);
-      ESP.restart();
+      // delay(10000);
+      // ESP.restart();
     }
 
-    while (!fona.getTime(time_buff, 23))
-    {
-      Serial.println("Failed to fetch time from network");
-      delay(1000);
-    };
-    Serial.println("Time: " + String(time_buff));
+    // while (!fona.getTime(time_buff, 23))
+    // {
+    //   Serial.println("Failed to fetch time from network");
+    //   delay(1000);
+    // };
+    // Serial.println("Time: " + String(time_buff));
   }
 
   else
@@ -236,10 +236,9 @@ void loop()
         {
           data.remove(data.length() - 1);
         }
-        data += "}";
+        data += "\"}";
         sensor_data[sensor_data_log_count] = data;
         Serial.println("Sensor data:" + sensor_data[sensor_data_log_count]);
-        sensor_data[sensor_data_log_count] = result_PMS;
         sensor_data_log_count++;
       }
       else
@@ -483,12 +482,12 @@ static void fetchSensorPMS(String &s)
             pms_pm10_max = pm10_serial;
           }
 
-          Serial.print("PM1 (sec.): ");
-          Serial.println(String(pm1_serial));
-          Serial.print("PM2.5 (sec.): ");
-          Serial.println(String(pm25_serial));
-          Serial.print("PM10 (sec.) : ");
-          Serial.println(String(pm10_serial));
+          // Serial.print("PM1 (sec.): ");
+          // Serial.println(String(pm1_serial));
+          // Serial.print("PM2.5 (sec.): ");
+          // Serial.println(String(pm25_serial));
+          // Serial.print("PM10 (sec.) : ");
+          // Serial.println(String(pm10_serial));
 
           pms_val_count++;
         }
@@ -597,11 +596,11 @@ static unsigned long sendData(const String &data, const int pin, const char *hos
         GPRS_INIT_FAIL_COUNT += 1;
         Serial.print("GPRS INIT FAIL COUNT: ");
         Serial.println(GPRS_INIT_FAIL_COUNT);
-        if (GPRS_INIT_FAIL_COUNT == 5)
+        if (GPRS_INIT_FAIL_COUNT == 3)
         { //! RESET COUNTER
           GPRS_INIT_FAIL_COUNT = 0;
           GSM_soft_reset();
-          GSM_init();
+          // GSM_init();
         }
       }
     }
@@ -640,16 +639,16 @@ static unsigned long sendData(const String &data, const int pin, const char *hos
       char gprs_url[strlen(url_copy)];
       strcpy(gprs_url, url_copy);
 
-      Serial.println("POST URL  " + String(gprs_url));
+      // Serial.println("POST URL  " + String(gprs_url));
 
-      Serial.print("Sending data via gsm");
-      Serial.print("\thttp://");
-      Serial.println(gprs_url);
-      Serial.println(gprs_data);
-      Serial.println("GPRS REQUEST HEAD:");
-      Serial.println(gprs_request_head);
-      Serial.println();
-      flushSerial();
+      // Serial.print("Sending data via gsm");
+      // Serial.print("\thttp://");
+      // Serial.println(gprs_url);
+      // Serial.println(gprs_data);
+      // Serial.println("GPRS REQUEST HEAD:");
+      // Serial.println(gprs_request_head);
+      // Serial.println();
+      // flushSerial();
 
 #ifdef QUECTEL
       QUECTEL_POST((char *)gprs_url, Quectel_headers, header_size, data, data.length());
@@ -713,13 +712,15 @@ static unsigned long sendCFA(const String &data, const int pin, const __FlashStr
   return sum_send_time;
 }
 
-String extractDateTime(String datestring)
+String extractDateTime(String datetimeStr)
 {
 
-  Serial.println("Received date string: " + datestring);
-  // Parse the datetime string
+  Serial.println("Received date string: " + datetimeStr); //! format looks like "25/02/24,05:55:53+00" including the quotes!
 
-  String datetimeStr = datestring;
+  // remove the first and last character of the string (")
+  datetimeStr = datetimeStr.substring(1, datetimeStr.length() - 1);
+
+  // Parse the datetime string
 
   int day = datetimeStr.substring(0, 2).toInt();
   int month = datetimeStr.substring(3, 5).toInt();
