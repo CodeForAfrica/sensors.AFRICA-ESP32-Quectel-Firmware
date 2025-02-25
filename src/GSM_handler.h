@@ -18,8 +18,10 @@ char SIM_CID[21] = "";
 // String GSM_INIT_ERROR = "";
 String NETWORK_NAME = "";
 
-const int error_buff_size = 256;
+const uint8_t error_buff_size = 256;
 char error_buffer[error_buff_size];
+const uint8_t gsm_buff_size = 1024;
+char raw_gsm_response[gsm_buff_size];
 
 /**** Function Declacrations **/
 bool GSM_init();
@@ -171,6 +173,31 @@ static void unlock_pin(char *PIN)
     }
 }
 
+char get_raw_response(char &cmd, char *res_buff, int timeout)
+{
+
+    memset(res_buff, '\0', gsm_buff_size);
+    while (fonaSS.available())
+    {
+        fonaSS.read();
+    }
+
+    fonaSS.println(cmd);
+    int sendStartMillis = millis();
+    do
+    {
+        if (fonaSS.available())
+        {
+            fonaSS.readBytes(res_buff, gsm_buff_size - 1);
+        }
+
+        delay(2);
+    } while (res_buff == "" || (millis() - sendStartMillis < timeout));
+    Serial.print("\n-------\nGSM RAW RESPONSE:\n" + *res_buff);
+    Serial.println("-------");
+
+    return *res_buff;
+}
 String handle_AT_CMD(String cmd, int _delay)
 {
     while (Serial.available() > 0)
