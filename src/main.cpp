@@ -76,7 +76,6 @@ static void fetchSensorPMS(String &s);
 static void powerOnTestSensors();
 static unsigned long sendData(const String &data, const int pin, const char *host, const char *url);
 static unsigned long sendCFA(const String &data, const int pin, const __FlashStringHelper *sensorname, const char *replace_str);
-String convertToISO8601(String datetime);
 String extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
 
@@ -705,21 +704,6 @@ static unsigned long sendCFA(const String &data, const int pin, const __FlashStr
   }
 
   return sum_send_time;
-}
-
-String convertToISO8601(String datetime)
-{
-  // Extract date and time components from the input string
-  String year = "20" + datetime.substring(0, 2); // Assuming the year is in the 21st century
-  String month = datetime.substring(3, 5);
-  String day = datetime.substring(6, 8);
-  String time = datetime.substring(9, 17);
-  String timezone = datetime.substring(17, 20);
-
-  // Construct the ISO 8601 formatted string
-  String iso8601 = year + "-" + month + "-" + day + "T" + time + timezone + ":00";
-
-  return iso8601;
 }
 
 String extractDateTime(String datestring)
