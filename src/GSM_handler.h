@@ -189,7 +189,7 @@ char get_raw_response(const char *cmd, char *res_buff, int timeout)
     flushSerial();
     delay(100);
     Serial.print("Received Command in get raw: ");
-    Serial.println(cmd);
+    Serial.print(cmd);
     fonaSS.println(cmd);
     int sendStartMillis = millis();
     do

@@ -2,6 +2,7 @@
 #include "global_configs.h"
 #include <SoftwareSerial.h>
 #include "GSM_handler.h"
+#include "SD_handler.h"
 #include <TimeLib.h>
 
 bool send_now = false;
@@ -70,6 +71,11 @@ SoftwareSerial serialSDS;
 #endif
 
 bool is_PMS_running = true;
+bool SD_MOUNT = false;
+bool SD_Attached = false;
+
+char SENSORS_DATA_DIR[20] = "/SENSORSDATA";
+char SENSORS_DATA_PATH[40] = "/SENSORSDATA/sensordatalog.txt";
 
 // Function declarations
 static void fetchSensorPMS(String &s);
@@ -120,6 +126,26 @@ void setup()
 
   Serial.println("\nChipId: " + esp_chipid);
   Serial.println("My ChipId: " + my_espchid);
+
+  // SD Init
+
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  if (!SD.begin(SD_CS))
+  {
+
+    Serial.println("Card Mount Failed");
+    SD_MOUNT = false;
+  }
+  else
+  {
+    SD_MOUNT = true;
+  }
+  SD_Attached = SDattached();
+
+  if (SD_Attached)
+  {
+    createDir(SD, SENSORS_DATA_DIR);
+  }
 
   if (gsm_capable)
   {
@@ -252,6 +278,20 @@ void loop()
   if (send_now)
   {
 
+    // save data to SD
+    for (int i = 0; i < sensor_data_log_count; i++)
+    {
+      if (sensor_data[i] != "")
+      {
+
+        const char *data_to_append = sensor_data[i].c_str();
+        char fmt_data[strlen(data_to_append) + 2];
+        strcpy(fmt_data, data_to_append);
+        strcat(fmt_data, "\n");
+        appendFile(SD, SENSORS_DATA_PATH, fmt_data);
+      }
+    }
+
     // Read data from array and send to server
     for (int i = 0; i < sensor_data_log_count; i++)
     {
@@ -270,6 +310,10 @@ void loop()
     Serial.println("Sent data counts: " + count_sends);
     starttime = millis(); // store the start time
   }
+
+  //! Debugging. Comment out during upload
+
+  readFile(SD, SENSORS_DATA_PATH);
 }
 
 /*****************************************************************
