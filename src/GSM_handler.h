@@ -289,9 +289,9 @@ bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR
     // Serial.println(res);
     // String ccid = String(res);
     char cmd[] = "AT+QCCID";
-    get_raw_response(cmd, raw_gsm_response, 10000);
+    get_raw_response(cmd, raw_gsm_response, 1000);
     char ccid[65];
-    strncpy(ccid, raw_gsm_response, 64);
+    strncpy(ccid, raw_gsm_response + 8, 20);
 
     // String ccid = handle_AT_CMD("AT+CCID", 10000);
     if (String(ccid).indexOf("ERROR") > -1) // Means string has the word error

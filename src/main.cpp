@@ -59,6 +59,13 @@ float last_value_PMS_P0 = -1.0;
 float last_value_PMS_P1 = -1.0;
 float last_value_PMS_P2 = -1.0;
 
+enum class PmSensorCmd
+{
+  Start,
+  Stop,
+  ContinuousMode
+};
+
 #if defined(ESP8266)
 SoftwareSerial serialSDS;
 #define SENSOR_PREFIX "esp8266-"
@@ -71,8 +78,15 @@ SoftwareSerial serialSDS;
 #endif
 
 bool is_PMS_running = true;
+
 bool SD_MOUNT = false;
 bool SD_Attached = false;
+
+#define REASSIGN_PINS 1
+int SD_SCK = 38;
+int SD_MISO = 41;
+int SD_MOSI = 40;
+int SD_CS = 39;
 
 char SENSORS_DATA_DIR[20] = "/SENSORSDATA";
 char SENSORS_DATA_PATH[40] = "/SENSORSDATA/sensordatalog.txt";
@@ -80,6 +94,8 @@ char SENSORS_DATA_PATH[40] = "/SENSORSDATA/sensordatalog.txt";
 // Function declarations
 static void fetchSensorPMS(String &s);
 static void powerOnTestSensors();
+static bool PMS_cmd(PmSensorCmd cmd);
+
 static unsigned long sendData(const String &data, const int pin, const char *host, const char *url);
 static unsigned long sendCFA(const String &data, const int pin, const __FlashStringHelper *sensorname, const char *replace_str);
 String extractDateTime(String datetimeStr);
@@ -94,18 +110,6 @@ void setup()
 #if defined(ESP32)
   Serial.begin(115200); // Output to Serial at 15200 baud
 #endif
-#if defined(ESP8266)
-  serialSDS.begin(9600, SWSERIAL_8N1, PM_SERIAL_RX, PM_SERIAL_TX);
-#endif
-#if defined(ESP32)
-  Serial.println("Serial SDS begin");
-  // serialSDS.begin(9600);
-  serialSDS.begin(9600, SERIAL_8N1, PM_SERIAL_RX, PM_SERIAL_TX);
-  Serial.println("Serial SDS already began");
-#endif
-  // serialSDS.enableIntTx(true);
-  serialSDS.setTimeout((12 * 9 * 1000) / 9600);
-  pinMode(PMS_LED, OUTPUT);
 
 #if defined(ESP8266)
   esp_chipid = std::move(String(ESP.getChipId()));
@@ -127,15 +131,20 @@ void setup()
   Serial.println("\nChipId: " + esp_chipid);
   Serial.println("My ChipId: " + my_espchid);
 
-  // SD Init
-
+#ifdef REASSIGN_PINS
+  Serial.print("Init SD ......");
+  delay(5000);
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   if (!SD.begin(SD_CS))
   {
-
+#else
+  if (!SD.begin())
+  {
+#endif
     Serial.println("Card Mount Failed");
     SD_MOUNT = false;
   }
+
   else
   {
     SD_MOUNT = true;
@@ -146,6 +155,19 @@ void setup()
   {
     createDir(SD, SENSORS_DATA_DIR);
   }
+
+#if defined(ESP8266)
+  serialSDS.begin(9600, SWSERIAL_8N1, PM_SERIAL_RX, PM_SERIAL_TX);
+#endif
+#if defined(ESP32)
+  Serial.println("Serial SDS begin");
+  // serialSDS.begin(9600);
+  serialSDS.begin(9600, SERIAL_8N1, PM_SERIAL_RX, PM_SERIAL_TX);
+  Serial.println("Serial SDS already began");
+#endif
+  // serialSDS.enableIntTx(true);
+  serialSDS.setTimeout((12 * 9 * 1000) / 9600);
+  pinMode(PMS_LED, OUTPUT);
 
   if (gsm_capable)
   {
@@ -335,13 +357,6 @@ static void add_Value2Json(String &res, const __FlashStringHelper *type, const _
   Serial.println(value);
   add_Value2Json(res, type, String(value));
 }
-
-enum class PmSensorCmd
-{
-  Start,
-  Stop,
-  ContinuousMode
-};
 
 /*****************************************************************
  * send Plantower PMS sensor command start, stop, cont. mode     *
