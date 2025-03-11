@@ -1,11 +1,7 @@
-#include <SoftwareSerial.h>
 #include <Adafruit_FONA.h>
 #include "global_configs.h"
 
-// SoftwareSerial fonaSS(FONA_TX, FONA_RX);
-
-SoftwareSerial fonaSS(MCU_RXD, MCU_TXD); // Testing Quectel Board
-SoftwareSerial *fonaSerial = &fonaSS;
+HardwareSerial fonaSS(1);
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 
 char SIM_PIN[5] = GSM_PIN;
