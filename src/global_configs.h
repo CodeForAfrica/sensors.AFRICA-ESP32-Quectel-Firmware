@@ -2,14 +2,11 @@
 #ifndef GLOBAL_CONFIGS_H
 #define GLOBAL_CONFIGS_H
 
-static const char HOST_CFA[] PROGMEM = "staging.api.sensors.africa";
-static const char URL_CFA[] PROGMEM = "/v1/push-sensor-data/";
+static const char HOST_CFA[] = "staging.api.sensors.africa";
+static const char URL_CFA[] = "/v1/push-sensor-data/";
 #define PORT_CFA 80
 
-#define SOFTWARE_VERSION_STR "NRZ-2020-129"
-
-const char data_first_part[] PROGMEM = "{\"software_version\": \"" SOFTWARE_VERSION_STR "\", \"sensordatavalues\":[";
-const char SENSORS_PMSx003[] PROGMEM = "PMSx003";
+static const char SENSOR_PREFIX[] = "esp32-";
 
 constexpr unsigned SMALL_STR = 64 - 1;
 constexpr unsigned MED_STR = 256 - 1;

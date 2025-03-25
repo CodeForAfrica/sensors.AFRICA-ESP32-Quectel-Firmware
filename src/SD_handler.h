@@ -55,10 +55,10 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
     file.close();
 }
 
-void appendFile(fs::FS &fs, const char *path, const char *message)
+void appendFile(fs::FS &fs, const char *path, const char *message, bool newline = true)
 {
-    Serial.printf("Appending to file: %s\n", path);
-
+    Serial.print("Appending to file: ");
+    Serial.println(path);
     File file = fs.open(path, FILE_APPEND);
     if (!file)
     {
@@ -68,6 +68,10 @@ void appendFile(fs::FS &fs, const char *path, const char *message)
     if (file.print(message))
     {
         Serial.println("Message appended");
+        if (newline)
+        {
+            file.println();
+        }
     }
     else
     {
