@@ -195,10 +195,9 @@ void loop()
         // save data to SD
         for (int i = 0; i < sensor_data_log_count; i++)
         {
-            if (sensor_data[i] != "")
+            if (strlen(sensor_data[i]) != 0)
             {
                 appendFile(SD, SENSORS_DATA_PATH, sensor_data[i]);
-                memset(sensor_data[i], '\0', 255);
             }
         }
 
@@ -213,7 +212,7 @@ void loop()
             for (int i = 0; i < sensor_data_log_count; i++)
             {
 
-                if (sensor_data[i] != "")
+                if (strlen(sensor_data[i]) != 0)
                 {
                     sum_send_time += sendData(sensor_data[i], PMS_API_PIN, HOST_CFA, URL_CFA);
                     memset(sensor_data[i], '\0', 255);
