@@ -466,7 +466,7 @@ void QUECTEL_POST(const char *url, char headers[][40], int header_size, const ch
     strcat(http_post_prepare, ",30,60");
 
     Serial.println(http_post_prepare);
-    if (sendAndCheck(http_post_prepare, "CONNECT", 30000)) // Allow enough time to connect to HTTP(S) server
+    if (sendAndCheck(http_post_prepare, "CONNECT", 10000)) // Allow enough time to connect to HTTP(S) server
     {
         Serial.println("Posting gprs data..");
         get_http_response_status(data, HTTP_POST_RESPONSE_STATUS);
