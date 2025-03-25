@@ -3,12 +3,8 @@
 
 #include "Adafruit_FONA.h"
 #include "global_configs.h"
-#include <SoftwareSerial.h>
 
-// SoftwareSerial fonaSS(FONA_TX, FONA_RX);
-// SoftwareSerial fonaSS(MCU_RXD, MCU_TXD); // Testing Quectel Board
-HardwareSerial fonaSS(2); // Testing Quectel Board
-// SoftwareSerial *fonaSerial = &fonaSS;
+HardwareSerial fonaSS(2);
 HardwareSerial *fonaSerial = &fonaSS;
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 
@@ -34,7 +30,7 @@ int REGISTER_TO_NETWORK_FAIL = 0;
 uint16_t HTTPOST_RESPONSE_STATUS;
 
 /**** Function Declacrations **/
-bool GSM_init(SoftwareSerial *gsm_serial);
+bool GSM_init(HardwareSerial *gsm_serial);
 bool register_to_network();
 static void unlock_pin(char *PIN);
 void SIM_PIN_Setup();
@@ -43,6 +39,9 @@ bool GPRS_init();
 void GSM_soft_reset();
 void restart_GSM();
 void enableGPRS();
+bool activateGPRS();
+bool deactivateGPRS();
+int8_t GPRS_status();
 void flushSerial();
 void SerialFlush();
 void QUECTEL_POST(char *url, String headers[], int header_size, const String &data, int data_length);
@@ -271,7 +270,7 @@ bool GPRS_init()
     // Check CGATT status
     Serial.println("\nChecking CGATT Status..");
     // fona.sendParseReply(F("AT+CGATT?"), F("+CGATT:"), &CGATT_status, ' ', 1);
-    CGATT_status = fona.GPRSstate();
+    CGATT_status = GPRS_status();
     Serial.println("CGATT_status: " + (String)CGATT_status);
 
     if (CGATT_status == 1)
@@ -284,10 +283,10 @@ bool GPRS_init()
     else
     {
 
-        if (fona.sendCheckReply(F("AT+CGATT=1"), F("OK"), 5000))
+        if (activateGPRS())
         {
             delay(2000);
-            CGATT_status = fona.GPRSstate();
+            CGATT_status = getNumber("AT+CGATT?\0", "+CGATT: ", 0, 1);
             if (CGATT_status == 1)
                 GPRS_CONNECTED = true;
         }
@@ -693,6 +692,59 @@ void troubleshoot_GSM()
     HTTPCFG_CONNECT_FAIL = 0;
     HTTP_POST_FAIL = 0;
     GPRS_INIT_FAIL_COUNT = 0;
+}
+
+int8_t GPRS_status()
+{
+
+    int8_t status = getNumber("AT+CGATT?\0", "+CGATT: ", 0, 1);
+    Serial.print("CGATT status: ");
+    Serial.println(status);
+    return status;
+}
+
+bool activateGPRS()
+{
+    if (GPRS_status() == 1)
+    {
+        Serial.println("GPRS already active");
+        return true;
+    }
+    if (sendAndCheck("AT+CGATT=1", "OK"))
+    {
+
+        return true;
+    }
+    else
+    {
+        Serial.println("Failed to enable GPRS");
+        return false;
+    }
+}
+
+bool deactivateGPRS()
+{
+
+    if (GPRS_status() == 0)
+    {
+        Serial.println("GPRS already inactive");
+        return true;
+    }
+    else
+    {
+        if (sendAndCheck("AT+CGATT=0", "OK"))
+        {
+            // query GPRS status
+            GPRS_status();
+            return true;
+        }
+        else
+        {
+            Serial.println("Failed to disable GPRS");
+            return false;
+        }
+        return true;
+    }
 }
 
 // Testing POST data
