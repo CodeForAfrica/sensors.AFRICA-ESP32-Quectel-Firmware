@@ -15,7 +15,7 @@ bool GPRS_CONNECTED = false;
 bool SIM_PIN_SET = false;
 bool SIM_USABLE = false;
 uint16_t CGATT_status;
-char SIM_CID[21] = "";
+char SIM_CCID[21] = "";
 String GSM_INIT_ERROR = "";
 String NETWORK_NAME = "";
 
@@ -208,26 +208,23 @@ void SIM_PIN_Setup()
 
 bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR" in response
 {
-    char qccid[30];
+    char qccid[21];
 
-    int timeout = 5000;
-    Serial.print("Getting SIM CCID ");
-    while (!fona.getSIMCCID(qccid) && timeout > 0)
-    {
-        Serial.print(".");
-        timeout -= 1000;
-        delay(1000);
-    }
+    char AT_response[255] = {};
 
-    if ((String)qccid != "")
+    char expected_reply[] = "+QCCID: ";
+
+    get_raw_response("AT+QCCID\0", AT_response, 255, true, 5000);
+
+    if (extractText(AT_response, expected_reply, qccid, 21, '\r') && strlen(qccid) == 20)
     {
-        Serial.print("SIM card available. CCID: ");
-        Serial.println(qccid);
+        strcpy(SIM_CCID, qccid);
         SIM_AVAILABLE = true;
         return SIM_AVAILABLE;
     }
     else
     {
+
         return false;
     }
 }
