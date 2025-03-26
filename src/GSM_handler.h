@@ -744,6 +744,34 @@ bool deactivateGPRS()
     }
 }
 
+bool getNetworkTime(char *time)
+{
+
+    char AT_response[64];
+    size_t AT_res_size = sizeof(AT_response);
+    char time_buff[23];
+    uint8_t retries = 0;
+
+    get_raw_response("AT+CCLK?\0", AT_response, AT_res_size, false, 5000);
+
+    while (!extractText(AT_response, "+CCLK: \"", time_buff, 32, '\"') && retries < 10)
+    {
+        get_raw_response("AT+CCLK?\0", AT_response, AT_res_size, false, 5000);
+        retries++;
+        delay(1000);
+    }
+
+    if (strlen(time_buff) > 0)
+    {
+        strcpy(time, time_buff);
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
 // Testing POST data
 // http://staging.api.sensors.africa/v1/push-sensor-data/
 

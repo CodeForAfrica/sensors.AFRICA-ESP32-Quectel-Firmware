@@ -32,7 +32,7 @@ char esp_chipid[18] = {};
 
 bool send_now = false;
 
-char time_buff[23];
+char time_buff[32] = {};
 
 void printPM_values();
 void printPM_Error();
@@ -109,12 +109,14 @@ void setup()
             Serial.println("GPRS initialized!");
         }
 
-        // while (!fona.getTime(time_buff, 23))
-        // {
-        //     Serial.println("Failed to fetch time from network");
-        //     delay(1000);
-        // };
-        // Serial.println("Time: " + String(time_buff));
+        if (getNetworkTime(time_buff))
+        {
+            Serial.println("Time: " + String(time_buff));
+        }
+        else
+        {
+            Serial.println("Failed to fetch time from network");
+        }
     }
 
     else
@@ -138,53 +140,54 @@ void loop()
         if (pms) // Successfull read
         {
 
-            char read_time[23];
-            // fona.getTime(read_time, 23);
+            char read_time[32];
+            String datetime = "";
+
             last_read_pms = millis();
             // print the results
             printPM_values();
 
-            // String datetime = "";
-            // if (String(read_time) != "")
-            // {
-            //     datetime = extractDateTime(String(read_time));
-            // }
-            // if (datetime == "")
-            // {
-            //     Serial.println("Datetime is empty...discarding data point");
-            // }
-            // else
-            // {
-            if (sensor_data_log_count < MAX_STRINGS)
+            if (getNetworkTime(read_time))
             {
-                // Add values to JSON
-                memset(result_PMS, 0, 255);
+                datetime = extractDateTime(String(read_time));
+            }
 
-                char PM_data[255] = {};
-                // add_Value2Json(PM_data, "PM1", pms.pm01);
-                // add_Value2Json(PM_data, "PM2", pms.pm25);
-                // add_Value2Json(PM_data, "PM10", pms.pm10);
-                add_Value2Json(PM_data, "P0", pms.pm01);
-                add_Value2Json(PM_data, "P1", pms.pm25);
-                add_Value2Json(PM_data, "P2", pms.pm10);
-
-                generateJSON_payload(result_PMS, PM_data);
-
-                Serial.print("result_PMS JSON: ");
-                Serial.println(result_PMS);
-
-                // Store in payload sensor data buffer
-
-                strcat(sensor_data[sensor_data_log_count], result_PMS);
-                Serial.print("Sensor data: ");
-                Serial.println(sensor_data[sensor_data_log_count]);
-                sensor_data_log_count++;
+            if (datetime == "")
+            {
+                Serial.println("Datetime is empty...discarding data point");
             }
             else
             {
-                Serial.println("Sensor data log count exceeded");
+                if (sensor_data_log_count < MAX_STRINGS)
+                {
+                    // Add values to JSON
+                    memset(result_PMS, 0, 255);
+
+                    char PM_data[255] = {};
+                    // add_Value2Json(PM_data, "PM1", pms.pm01);
+                    // add_Value2Json(PM_data, "PM2", pms.pm25);
+                    // add_Value2Json(PM_data, "PM10", pms.pm10);
+                    add_Value2Json(PM_data, "P0", pms.pm01);
+                    add_Value2Json(PM_data, "P1", pms.pm25);
+                    add_Value2Json(PM_data, "P2", pms.pm10);
+
+                    generateJSON_payload(result_PMS, PM_data);
+
+                    Serial.print("result_PMS JSON: ");
+                    Serial.println(result_PMS);
+
+                    // Store in payload sensor data buffer
+
+                    strcat(sensor_data[sensor_data_log_count], result_PMS);
+                    Serial.print("Sensor data: ");
+                    Serial.println(sensor_data[sensor_data_log_count]);
+                    sensor_data_log_count++;
+                }
+                else
+                {
+                    Serial.println("Sensor data log count exceeded");
+                }
             }
-            // }
         }
         else // something went wrong
         {
@@ -357,10 +360,21 @@ void generateJSON_payload(char *res, char *data)
 String extractDateTime(String datetimeStr)
 {
 
-    Serial.println("Received date string: " + datetimeStr); //! format looks like "25/02/24,05:55:53+00" including the quotes!
+    Serial.println("Received date string: " + datetimeStr); //! format looks like "25/02/24,05:55:53+00" and may include the quotes!
 
-    // remove the first and last character of the string (")
-    datetimeStr = datetimeStr.substring(1, datetimeStr.length() - 1);
+    // check if received string is empty
+    if (datetimeStr == "")
+    {
+        Serial.println("Datetime string is empty");
+        return "";
+    }
+
+    // check if the datetime string has leading or trailing quotes
+    if (datetimeStr[0] == '"', datetimeStr[datetimeStr.length() - 1] == '"')
+    {
+        // remove the first and last character of the string (")
+        datetimeStr = datetimeStr.substring(1, datetimeStr.length() - 1);
+    }
 
     // Parse the datetime string
 
