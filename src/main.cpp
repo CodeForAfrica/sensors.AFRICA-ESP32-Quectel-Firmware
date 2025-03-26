@@ -382,13 +382,30 @@ String extractDateTime(String datetimeStr)
 
     // Parse the datetime string
 
-    int day = datetimeStr.substring(0, 2).toInt();
+    int year = datetimeStr.substring(0, 2).toInt();
     int month = datetimeStr.substring(3, 5).toInt();
-    int year = datetimeStr.substring(6, 8).toInt();
+    int day = datetimeStr.substring(6, 8).toInt();
     int hour = datetimeStr.substring(9, 11).toInt();
     int minute = datetimeStr.substring(12, 14).toInt();
     int second = datetimeStr.substring(15, 17).toInt();
+
+#if defined(QUECTEL)
+
+    // time zone = indicates the difference, expressed in quarters of an hour, between the local time and GMT; range: -48 to +56)
+    int tz = datetimeStr.substring(18).toInt() / 4;
+    String timezone = datetimeStr.substring(17, 18); // extract timezone sign
+    if (tz < 10)
+    {
+        timezone += "0" + String(tz);
+    }
+    else
+    {
+        timezone += String(tz);
+    }
+#else
     String timezone = datetimeStr.substring(17); // +00
+
+#endif
 
     Serial.println("Day: " + String(day));
     Serial.println("Month: " + String(month));

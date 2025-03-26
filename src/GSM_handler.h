@@ -744,6 +744,14 @@ bool deactivateGPRS()
     }
 }
 
+/**
+  @brief: Query the real time clock (RTC) of the module.
+  @param time : The format is "yy/MM/dd,hh:mm:ss±zz",indicating year (two last digits),
+                month, day, hour, minutes, seconds and
+                time zone (indicates the difference, expressed in quarters of an hour, between the local time and GMT; range: -48 to +56).
+                E.g. May 6th, 1994, 22:10:00 GMT+2 hours equals to "94/05/06,22:10:00+08"
+  @return bool : true if time is successfully extracted or false if otherwise
+*/
 bool getNetworkTime(char *time)
 {
 
