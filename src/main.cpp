@@ -37,7 +37,7 @@ char time_buff[32] = {};
 void printPM_values();
 void printPM_Error();
 static void add_Value2Json(char *res, char *value_type, uint16_t &value);
-void generateJSON_payload(char *res, char *data);
+void generateJSON_payload(char *res, char *data, const char *timestamp);
 static unsigned long sendData(const char *data, const int _pin, const char *host, const char *url);
 String extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
@@ -171,7 +171,7 @@ void loop()
                     add_Value2Json(PM_data, "P1", pms.pm25);
                     add_Value2Json(PM_data, "P2", pms.pm10);
 
-                    generateJSON_payload(result_PMS, PM_data);
+                    generateJSON_payload(result_PMS, PM_data, datetime.c_str());
 
                     Serial.print("result_PMS JSON: ");
                     Serial.println(result_PMS);
@@ -344,10 +344,14 @@ void add_Value2Json(char *res, char *value_type, uint16_t &value)
     // Serial.println(value_str);
 }
 
-void generateJSON_payload(char *res, char *data)
+void generateJSON_payload(char *res, char *data, const char *timestamp)
 {
 
-    strcpy(res, "{\"software_version\": \"NRZ-2020-129\", \"sensordatavalues\":[");
+    strcpy(res, "{\"software_version\": \"NRZ-2020-129\",");
+    strcat(res, "\"timestamp\": \"");
+    strcat(res, timestamp);
+    strcat(res, "\",");
+    strcat(res, "\"sensordatavalues\":[");
     strcat(res, data);
     char *trailing_comma = strrchr(res, ',');
     if (trailing_comma)
