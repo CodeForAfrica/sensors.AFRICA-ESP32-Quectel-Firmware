@@ -161,9 +161,12 @@ void loop()
                 memset(result_PMS, 0, 255);
 
                 char PM_data[255] = {};
-                add_Value2Json(PM_data, "PM1", pms.pm01);
-                add_Value2Json(PM_data, "PM2", pms.pm25);
-                add_Value2Json(PM_data, "PM10", pms.pm10);
+                // add_Value2Json(PM_data, "PM1", pms.pm01);
+                // add_Value2Json(PM_data, "PM2", pms.pm25);
+                // add_Value2Json(PM_data, "PM10", pms.pm10);
+                add_Value2Json(PM_data, "P0", pms.pm01);
+                add_Value2Json(PM_data, "P1", pms.pm25);
+                add_Value2Json(PM_data, "P2", pms.pm10);
 
                 generateJSON_payload(result_PMS, PM_data);
 
