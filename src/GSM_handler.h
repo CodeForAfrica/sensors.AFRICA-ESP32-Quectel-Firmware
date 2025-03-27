@@ -1,12 +1,5 @@
-// HardwareSerial GSMSerial(1);
-// Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
-
-#include "Adafruit_FONA.h"
-#include "global_configs.h"
-
 HardwareSerial GSMSerial(2);
-HardwareSerial *fonaSerial = &GSMSerial;
-Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
+// HardwareSerial *gsmSerial = &GSMSerial;
 
 char SIM_PIN[5] = GSM_PIN;
 bool GSM_CONNECTED = false;
@@ -30,7 +23,7 @@ int REGISTER_TO_NETWORK_FAIL = 0;
 uint16_t HTTPOST_RESPONSE_STATUS;
 
 /**** Function Declacrations **/
-bool GSM_init(HardwareSerial *gsm_serial);
+bool GSM_init();
 bool register_to_network();
 static void unlock_pin(char *PIN);
 void SIM_PIN_Setup();
@@ -44,12 +37,14 @@ bool deactivateGPRS();
 int8_t GPRS_status();
 void flushSerial();
 void SerialFlush();
-void QUECTEL_POST(char *url, String headers[], int header_size, const String &data, int data_length);
+void QUECTEL_POST(const char *url, char headers[][40], int header_size, const char *data, size_t data_length);
 bool extractText(char *input, const char *target, char *output, uint8_t output_size, char _until); // ? should go to utils
 void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool fill_buffer = false, unsigned long timeout = 3000);
 int16_t getNumber(char *AT_cmd, char *expected_reply, uint8_t index_from, uint8_t length);
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS);
 bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long timeout = 1000);
+bool GSM_Serial_begin();
+bool getNetworkTime(char *time);
 
 void troubleshoot_GSM();
 
@@ -138,33 +133,19 @@ bool register_to_network()
     return true;
 }
 
-static void unlock_pin(char *PIN)
-{
-    // flushSerial();
+// static void unlock_pin(char *PIN)
+// {
 
-    // Attempt to SET PIN if not empty
-    Serial.print("GSM CONFIG SET PIN: ");
-    Serial.println(PIN);
-    Serial.print("Length of PIN");
-    Serial.println(strlen(PIN));
-    if (strlen(PIN) > 1)
-    {
-        // debug_outln(F("\nAttempting to Unlock SIM please wait: "), DEBUG_MIN_INFO);
-        Serial.print("Attempting to unlock SIM using PIN: ");
-        Serial.println(PIN);
-        if (!fona.unlockSIM(PIN))
-        {
-            // debug_outln(F("Failed to Unlock SIM card with pin: "), DEBUG_MIN_INFO);
-            Serial.print("Failed to Unlock SIM card with PIN: ");
-            // debug_outln(gsm_pin, DEBUG_MIN_INFO);
-            Serial.println(PIN);
-            SIM_PIN_SET = false;
-            return;
-        }
-
-        SIM_PIN_SET = true;
-    }
-}
+//     // Attempt to SET PIN if not empty
+//     Serial.print("GSM CONFIG SET PIN: ");
+//     Serial.println(PIN);
+//     // Serial.print("Length of PIN");
+//     Serial.println(strlen(PIN));
+//     if (strlen(PIN) > 1)
+//     {
+//         SIM_PIN_SET = true;
+//     }
+// }
 
 void SIM_PIN_Setup()
 {
@@ -207,7 +188,6 @@ bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR
     }
 }
 
-// Similar to FONA enableGPRS() but quicker because APN setting are not configured as it is configured during GSM_init()
 bool GPRS_init()
 {
 
@@ -287,9 +267,9 @@ bool GPRS_init()
 void GSM_soft_reset()
 {
 
-    fona.enableGPRS(false); // basically shut down GPRS service
+    deactivateGPRS();
 
-    if (!fona.sendCheckReply(F("AT+CFUN=1,1"), F("OK")))
+    if (!sendAndCheck("AT+CFUN=1,1", "OK"))
     {
         Serial.println("Soft resetting GSM with full functionality failed!");
         return;
@@ -310,7 +290,7 @@ void restart_GSM()
     Serial.println("Restarting GSM");
     //! The AQ PCB board has the GSM reset physically connected to the ESP chip
 
-    if (!GSM_init(fonaSerial))
+    if (!GSM_init())
     {
         Serial.println("GSM not fully configured");
         Serial.print("Failure point: ");
@@ -323,19 +303,17 @@ void enableGPRS()
 {
 
     int retry_count = 0;
-    while ((fona.GPRSstate() != 0) && (retry_count < 40))
+    while ((GPRS_status() != 0) && (retry_count < 40))
     {
         delay(3000);
-        fona.enableGPRS(true);
+        activateGPRS();
         retry_count++;
     }
-
-    fona.enableGPRS(true);
 }
 
 void disableGPRS()
 {
-    fona.enableGPRS(false);
+    deactivateGPRS();
     GPRS_CONNECTED = false;
 }
 
@@ -344,7 +322,7 @@ flushSerial
 *****************************************************************/
 void flushSerial()
 {
-    Serial.println("Flushing fona serial..\n############");
+    Serial.println("Flushing GSM serial..\n############");
     while (GSMSerial.available())
     {
 
@@ -626,7 +604,7 @@ void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS)
 void troubleshoot_GSM()
 {
 
-    GSM_init(fonaSerial); // ! Use GSM soft reset if GSM reset pin is not connected
+    GSM_init(); // ! Use GSM soft reset if GSM reset pin is not connected
 
     register_to_network();
 
