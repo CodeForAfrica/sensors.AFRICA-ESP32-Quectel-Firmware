@@ -24,8 +24,7 @@ bool gsm_capable = true;
 #define MCU_RXD 17
 #define MCU_TXD 18
 #define QUECTEL_PWR_KEY 16
-// GSM Using hardware serial
-#define FONA_RST 42 // PIN 35
+#define GSM_RST_PIN 42 // PIN 35
 
 #define GSM_PIN ""
 

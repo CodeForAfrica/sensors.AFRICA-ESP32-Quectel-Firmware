@@ -1,5 +1,10 @@
 HardwareSerial GSMSerial(2);
-// HardwareSerial *gsmSerial = &GSMSerial;
+
+enum RST_SEQ
+{
+    HIGH_LOW_HIGH,
+    LOW_HIGH_LOW
+};
 
 char SIM_PIN[5] = GSM_PIN;
 bool GSM_CONNECTED = false;
@@ -45,6 +50,7 @@ void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS);
 bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long timeout = 1000);
 bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
+void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
 
 void troubleshoot_GSM();
 
@@ -52,6 +58,16 @@ bool GSM_init()
 {
 
     String error_msg = "";
+
+    Serial.println("Restarting GSM...");
+
+#ifdef GSM_RST_PIN
+
+    GSMreset(RST_SEQ::LOW_HIGH_LOW);
+#else
+    GSM_soft_reset();
+
+#endif
 
     // Check if SIM is inserted
     if (!is_SIMCID_valid())
@@ -276,7 +292,6 @@ void GSM_soft_reset()
     }
     Serial.println("Soft resetting the GSM module...");
     delay(30000); // wait for GSM to warm up
-    // #endif
 }
 
 /***
@@ -745,6 +760,34 @@ bool GSM_Serial_begin()
     sendAndCheck("ATI", "OK");
 
     return comm_init;
+}
+
+/// @brief Reset GSM module
+/// @param seq: Sequence to to toggle reset pin to trigger a restart
+/// @param timing_delay : Timing function for the reset to happen
+void GSMreset(RST_SEQ seq, uint8_t timing_delay)
+{
+
+    pinMode(GSM_RST_PIN, OUTPUT);
+
+    if (seq == LOW_HIGH_LOW)
+    {
+        digitalWrite(GSM_RST_PIN, LOW);
+        delay(timing_delay);
+        digitalWrite(GSM_RST_PIN, HIGH);
+        delay(timing_delay);
+        digitalWrite(GSM_RST_PIN, LOW);
+    }
+    else if (seq == HIGH_LOW_HIGH)
+    {
+        digitalWrite(GSM_RST_PIN, HIGH);
+        delay(timing_delay);
+        digitalWrite(GSM_RST_PIN, LOW);
+        delay(timing_delay);
+        digitalWrite(GSM_RST_PIN, HIGH);
+    }
+
+    delay(30000); // Allow enough time for GSM to warm up
 }
 
 // Testing POST data
