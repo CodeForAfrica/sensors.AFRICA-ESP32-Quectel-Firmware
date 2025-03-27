@@ -1,11 +1,11 @@
-// HardwareSerial fonaSS(1);
+// HardwareSerial GSMSerial(1);
 // Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 
 #include "Adafruit_FONA.h"
 #include "global_configs.h"
 
-HardwareSerial fonaSS(2);
-HardwareSerial *fonaSerial = &fonaSS;
+HardwareSerial GSMSerial(2);
+HardwareSerial *fonaSerial = &GSMSerial;
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 
 char SIM_PIN[5] = GSM_PIN;
@@ -53,28 +53,10 @@ bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long 
 
 void troubleshoot_GSM();
 
-// Set a decent delay before this to warm up the GSM module
-bool GSM_init(HardwareSerial *gsm_serial)
-{ // Pass a ptr to SoftwareSerial GSM instance
+bool GSM_init()
+{
 
-    pinMode(QUECTEL_PWR_KEY, OUTPUT);
-    digitalWrite(QUECTEL_PWR_KEY, HIGH);
-    // delay(5000);
-
-    gsm_serial->begin(115200, SERIAL_8N1, MCU_RXD, MCU_TXD);
     String error_msg = "";
-
-    // Check if there is serial communication with a GSM module
-    if (!fona.begin(*gsm_serial, fona.LOW_HIGH_LOW, 120))
-    {
-        error_msg = "Could not find GSM module";
-        GSM_INIT_ERROR = error_msg;
-        Serial.println(error_msg);
-        GSM_CONNECTED = false;
-        return false;
-    }
-
-    Serial.println("GSM module found!");
 
     // Check if SIM is inserted
     if (!is_SIMCID_valid())
@@ -99,9 +81,6 @@ bool GSM_init(HardwareSerial *gsm_serial)
     // }
     // Set if SIM is usable flag
     SIM_USABLE = true;
-
-    // fona.sendCheckReply(F("AT+CMEE=2"), F("OK"));
-    sendAndCheck("AT+CMEE=2", "OK");
 
     return true;
 }
@@ -154,7 +133,6 @@ bool register_to_network()
         return false;
     }
 
-    // fona.sendCheckReply(F("AT+COPS?"), F("OK"));
     sendAndCheck("AT+COPS?", "OK");
 
     return true;
@@ -243,7 +221,7 @@ bool GPRS_init()
     bool PDP_config = false;
     while (timeout > 0)
     {
-        // PDP_config = fona.sendCheckReply(F("AT+QICSGP=1,1"), F("OK"));
+
         PDP_config = sendAndCheck("AT+QICSGP=1,1\0", "OK");
 
         if (PDP_config)
@@ -266,7 +244,6 @@ bool GPRS_init()
 
     // Check CGATT status
     Serial.println("\nChecking CGATT Status..");
-    // fona.sendParseReply(F("AT+CGATT?"), F("+CGATT:"), &CGATT_status, ' ', 1);
     CGATT_status = GPRS_status();
     Serial.println("CGATT_status: " + (String)CGATT_status);
 
@@ -293,14 +270,7 @@ bool GPRS_init()
         }
     }
 
-    // if (!fona.sendCheckReply(F("AT+QIACT=1"), F("OK"), 3000))
-    // {
-    //     err = "Failed to activate GPRS PDP context";
-    //     GSM_INIT_ERROR = err;
-    //     Serial.println(err);
-    //     GPRS_CONNECTED = false;
-    //     return GPRS_CONNECTED;
-    // }
+    //? QIACT
 
 #else
     // "AT+SAPBR=1,1"
@@ -316,19 +286,7 @@ bool GPRS_init()
 
 void GSM_soft_reset()
 {
-    // #ifdef QUECTEL
-    //     // ! Observation per v1 of Quectel PCB is that it POWERS BACK ON immediately after sending POWER DOWN command
-    //     if (fona.sendCheckReply(F("AT+QPOWD"), F("POWERED DOWN")))
-    //     {
-    //         Serial.println("Restarting QUECTEL GSM");
-    //         delay(10000); // Give module enough time to register to network
-    //     }
-    //     else
-    //     {
-    //         Serial.println("Failed to power down Quectel module");
-    //     }
 
-    // #else
     fona.enableGPRS(false); // basically shut down GPRS service
 
     if (!fona.sendCheckReply(F("AT+CFUN=1,1"), F("OK")))
@@ -351,12 +309,6 @@ void restart_GSM()
 {
     Serial.println("Restarting GSM");
     //! The AQ PCB board has the GSM reset physically connected to the ESP chip
-    // GSM_soft_reset();
-    // if (!fona.begin(*fonaSerial))
-    // {
-    //     Serial.println("Couldn't find GSM");
-    //     return;
-    // }
 
     if (!GSM_init(fonaSerial))
     {
@@ -369,7 +321,6 @@ void restart_GSM()
 
 void enableGPRS()
 {
-    // fona.setGPRSNetworkSettings(FONAFlashStringPtr(gprs_apn), FONAFlashStringPtr(gprs_username), FONAFlashStringPtr(gprs_password));
 
     int retry_count = 0;
     while ((fona.GPRSstate() != 0) && (retry_count < 40))
@@ -394,10 +345,10 @@ flushSerial
 void flushSerial()
 {
     Serial.println("Flushing fona serial..\n############");
-    while (fonaSS.available())
+    while (GSMSerial.available())
     {
 
-        Serial.print(fonaSS.read());
+        Serial.print(GSMSerial.read());
     }
     Serial.println("##################");
 }
@@ -425,17 +376,13 @@ void QUECTEL_POST(const char *url, char headers[][40], int header_size, const ch
     strcpy(HTTP_CFG, "AT+QHTTPCFG=\"url\",\"http://"); // protocol must be set before URL
     strcat(HTTP_CFG, url);
     strcat(HTTP_CFG, "\"");
-    // String HTTP_CFG = "AT+QHTTPCFG=\"url\",\"http://" + String(url) + "\"";
     Serial.print("Quectel URL config: ");
     Serial.println(HTTP_CFG);
+
     sendAndCheck(HTTP_CFG, "OK", 2000);
-    // fona.sendCheckReply(F("AT+QHTTPCFG=\"contextid\",1"), F("OK"));      // set context id
     sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK");
-    // fona.sendCheckReply(F("AT+QHTTPCFG=\"requestheader\",0"), F("OK"));  // disable request headers
     sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK");
-    // fona.sendCheckReply(F("AT+QHTTPCFG=\"responseheader\",1"), F("OK")); // enable response headers
     sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK");
-    // fona.sendCheckReply(F("AT+QHTTPCFG=\"rspout/auto\",1"), F("OK"));    // enable auto response and "disable" HTTTPREAD
     sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",1", "OK");
 
     for (int i = 0; i < header_size; i++)
@@ -510,19 +457,19 @@ void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool fi
     size_t buff_pos = 0;
     Serial.print("Received Command in get raw: ");
     Serial.println(cmd);
-    fona.println(cmd);
+    GSMSerial.println(cmd);
     unsigned long sendStartMillis = millis();
     do
     {
         if (buff_pos >= buff_size) // Check if buff is full
             break;
 
-        while (fona.available())
+        while (GSMSerial.available())
         {
 
             if (buff_pos >= buff_size)
                 break;
-            res_buff[buff_pos] = fona.read();
+            res_buff[buff_pos] = GSMSerial.read();
             buff_pos++;
         }
 
@@ -778,6 +725,48 @@ bool getNetworkTime(char *time)
     {
         return false;
     }
+}
+
+bool GSM_Serial_begin()
+{
+    pinMode(QUECTEL_PWR_KEY, OUTPUT);
+    digitalWrite(QUECTEL_PWR_KEY, HIGH);
+
+    GSMSerial.begin(115200, SERIAL_8N1, MCU_RXD, MCU_TXD);
+
+    bool comm_init = false;
+
+    int16_t timeout = 30000;
+
+    Serial.println("Attempting to initate comms with GSM module");
+
+    while (millis() < timeout)
+    {
+        while (GSMSerial.available())
+            GSMSerial.read();
+        if (sendAndCheck("AT", "OK"))
+        {
+            comm_init = true;
+            Serial.println("GSM module found!");
+            break;
+        }
+    }
+    if (!comm_init)
+    {
+        return false;
+    }
+
+// debug
+#ifdef GSM_DEBUG
+    sendAndCheck("ATE1", "OK");
+    sendAndCheck("AT+CMEE=2", "OK");
+#else
+    sendAndCheck("ATE0", "OK");
+    sendAndCheck("AT+CMEE=1", "OK");
+#endif
+    sendAndCheck("ATI", "OK");
+
+    return comm_init;
 }
 
 // Testing POST data

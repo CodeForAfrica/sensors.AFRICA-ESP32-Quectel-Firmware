@@ -14,6 +14,7 @@ constexpr unsigned LARGE_STR = 512 - 1;
 constexpr unsigned XLARGE_STR = 1024 - 1;
 
 bool gsm_capable = true;
+#define GSM_DEBUG
 
 #define QUECTEL EC200CN
 

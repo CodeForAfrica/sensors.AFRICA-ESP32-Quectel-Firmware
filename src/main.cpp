@@ -81,41 +81,50 @@ void setup()
 
     if (gsm_capable)
     {
-
-        if (!GSM_init(fonaSerial)) // ! Why hang here after ESP restart?
+        if (GSM_Serial_begin())
         {
-            Serial.println("GSM not fully configured");
-            Serial.print("Failure point: ");
-            Serial.println(GSM_INIT_ERROR);
-            Serial.println();
-            // delay(10000);
-            // ESP.restart();
-        }
-        GSM_CONNECTED = true;
 
-        while (!register_to_network())
-        {
-            Serial.println("Retrying network registration...");
-        }
+            if (!GSM_init())
+            {
+                Serial.println("GSM not fully configured");
+                Serial.print("Failure point: ");
+                Serial.println(GSM_INIT_ERROR);
+                Serial.println();
+                return;
+            }
+            else
+            {
+                GSM_CONNECTED = true;
 
-        // GPRS init
+                while (!register_to_network()) // ! INFINITE LOOP!
+                {
+                    Serial.println("Retrying network registration...");
+                }
 
-        if (!GPRS_init())
-        {
-            Serial.println("Failed to init GPRS");
+                // GPRS init
+
+                if (!GPRS_init())
+                {
+                    Serial.println("Failed to init GPRS");
+                }
+                else
+                {
+                    Serial.println("GPRS initialized!");
+                }
+
+                if (getNetworkTime(time_buff))
+                {
+                    Serial.println("Time: " + String(time_buff));
+                }
+                else
+                {
+                    Serial.println("Failed to fetch time from network");
+                }
+            }
         }
         else
         {
-            Serial.println("GPRS initialized!");
-        }
-
-        if (getNetworkTime(time_buff))
-        {
-            Serial.println("Time: " + String(time_buff));
-        }
-        else
-        {
-            Serial.println("Failed to fetch time from network");
+            Serial.println("Could not communicate to GSM module.");
         }
     }
 
