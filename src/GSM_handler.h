@@ -36,7 +36,6 @@ bool is_SIMCID_valid();
 bool GPRS_init();
 void GSM_soft_reset();
 void restart_GSM();
-void enableGPRS();
 bool activateGPRS();
 bool deactivateGPRS();
 int8_t GPRS_status();
@@ -312,24 +311,6 @@ void restart_GSM()
         Serial.println(GSM_INIT_ERROR);
         Serial.println();
     }
-}
-
-void enableGPRS()
-{
-
-    int retry_count = 0;
-    while ((GPRS_status() != 0) && (retry_count < 40))
-    {
-        delay(3000);
-        activateGPRS();
-        retry_count++;
-    }
-}
-
-void disableGPRS()
-{
-    deactivateGPRS();
-    GPRS_CONNECTED = false;
 }
 
 /*****************************************************************
