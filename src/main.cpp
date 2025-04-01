@@ -29,7 +29,9 @@ char ROOT_DIR[24] = {};
 char BASE_SENSORS_DATA_DIR[20] = "/SENSORSDATA";
 char CURRENT_SENSORS_DATA_DIR[128] = {};
 char SENSORS_DATA_PATH[128] = {};
-char SENSOR_FAILED_DATA_SEND_STORE[40] = "/SENSORDATA/failed_send_payloads.txt";
+char SENSORS_FAILED_DATA_SEND_STORE_FILE[40] = "failed_send_payloads.txt";
+char SENSORS_FAILED_DATA_SEND_STORE_PATH[128] = {};
+
 char esp_chipid[18] = {};
 
 bool send_now = false;
@@ -40,7 +42,7 @@ void printPM_values();
 void printPM_Error();
 static void add_Value2Json(char *res, char *value_type, uint16_t &value);
 void generateJSON_payload(char *res, char *data, const char *timestamp);
-static unsigned long sendData(const char *data, const int _pin, const char *host, const char *url);
+bool sendData(const char *data, const int _pin, const char *host, const char *url);
 String extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
 void init_SD_loggers();
@@ -261,7 +263,11 @@ void loop()
 
                 if (strlen(sensor_data[i]) != 0)
                 {
-                    sum_send_time += sendData(sensor_data[i], PMS_API_PIN, HOST_CFA, URL_CFA);
+                    if (!sendData(sensor_data[i], PMS_API_PIN, HOST_CFA, URL_CFA))
+                    {
+                        // Append to file for sending later
+                        appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, sensor_data[i]);
+                    }
                     memset(sensor_data[i], '\0', 255);
                 }
             }
@@ -269,7 +275,7 @@ void loop()
             Serial.println("Time for Sending (ms): " + String(sum_send_time));
 
             // Resetting for next sampling
-            sum_send_time = 0;
+
             sensor_data_log_count = 0;
 
             count_sends++;
@@ -387,7 +393,6 @@ void add_Value2Json(char *res, char *value_type, uint16_t &value)
 
 void generateJSON_payload(char *res, char *data, const char *timestamp)
 {
-
     strcpy(res, "{\"software_version\": \"NRZ-2020-129\",");
     strcat(res, "\"timestamp\": \"");
     strcat(res, timestamp);
@@ -404,7 +409,6 @@ void generateJSON_payload(char *res, char *data, const char *timestamp)
 
 String extractDateTime(String datetimeStr)
 {
-
     Serial.println("Received date string: " + datetimeStr); //! format looks like "25/02/24,05:55:53+00" and may include the quotes!
 
     // check if received string is empty
@@ -525,10 +529,9 @@ String formatDateTime(time_t t, String timezone)
 /*****************************************************************
  * send data to rest api                                         *
  *****************************************************************/
-static unsigned long sendData(const char *data, const int _pin, const char *host, const char *url)
+bool sendData(const char *data, const int _pin, const char *host, const char *url)
 {
-
-    unsigned long start_send = millis();
+    // unsigned long start_send = millis();
 
     char gprs_url[64] = {};
     strcat(gprs_url, host);
@@ -541,7 +544,7 @@ static unsigned long sendData(const char *data, const int _pin, const char *host
     {
 
         int retry_count = 0;
-        uint16_t statuscode;
+        uint8_t statuscode = 0;
         int16_t length;
 
 #ifdef QUECTEL
@@ -556,23 +559,29 @@ static unsigned long sendData(const char *data, const int _pin, const char *host
 
         // int header_size = sizeof(Quectel_headers) / sizeof(Quectel_headers[0]);
 
-        QUECTEL_POST(gprs_url, Quectel_headers, 3, data, strlen(data));
+        QUECTEL_POST(gprs_url, Quectel_headers, 3, data, strlen(data), statuscode);
+
+        if (statuscode != 200 || statuscode != 201)
+        {
+            return false;
+        }
 
         // ToDo: close HTTP session/ PDP context
 #endif
     }
 
-#if defined(ESP8266)
-    wdt_reset();
-#endif
-    yield();
-    return millis() - start_send;
+    // #if defined(ESP8266)
+    //     wdt_reset();
+    // #endif
+    //     yield();
+    //     return millis() - start_send;
+
+    return true;
 }
 
 /// @brief Init directories for logging files
 void init_SD_loggers()
 {
-
     char _year[4] = {};
 
     strcpy(CURRENT_SENSORS_DATA_DIR, ROOT_DIR);
@@ -594,6 +603,13 @@ void init_SD_loggers()
     // Create Directories
     createDir(SD, ROOT_DIR);
     createDir(SD, CURRENT_SENSORS_DATA_DIR);
+
+    // Init logger paths
+    strcpy(SENSORS_FAILED_DATA_SEND_STORE_PATH, ROOT_DIR);
+    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, BASE_SENSORS_DATA_DIR);
+    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, "/");
+    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, SENSORS_FAILED_DATA_SEND_STORE_FILE);
+    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, "\0");
 
     // Debug runtime logger;
 }
