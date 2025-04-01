@@ -25,9 +25,11 @@ int SD_MISO = 41;
 int SD_MOSI = 40;
 int SD_CS = 39;
 
-char SENSORS_DATA_DIR[20] = "/SENSORSDATA";
-char SENSORS_DATA_PATH[40] = "/SENSORSDATA/sensordatalog.txt";
-
+char ROOT_DIR[24] = {};
+char BASE_SENSORS_DATA_DIR[20] = "/SENSORSDATA";
+char CURRENT_SENSORS_DATA_DIR[128] = {};
+char SENSORS_DATA_PATH[128] = {};
+char SENSOR_FAILED_DATA_SEND_STORE[40] = "/SENSORDATA/failed_send_payloads.txt";
 char esp_chipid[18] = {};
 
 bool send_now = false;
@@ -41,7 +43,31 @@ void generateJSON_payload(char *res, char *data, const char *timestamp);
 static unsigned long sendData(const char *data, const int _pin, const char *host, const char *url);
 String extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
+void init_SD_loggers();
+void updateLoggers();
+void getMonthName(int month_num, char *month);
 
+enum Month
+{
+    _JAN = 1,
+    _FEB = 2,
+    _MAR = 3,
+    _APR = 4,
+    _MAY = 5,
+    _JUN = 6,
+    _JUL = 7,
+    _AUG = 8,
+    _SEP = 9,
+    _OCT = 10,
+    _NOV = 11,
+    _DEC = 12
+
+};
+
+int current_month = 0;
+int current_year = 0;
+int new_month = 0;
+int new_year = 0;
 void setup()
 {
     Serial.begin(115200);
@@ -51,33 +77,11 @@ void setup()
     snprintf(esp_chipid, sizeof(esp_chipid), "%llX", chipid_num);
     Serial.print("ESP32 Chip ID: ");
     Serial.println(esp_chipid);
+    strcpy(ROOT_DIR, SENSOR_PREFIX);
+    strcat(ROOT_DIR, esp_chipid);
 
     Serial.println("Initializing PMS5003 sensor");
     pms.init();
-#ifdef REASSIGN_PINS
-    Serial.print("Init SD ......");
-    delay(5000);
-    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-    if (!SD.begin(SD_CS))
-    {
-#else
-    if (!SD.begin())
-    {
-#endif
-        Serial.println("Card Mount Failed");
-        SD_MOUNT = false;
-    }
-
-    else
-    {
-        SD_MOUNT = true;
-    }
-    SD_Attached = SDattached();
-
-    if (SD_Attached)
-    {
-        createDir(SD, SENSORS_DATA_DIR);
-    }
 
     if (gsm_capable)
     {
@@ -134,6 +138,32 @@ void setup()
         Serial.println("Support for other network connections not yet implemented");
     }
 
+// SD INIT
+#ifdef REASSIGN_PINS
+    Serial.print("Init SD ......");
+    delay(5000);
+    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    if (!SD.begin(SD_CS))
+    {
+#else
+    if (!SD.begin())
+    {
+#endif
+        Serial.println("Card Mount Failed");
+        SD_MOUNT = false;
+    }
+
+    else
+    {
+        SD_MOUNT = true;
+    }
+    SD_Attached = SDattached();
+
+    if (SD_Attached)
+    {
+        init_SD_loggers();
+    }
+
     starttime = millis();
 }
 
@@ -167,6 +197,8 @@ void loop()
             }
             else
             {
+                updateLoggers(); // In case we roll into a new year or month.
+
                 if (sensor_data_log_count < MAX_STRINGS)
                 {
                     // Add values to JSON
@@ -416,12 +448,12 @@ String extractDateTime(String datetimeStr)
 
 #endif
 
-    Serial.println("Day: " + String(day));
-    Serial.println("Month: " + String(month));
-    Serial.println("Year: " + String(year));
-    Serial.println("Hour: " + String(hour));
-    Serial.println("Minute: " + String(minute));
-    Serial.println("Second: " + String(second));
+    // Serial.println("Day: " + String(day));
+    // Serial.println("Month: " + String(month));
+    // Serial.println("Year: " + String(year));
+    // Serial.println("Hour: " + String(hour));
+    // Serial.println("Minute: " + String(minute));
+    // Serial.println("Second: " + String(second));
 
     // Adjust year for TimeLib (TimeLib expects years since 1970)
     year += 2000; // Assuming 24 is 2024
@@ -435,6 +467,26 @@ String extractDateTime(String datetimeStr)
     tm.Day = day;
     tm.Month = month;
     tm.Year = year;
+
+    if (year > current_year)
+    {
+        new_year = year;
+        new_month = 1; // Reset month
+    }
+    else
+    {
+        current_year = new_year = year;
+    }
+
+    if (month > current_month)
+    {
+        new_month = month;
+    }
+
+    else
+    {
+        current_month = new_month = month;
+    }
 
     // Create a time_t value
     time_t t = makeTime(tm);
@@ -515,4 +567,106 @@ static unsigned long sendData(const char *data, const int _pin, const char *host
 #endif
     yield();
     return millis() - start_send;
+}
+
+/// @brief Init directories for logging files
+void init_SD_loggers()
+{
+
+    char _year[4] = {};
+
+    strcpy(CURRENT_SENSORS_DATA_DIR, ROOT_DIR);
+
+    if (current_year != 0 && current_month != 0)
+    {
+        itoa(current_year, _year, 10);
+        strcat(CURRENT_SENSORS_DATA_DIR, BASE_SENSORS_DATA_DIR);
+        strcat(CURRENT_SENSORS_DATA_DIR, "/");
+        strcat(CURRENT_SENSORS_DATA_DIR, _year);
+    }
+
+    else
+    {
+        Serial.println("Year or month not set");
+        return;
+    }
+
+    // Create Directories
+    createDir(SD, ROOT_DIR);
+    createDir(SD, CURRENT_SENSORS_DATA_DIR);
+
+    // Debug runtime logger;
+}
+
+void updateLoggers()
+{
+    if (new_year > current_year)
+    {
+        current_year = new_year;
+        init_SD_loggers();
+    }
+    else if (new_month > current_month)
+    {
+        memset(SENSORS_DATA_PATH, 0, sizeof(SENSORS_DATA_PATH));
+        char month[3] = {};
+        getMonthName(current_month, month);
+
+        // Update sensors data path
+        strcpy(SENSORS_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
+        strcat(SENSORS_DATA_PATH, "/");
+        strcat(SENSORS_DATA_PATH, month);
+        strcat(SENSORS_DATA_PATH, ".txt");
+    }
+}
+
+/// @brief convert number of month to name
+/// @param month_num : range from 1 to 12
+/// @param month : name of the month
+void getMonthName(int month_num, char *month)
+{
+    switch (month_num)
+    {
+    case (Month::_JAN):
+        strcpy(month, "JAN");
+        break;
+
+    case (Month::_FEB):
+        strcpy(month, "FEB");
+        break;
+
+    case (Month::_MAR):
+        strcpy(month, "MAR");
+        break;
+
+    case (Month::_APR):
+        strcpy(month, "APR");
+        break;
+
+    case (Month::_MAY):
+        strcpy(month, "MAY");
+        break;
+
+    case (Month::_JUN):
+        strcpy(month, "JUN");
+        break;
+
+    case (Month::_JUL):
+        strcpy(month, "JUL");
+        break;
+    case (Month::_AUG):
+        strcpy(month, "AUG");
+        break;
+    case (Month::_SEP):
+        strcpy(month, "SEP");
+        break;
+    case (Month::_OCT):
+        strcpy(month, "OCT");
+        break;
+    case (Month::_NOV):
+        strcpy(month, "NOV");
+        break;
+    case (Month::_DEC):
+        strcpy(month, "DEC");
+        break;
+    }
 }
