@@ -48,6 +48,7 @@ String formatDateTime(time_t t, String timezone);
 void init_SD_loggers();
 void updateLoggers();
 void getMonthName(int month_num, char *month);
+void readSendDelete(const char *datafile);
 
 enum Month
 {
@@ -272,7 +273,10 @@ void loop()
                 }
             }
 
-            Serial.println("Time for Sending (ms): " + String(sum_send_time));
+            // send payloads from the files that stores data that failed posting previously
+            readSendDelete(SENSORS_FAILED_DATA_SEND_STORE_PATH);
+
+            // Serial.println("Time for Sending (ms): " + String(sum_send_time));
 
             // Resetting for next sampling
 
@@ -685,4 +689,38 @@ void getMonthName(int month_num, char *month)
         strcpy(month, "DEC");
         break;
     }
+}
+
+void readSendDelete(const char *datafile)
+{
+
+    bool EndOfFile = false;
+    String data;
+    const char *tempFile = "/temp_sensor_payload.txt";
+
+    Serial.println("Attempting to send data that previoudly failed to send.");
+
+    while (!EndOfFile)
+    {
+
+        data = readLine(SD, datafile, EndOfFile, false);
+        // readline continously
+        if (data != "")
+        {
+
+            // check type of payload //! for now we assume it's only PM data
+            // Todo: validate JSON
+            // Attempt send payload
+            if (!sendData(data.c_str(), PMS_API_PIN, HOST_CFA, URL_CFA))
+            {
+                // store data in temp file
+                appendFile(SD, tempFile, data.c_str(), false); //? does FS lib support opening multiple files? Otherwise close the previously opened file.
+            }
+        }
+    }
+
+    updateFileContents(SD, datafile, tempFile);
+
+    // close files
+    closeFile(SD, datafile);
 }

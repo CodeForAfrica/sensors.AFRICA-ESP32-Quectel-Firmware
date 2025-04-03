@@ -108,3 +108,51 @@ bool SDattached()
     Serial.printf("SD Card Size: %lluMB\n", SD.cardSize() / (1024 * 1024));
     return true;
 }
+
+String readLine(fs::FS &fs, const char *path, bool &EndOfFileMarker, bool closefile = true)
+{
+    String line = "";
+    char c;
+
+    File file = fs.open(path);
+
+    if (file.peek() == -1)
+    {
+        EndOfFileMarker = true;
+        Serial.println("End of file reached");
+        return "";
+    }
+
+    while (file.available())
+    {
+        c = file.read();
+        if (c == '\n')
+        {
+            break;
+        }
+        // Skip carriage return
+        if (c != '\r')
+        {
+            line += c;
+        }
+    }
+    if (closefile)
+    {
+        file.close();
+    }
+
+    return line;
+}
+
+void updateFileContents(fs::FS &fs, const char *file_to_updated, const char *temp_file)
+{
+
+    fs.remove(file_to_updated);
+    fs.rename(temp_file, file_to_updated);
+}
+
+void closeFile(fs::FS &fs, const char *path)
+{
+    File file = fs.open(path);
+    file.close();
+}
