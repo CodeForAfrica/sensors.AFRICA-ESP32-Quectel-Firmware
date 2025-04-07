@@ -46,9 +46,10 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
 String extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
 void init_SD_loggers();
-void updateLoggers();
 void getMonthName(int month_num, char *month);
 void readSendDelete(const char *datafile);
+void initCalenderFromNetworkTime();
+void updateCalendarFromNetworkTime();
 
 enum Month
 {
@@ -67,10 +68,9 @@ enum Month
 
 };
 
-int current_month = 0;
-int current_year = 0;
-int new_month = 0;
-int new_year = 0;
+int current_year, current_month = 0;
+int network_year, network_month = 0;
+
 void setup()
 {
     Serial.begin(115200);
@@ -80,9 +80,6 @@ void setup()
     snprintf(esp_chipid, sizeof(esp_chipid), "%llX", chipid_num);
     Serial.print("ESP32 Chip ID: ");
     Serial.println(esp_chipid);
-    strcpy(ROOT_DIR, SENSOR_PREFIX);
-    strcat(ROOT_DIR, esp_chipid);
-
     Serial.println("Initializing PMS5003 sensor");
     pms.init();
 
@@ -122,6 +119,8 @@ void setup()
                 if (getNetworkTime(time_buff))
                 {
                     Serial.println("Time: " + String(time_buff));
+                    extractDateTime(String(time_buff));
+                    initCalenderFromNetworkTime();
                 }
                 else
                 {
@@ -200,7 +199,7 @@ void loop()
             }
             else
             {
-                updateLoggers(); // In case we roll into a new year or month.
+                updateCalendarFromNetworkTime(); // In case we roll into a new year or month.
 
                 if (sensor_data_log_count < MAX_STRINGS)
                 {
@@ -431,12 +430,12 @@ String extractDateTime(String datetimeStr)
 
     // Parse the datetime string
 
-    int year = datetimeStr.substring(0, 2).toInt();
-    int month = datetimeStr.substring(3, 5).toInt();
-    int day = datetimeStr.substring(6, 8).toInt();
-    int hour = datetimeStr.substring(9, 11).toInt();
-    int minute = datetimeStr.substring(12, 14).toInt();
-    int second = datetimeStr.substring(15, 17).toInt();
+    int _year = datetimeStr.substring(0, 2).toInt();
+    int _month = datetimeStr.substring(3, 5).toInt();
+    int _day = datetimeStr.substring(6, 8).toInt();
+    int _hour = datetimeStr.substring(9, 11).toInt();
+    int _minute = datetimeStr.substring(12, 14).toInt();
+    int _second = datetimeStr.substring(15, 17).toInt();
 
 #if defined(QUECTEL)
 
@@ -464,40 +463,23 @@ String extractDateTime(String datetimeStr)
     // Serial.println("Second: " + String(second));
 
     // Adjust year for TimeLib (TimeLib expects years since 1970)
-    year += 2000; // Assuming 24 is 2024
-    year -= 1970;
+    _year += 2000; // Assuming 24 is 2024
+    _year -= 1970;
 
     // Create a tmElements_t struct
     tmElements_t tm;
-    tm.Second = second;
-    tm.Minute = minute;
-    tm.Hour = hour;
-    tm.Day = day;
-    tm.Month = month;
-    tm.Year = year;
-
-    if (year > current_year)
-    {
-        new_year = year;
-        new_month = 1; // Reset month
-    }
-    else
-    {
-        current_year = new_year = year;
-    }
-
-    if (month > current_month)
-    {
-        new_month = month;
-    }
-
-    else
-    {
-        current_month = new_month = month;
-    }
+    tm.Second = _second;
+    tm.Minute = _minute;
+    tm.Hour = _hour;
+    tm.Day = _day;
+    tm.Month = _month;
+    tm.Year = _year;
 
     // Create a time_t value
     time_t t = makeTime(tm);
+
+    network_year = year(t);
+    network_month = month(t);
 
     // Format the time_t value to YYYY-MM-DDThh:mm:ss+HH:MM
     String formattedDateTime = formatDateTime(t, timezone);
@@ -586,16 +568,25 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
 /// @brief Init directories for logging files
 void init_SD_loggers()
 {
-    char _year[4] = {};
-
-    strcpy(CURRENT_SENSORS_DATA_DIR, ROOT_DIR);
+    // Root directory
+    strcpy(ROOT_DIR, "/");
+    strcat(ROOT_DIR, SENSOR_PREFIX);
+    strcat(ROOT_DIR, esp_chipid);
+    createDir(SD, ROOT_DIR);
 
     if (current_year != 0 && current_month != 0)
     {
-        itoa(current_year, _year, 10);
+        char _year[4] = {};
+        strcpy(CURRENT_SENSORS_DATA_DIR, ROOT_DIR);
         strcat(CURRENT_SENSORS_DATA_DIR, BASE_SENSORS_DATA_DIR);
+
+        createDir(SD, CURRENT_SENSORS_DATA_DIR); // Create base sensor directory "/ESP_CHIP_ID/SENSORSDATA"
+
+        itoa(current_year, _year, 10);
         strcat(CURRENT_SENSORS_DATA_DIR, "/");
         strcat(CURRENT_SENSORS_DATA_DIR, _year);
+
+        createDir(SD, CURRENT_SENSORS_DATA_DIR); // Create year directory "/ESP_CHIP_ID/SENSORSDATA/2025"
     }
 
     else
@@ -604,9 +595,15 @@ void init_SD_loggers()
         return;
     }
 
-    // Create Directories
-    createDir(SD, ROOT_DIR);
-    createDir(SD, CURRENT_SENSORS_DATA_DIR);
+    memset(SENSORS_DATA_PATH, 0, sizeof(SENSORS_DATA_PATH));
+    char month[3] = {};
+    getMonthName(current_month, month);
+
+    // Update sensors data path
+    strcpy(SENSORS_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
+    strcat(SENSORS_DATA_PATH, "/");
+    strcat(SENSORS_DATA_PATH, month);
+    strcat(SENSORS_DATA_PATH, ".txt");
 
     // Init logger paths
     strcpy(SENSORS_FAILED_DATA_SEND_STORE_PATH, ROOT_DIR);
@@ -615,28 +612,11 @@ void init_SD_loggers()
     strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, SENSORS_FAILED_DATA_SEND_STORE_FILE);
     strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, "\0");
 
+    // write files to SD
+    // writeFile(SD, SENSORS_DATA_PATH, "");                   // create file if it does not exist
+    // writeFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, ""); // create file if it does not exist
+
     // Debug runtime logger;
-}
-
-void updateLoggers()
-{
-    if (new_year > current_year)
-    {
-        current_year = new_year;
-        init_SD_loggers();
-    }
-    else if (new_month > current_month)
-    {
-        memset(SENSORS_DATA_PATH, 0, sizeof(SENSORS_DATA_PATH));
-        char month[3] = {};
-        getMonthName(current_month, month);
-
-        // Update sensors data path
-        strcpy(SENSORS_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
-        strcat(SENSORS_DATA_PATH, "/");
-        strcat(SENSORS_DATA_PATH, month);
-        strcat(SENSORS_DATA_PATH, ".txt");
-    }
 }
 
 /// @brief convert number of month to name
@@ -723,4 +703,43 @@ void readSendDelete(const char *datafile)
 
     // close files
     closeFile(SD, datafile);
+}
+
+void updateCalendarFromNetworkTime()
+{
+    bool calendarUpdated = false;
+
+    if (network_year > current_year)
+    {
+        Serial.print("Updating year from: ");
+        Serial.print(current_year);
+        Serial.print(" to: ");
+        Serial.println(network_year);
+
+        current_year = network_year;
+        calendarUpdated = true;
+    }
+    else if (network_month > current_month)
+    {
+        Serial.print("Updating year from: ");
+        Serial.print(current_year);
+        Serial.print(" to: ");
+        Serial.println(network_year);
+
+        current_month = network_month;
+        calendarUpdated = true;
+    }
+    if (calendarUpdated)
+    {
+        init_SD_loggers();
+    }
+}
+
+void initCalenderFromNetworkTime()
+{
+    if (network_year != 0 && network_month != 0)
+    {
+        current_year = network_year;
+        current_month = network_month;
+    }
 }
