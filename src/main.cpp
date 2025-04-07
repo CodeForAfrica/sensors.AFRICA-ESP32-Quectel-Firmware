@@ -13,8 +13,8 @@ unsigned sending_intervall_ms = 1 * 60 * 1000; // 145000;
 unsigned long count_sends = 0;
 
 uint8_t sensor_data_log_count = 0;
-const int MAX_STRINGS = 48;
-char sensor_data[MAX_STRINGS][255];
+const int MAX_PAYLOADS = 48;
+char sensor_data[MAX_PAYLOADS][255];
 
 bool SD_MOUNT = false;
 bool SD_Attached = false;
@@ -201,7 +201,7 @@ void loop()
             {
                 updateCalendarFromNetworkTime(); // In case we roll into a new year or month.
 
-                if (sensor_data_log_count < MAX_STRINGS)
+                if (sensor_data_log_count < MAX_PAYLOADS)
                 {
                     // Add values to JSON
                     memset(result_PMS, 0, 255);
