@@ -40,7 +40,7 @@ char time_buff[32] = {};
 
 void printPM_values();
 void printPM_Error();
-static void add_Value2Json(char *res, char *value_type, uint16_t &value);
+static void add_Value2Json(char *res, const char *value_type, uint16_t &value);
 void generateJSON_payload(char *res, char *data, const char *timestamp);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
 String extractDateTime(String datetimeStr);
@@ -370,7 +370,7 @@ void printPM_Error()
     }
 }
 
-void add_Value2Json(char *res, char *value_type, uint16_t &value)
+void add_Value2Json(char *res, const char *value_type, uint16_t &value)
 {
     char value_str[64] = {}; // ! make sure this is big enough
     char char_value[18];

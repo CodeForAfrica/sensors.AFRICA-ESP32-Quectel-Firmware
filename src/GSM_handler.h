@@ -44,7 +44,7 @@ void SerialFlush();
 void QUECTEL_POST(const char *url, char headers[][40], int header_size, const char *data, size_t data_length, uint8_t &response_status);
 bool extractText(char *input, const char *target, char *output, uint8_t output_size, char _until); // ? should go to utils
 void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool wait_timeout = false, unsigned long timeout = 3000);
-int16_t getNumber(char *AT_cmd, char *expected_reply, uint8_t index_from, uint8_t length);
+int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_from, uint8_t length);
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS);
 bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long timeout = 1000);
 bool GSM_Serial_begin();
@@ -358,7 +358,7 @@ void QUECTEL_POST(const char *url, char headers[][40], int header_size, const ch
     sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK");
     sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK");
     sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",1", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK");
 
     for (int i = 0; i < header_size; i++)
     {
@@ -513,7 +513,7 @@ bool extractText(char *input, const char *target, char *output, uint8_t output_s
 }
 
 // extract an integer
-int16_t getNumber(char *AT_cmd, char *expected_reply, uint8_t index_from, uint8_t length)
+int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_from, uint8_t length)
 {
 
     int16_t num;
