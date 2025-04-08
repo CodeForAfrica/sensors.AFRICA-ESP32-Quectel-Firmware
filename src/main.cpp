@@ -38,10 +38,16 @@ bool send_now = false;
 
 char time_buff[32] = {};
 
+enum SensorAPN_PIN
+{
+    PMS = PMS_API_PIN,
+    DHT = 7
+};
+
 void printPM_values();
 void printPM_Error();
 static void add_Value2Json(char *res, const char *value_type, uint16_t &value);
-void generateJSON_payload(char *res, char *data, const char *timestamp);
+void generateJSON_payload(char *res, char *data, const char *timestamp, SensorAPN_PIN pin);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
 String extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
@@ -214,7 +220,7 @@ void loop()
                     add_Value2Json(PM_data, "P1", pms.pm25);
                     add_Value2Json(PM_data, "P2", pms.pm10);
 
-                    generateJSON_payload(result_PMS, PM_data, datetime.c_str());
+                    generateJSON_payload(result_PMS, PM_data, datetime.c_str(), SensorAPN_PIN::PMS);
 
                     Serial.print("result_PMS JSON: ");
                     Serial.println(result_PMS);
@@ -394,7 +400,7 @@ void add_Value2Json(char *res, const char *value_type, uint16_t &value)
     // Serial.println(value_str);
 }
 
-void generateJSON_payload(char *res, char *data, const char *timestamp)
+void generateJSON_payload(char *res, char *data, const char *timestamp, SensorAPN_PIN pin)
 {
     strcpy(res, "{\"software_version\": \"NRZ-2020-129\",");
     strcat(res, "\"timestamp\": \"");
@@ -402,6 +408,20 @@ void generateJSON_payload(char *res, char *data, const char *timestamp)
     strcat(res, "\",");
     strcat(res, "\"sensordatavalues\":[");
     strcat(res, data);
+
+    char sensor_type[24] = ",\"type\":\"";
+    switch (pin)
+    {
+    case SensorAPN_PIN::PMS:
+        strcat(res, "PMS\"");
+        break;
+    case SensorAPN_PIN::DHT:
+        strcat(res, "DHT\"");
+        break;
+    default:
+        Serial.println("Unsupported sensor pin");
+        break;
+    }
     char *trailing_comma = strrchr(res, ',');
     if (trailing_comma)
     {
@@ -690,6 +710,7 @@ void readSendDelete(const char *datafile)
 
             // check type of payload //! for now we assume it's only PM data
             // Todo: validate JSON
+            // Todo: check senor type to determine which API pin to use
             // Attempt send payload
             if (!sendData(data.c_str(), PMS_API_PIN, HOST_CFA, URL_CFA))
             {
