@@ -717,14 +717,15 @@ void updateCalendarFromNetworkTime()
         Serial.println(network_year);
 
         current_year = network_year;
+        current_month = network_month; // Also update the month. Ideally, Jan.
         calendarUpdated = true;
     }
     else if (network_month > current_month)
     {
         Serial.print("Updating year from: ");
-        Serial.print(current_year);
+        Serial.print(current_month);
         Serial.print(" to: ");
-        Serial.println(network_year);
+        Serial.println(network_month);
 
         current_month = network_month;
         calendarUpdated = true;
