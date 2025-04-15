@@ -177,71 +177,12 @@ void setup()
 
 void loop()
 {
-    static char result_PMS[255] = {};
     unsigned sum_send_time = 0;
     act_milli = millis();
     send_now = act_milli - starttime > sending_intervall_ms;
     if (act_milli - last_read_pms > sampling_interval)
     {
-        pms.read();
-        if (pms) // Successfull read
-        {
-
-            char read_time[32];
-            String datetime = "";
-
-            last_read_pms = millis();
-            // print the results
-            printPM_values();
-
-            if (getNetworkTime(read_time))
-            {
-                datetime = extractDateTime(String(read_time));
-            }
-
-            if (datetime == "")
-            {
-                Serial.println("Datetime is empty...discarding data point");
-            }
-            else
-            {
-                updateCalendarFromNetworkTime(); // In case we roll into a new year or month.
-
-                if (sensor_data_log_count < MAX_PAYLOADS)
-                {
-                    // Add values to JSON
-                    memset(result_PMS, 0, 255);
-
-                    char PM_data[255] = {};
-                    // add_Value2Json(PM_data, "PM1", pms.pm01);
-                    // add_Value2Json(PM_data, "PM2", pms.pm25);
-                    // add_Value2Json(PM_data, "PM10", pms.pm10);
-                    add_Value2Json(PM_data, "P0", pms.pm01);
-                    add_Value2Json(PM_data, "P1", pms.pm25);
-                    add_Value2Json(PM_data, "P2", pms.pm10);
-
-                    generateJSON_payload(result_PMS, PM_data, datetime.c_str(), SensorAPN_PIN::PMS);
-
-                    Serial.print("result_PMS JSON: ");
-                    Serial.println(result_PMS);
-
-                    // Store in payload sensor data buffer
-
-                    strcat(sensor_data[sensor_data_log_count], result_PMS);
-                    Serial.print("Sensor data: ");
-                    Serial.println(sensor_data[sensor_data_log_count]);
-                    sensor_data_log_count++;
-                }
-                else
-                {
-                    Serial.println("Sensor data log count exceeded");
-                }
-            }
-        }
-        else // something went wrong
-        {
-            printPM_Error();
-        }
+        getPMSREADINGS();
     }
 
     if (send_now)
@@ -292,6 +233,75 @@ void loop()
         }
 
         starttime = millis();
+    }
+}
+
+void getPMSREADINGS()
+{
+    // pms.wake_up();
+    // delay(30000); // wait for 30 seconds to get a reading
+    // pms.request_reading();
+    // delay(10000); // wait for 10 seconds to get a reading
+    // pms.sleep();
+    static char result_PMS[255] = {};
+    pms.read();
+    if (pms) // Successfull read
+    {
+
+        char read_time[32];
+        String datetime = "";
+
+        last_read_pms = millis();
+        // print the results
+        printPM_values();
+
+        if (getNetworkTime(read_time))
+        {
+            datetime = extractDateTime(String(read_time));
+        }
+
+        if (datetime == "")
+        {
+            Serial.println("Datetime is empty...discarding data point");
+        }
+        else
+        {
+            updateCalendarFromNetworkTime(); // In case we roll into a new year or month.
+
+            if (sensor_data_log_count < MAX_PAYLOADS)
+            {
+                // Add values to JSON
+                memset(result_PMS, 0, 255);
+
+                char PM_data[255] = {};
+                // add_Value2Json(PM_data, "PM1", pms.pm01);
+                // add_Value2Json(PM_data, "PM2", pms.pm25);
+                // add_Value2Json(PM_data, "PM10", pms.pm10);
+                add_Value2Json(PM_data, "P0", pms.pm01);
+                add_Value2Json(PM_data, "P1", pms.pm25);
+                add_Value2Json(PM_data, "P2", pms.pm10);
+
+                generateJSON_payload(result_PMS, PM_data, datetime.c_str(), SensorAPN_PIN::PMS);
+
+                Serial.print("result_PMS JSON: ");
+                Serial.println(result_PMS);
+
+                // Store in payload sensor data buffer
+
+                strcat(sensor_data[sensor_data_log_count], result_PMS);
+                Serial.print("Sensor data: ");
+                Serial.println(sensor_data[sensor_data_log_count]);
+                sensor_data_log_count++;
+            }
+            else
+            {
+                Serial.println("Sensor data log count exceeded");
+            }
+        }
+    }
+    else // something went wrong
+    {
+        printPM_Error();
     }
 }
 
