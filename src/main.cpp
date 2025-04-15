@@ -49,7 +49,7 @@ void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
 void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value);
-void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin);
+void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
 String extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
@@ -245,7 +245,7 @@ void getPMSREADINGS()
     // pms.request_reading();
     // delay(10000); // wait for 10 seconds to get a reading
     // pms.sleep();
-    static char result_PMS[255] = {};
+    char result_PMS[255] = {};
     pms.read();
     if (pms) // Successfull read
     {
@@ -273,17 +273,15 @@ void getPMSREADINGS()
             if (sensor_data_log_count < MAX_PAYLOADS)
             {
                 // Add values to JSON
-                memset(result_PMS, 0, 255);
-
-                // char PM_data[255] = {};
                 JsonDocument PM_data_doc;
                 JsonArray PM_data = PM_data_doc.to<JsonArray>();
+
                 add_value2JSON_array(PM_data, "P0", pms.pm01);
                 add_value2JSON_array(PM_data, "P1", pms.pm25);
                 add_value2JSON_array(PM_data, "P2", pms.pm10);
 
                 // serializeJsonPretty(PM_data_doc, Serial);
-                generateJSON_payload(result_PMS, PM_data_doc, datetime.c_str(), SensorAPN_PIN::PMS);
+                generateJSON_payload(result_PMS, PM_data_doc, datetime.c_str(), SensorAPN_PIN::PMS, sizeof(result_PMS));
 
                 Serial.print("\nresult_PMS JSON: ");
                 Serial.println(result_PMS);
@@ -388,7 +386,7 @@ void printPM_Error()
     }
 }
 
-void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin)
+void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size)
 {
     JsonDocument payload;
 
@@ -414,7 +412,7 @@ void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, 
         break;
     }
 
-    serializeJson(payload, res, 255);
+    serializeJson(payload, res, size);
 }
 
 String extractDateTime(String datetimeStr)
@@ -680,7 +678,6 @@ void getMonthName(int month_num, char *month)
 
 void readSendDelete(const char *datafile)
 {
-
     bool EndOfFile = false;
     String data;
     const char *tempFile = "/temp_sensor_payload.txt";
