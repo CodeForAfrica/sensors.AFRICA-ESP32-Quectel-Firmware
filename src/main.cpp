@@ -3,6 +3,7 @@
 #include "SD_handler.h"
 #include "GSM_handler.h"
 #include <TimeLib.h>
+#include <ArduinoJson.h>
 
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 unsigned long act_milli;
@@ -44,10 +45,11 @@ enum SensorAPN_PIN
     DHT = 7
 };
 
+void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
-static void add_Value2Json(char *res, const char *value_type, uint16_t &value);
-void generateJSON_payload(char *res, char *data, const char *timestamp, SensorAPN_PIN pin);
+void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value);
+void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
 String extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
@@ -273,17 +275,17 @@ void getPMSREADINGS()
                 // Add values to JSON
                 memset(result_PMS, 0, 255);
 
-                char PM_data[255] = {};
-                // add_Value2Json(PM_data, "PM1", pms.pm01);
-                // add_Value2Json(PM_data, "PM2", pms.pm25);
-                // add_Value2Json(PM_data, "PM10", pms.pm10);
-                add_Value2Json(PM_data, "P0", pms.pm01);
-                add_Value2Json(PM_data, "P1", pms.pm25);
-                add_Value2Json(PM_data, "P2", pms.pm10);
+                // char PM_data[255] = {};
+                JsonDocument PM_data_doc;
+                JsonArray PM_data = PM_data_doc.to<JsonArray>();
+                add_value2JSON_array(PM_data, "P0", pms.pm01);
+                add_value2JSON_array(PM_data, "P1", pms.pm25);
+                add_value2JSON_array(PM_data, "P2", pms.pm10);
 
-                generateJSON_payload(result_PMS, PM_data, datetime.c_str(), SensorAPN_PIN::PMS);
+                // serializeJsonPretty(PM_data_doc, Serial);
+                generateJSON_payload(result_PMS, PM_data_doc, datetime.c_str(), SensorAPN_PIN::PMS);
 
-                Serial.print("result_PMS JSON: ");
+                Serial.print("\nresult_PMS JSON: ");
                 Serial.println(result_PMS);
 
                 // Store in payload sensor data buffer
@@ -386,58 +388,33 @@ void printPM_Error()
     }
 }
 
-void add_Value2Json(char *res, const char *value_type, uint16_t &value)
+void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin)
 {
-    char value_str[64] = {}; // ! make sure this is big enough
-    char char_value[18];
-    // memset(value_str, 0, 64);
-    itoa(value, char_value, 10);
+    JsonDocument payload;
 
-    // Serial.print("Checking if value_str has something: ");
-    // Serial.println(value_str);
-    // Serial.println(value_str[0], HEX);
-    // Serial.println(value_str[1], HEX);
+    payload["software_version"] = "NRZ-2020-129";
+    payload["timestamp"] = timestamp;
+    payload["sensordatavalues"] = data;
 
-    strcat(value_str, "{\"value_type\":\"");
-    strcat(value_str, value_type); // add value type
-    strcat(value_str, "\",\"value\":\"");
-    strcat(value_str, char_value); // add value
-    strcat(value_str, "\"},");     // last part with trailing comma
-
-    strcat(res, value_str);
-
-    // Serial.print("JSON value: ");
-    // Serial.println(value_str);
-}
-
-void generateJSON_payload(char *res, char *data, const char *timestamp, SensorAPN_PIN pin)
-{
-    strcpy(res, "{\"software_version\": \"NRZ-2020-129\",");
-    strcat(res, "\"timestamp\": \"");
-    strcat(res, timestamp);
-    strcat(res, "\",");
-    strcat(res, "\"sensordatavalues\":[");
-    strcat(res, data);
-
-    char sensor_type[24] = ",\"type\":\"";
+    // char sensor_type[24] = ",\"type\":\"";
     switch (pin)
     {
     case SensorAPN_PIN::PMS:
-        strcat(res, "PMS\"");
+        // strcat(res, "PMS\"");
+        payload["sensor_type"] = "PMS";
+        payload["APN_PIN"] = pin;
         break;
     case SensorAPN_PIN::DHT:
-        strcat(res, "DHT\"");
+        // strcat(res, "DHT\"");
+        payload["sensor_type"] = "DHT";
+        payload["APN_PIN"] = pin;
         break;
     default:
         Serial.println("Unsupported sensor pin");
         break;
     }
-    char *trailing_comma = strrchr(res, ',');
-    if (trailing_comma)
-    {
-        res[trailing_comma - res] = '\0';
-    }
-    strcat(res, "]}");
+
+    serializeJson(payload, res, 255);
 }
 
 String extractDateTime(String datetimeStr)
@@ -774,4 +751,12 @@ void initCalenderFromNetworkTime()
         current_year = network_year;
         current_month = network_month;
     }
+}
+
+void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value)
+{
+    JsonDocument doc;
+    doc["value_type"] = key;
+    doc["value"] = value;
+    arr.add(doc);
 }
