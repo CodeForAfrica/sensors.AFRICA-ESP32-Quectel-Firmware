@@ -50,6 +50,7 @@ void printPM_values();
 void printPM_Error();
 void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value);
 void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size);
+bool validateJson(const char *input);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
 String extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
@@ -697,13 +698,17 @@ void readSendDelete(const char *datafile)
 
         data = readLine(SD, datafile, EndOfFile, false);
         // readline continously
+        if (!validateJson(data.c_str()))
+        {
+            Serial.println("Invalid JSON data: " + data);
+            continue;
+        }
+
         if (data != "")
         {
-
-            // check type of payload //! for now we assume it's only PM data
-            // Todo: validate JSON
             // Todo: check senor type to determine which API pin to use
             // Attempt send payload
+            // Serial.println("Attempting to send data from SD card: " + data);
             if (!sendData(data.c_str(), PMS_API_PIN, HOST_CFA, URL_CFA))
             {
                 // store data in temp file
@@ -764,4 +769,10 @@ void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value)
     doc["value_type"] = key;
     doc["value"] = value;
     arr.add(doc);
+}
+
+bool validateJson(const char *input)
+{
+    JsonDocument doc, filter;
+    return deserializeJson(doc, input, DeserializationOption::Filter(filter)) == DeserializationError::Ok;
 }
