@@ -680,7 +680,7 @@ bool getNetworkTime(char *time)
 
     char AT_response[64];
     size_t AT_res_size = sizeof(AT_response);
-    char time_buff[23];
+    char time_buff[23] = {};
     uint8_t retries = 0;
 
     get_raw_response("AT+CCLK?\0", AT_response, AT_res_size, false, 5000);
@@ -692,8 +692,15 @@ bool getNetworkTime(char *time)
         delay(1000);
     }
 
-    if (strlen(time_buff) > 0)
+    String time_str = String(time_buff);
+
+    if (time_str.charAt(2) == '/' && time_str.charAt(5) == '/' && time_str.charAt(8) == ',' && time_str.charAt(11) == ':' && time_str.charAt(14) == ':')
     {
+
+        // Serial.println("Time length: " + (String)strlen(time_buff));
+        // Serial.println("Time buffer: " + (String)time_buff);
+        // Serial.println("Time buffer size: " + (String)sizeof(time_buff));
+
         strcpy(time, time_buff);
         return true;
     }

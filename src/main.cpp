@@ -442,6 +442,14 @@ String extractDateTime(String datetimeStr)
     int _minute = datetimeStr.substring(12, 14).toInt();
     int _second = datetimeStr.substring(15, 17).toInt();
 
+    // perform sanity check on the parsed values
+    if (_year < 0 || _year > 99 || _month < 1 || _month > 12 || _day < 1 || _day > 31 ||
+        _hour < 0 || _hour > 23 || _minute < 0 || _minute > 59 || _second < 0 || _second > 59)
+    {
+        Serial.println("Invalid date/time values");
+        return "";
+    }
+
 #if defined(QUECTEL)
 
     // time zone = indicates the difference, expressed in quarters of an hour, between the local time and GMT; range: -48 to +56)
