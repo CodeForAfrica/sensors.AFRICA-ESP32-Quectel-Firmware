@@ -560,7 +560,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
 
         QUECTEL_POST(gprs_url, Quectel_headers, 3, data, strlen(data), statuscode);
 
-        if (statuscode != 200 || statuscode != 201)
+        if (!(statuscode == 200 || statuscode == 201))
         {
             return false;
         }
