@@ -116,6 +116,14 @@ String readLine(fs::FS &fs, const char *path, int &next_char, int &last_read_ind
 
     File file = fs.open(path);
 
+    if (!file)
+    {
+        Serial.println("Failed to open file to read line");
+        return "";
+    }
+
+    file.seek(from);
+
     while (file.available())
     {
         c = file.read();
@@ -131,7 +139,7 @@ String readLine(fs::FS &fs, const char *path, int &next_char, int &last_read_ind
     }
 
     last_read_index = file.position();
-    file.seek((last_read_index), SeekMode::SeekSet);
+    // file.seek((last_read_index), SeekMode::SeekSet);
     next_char = file.read();
 
     if (closefile)

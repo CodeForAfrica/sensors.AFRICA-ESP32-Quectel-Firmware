@@ -705,7 +705,7 @@ void readSendDelete(const char *datafile)
 
         if (next_byte == -1) // End of file reached
         {
-            break;
+            Serial.println("End of file read");
         }
 
         if (!validateJson(data.c_str()))
