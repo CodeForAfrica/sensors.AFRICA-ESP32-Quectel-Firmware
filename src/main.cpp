@@ -687,17 +687,27 @@ void getMonthName(int month_num, char *month)
 
 void readSendDelete(const char *datafile)
 {
-    bool EndOfFile = false;
     String data;
     const char *tempFile = "/temp_sensor_payload.txt";
 
     Serial.println("Attempting to send data that previoudly failed to send.");
 
-    while (!EndOfFile)
+    int last_readindex = 0;
+    int read_from = 0;
+    int next_byte = -1;
+
+    // readline continously
+    do
     {
 
-        data = readLine(SD, datafile, EndOfFile, false);
-        // readline continously
+        data = readLine(SD, datafile, next_byte, last_readindex, read_from, false);
+        read_from = last_readindex;
+
+        if (next_byte == -1) // End of file reached
+        {
+            break;
+        }
+
         if (!validateJson(data.c_str()))
         {
             Serial.println("Invalid JSON data: " + data);
@@ -715,7 +725,7 @@ void readSendDelete(const char *datafile)
                 appendFile(SD, tempFile, data.c_str(), false); //? does FS lib support opening multiple files? Otherwise close the previously opened file.
             }
         }
-    }
+    } while (next_byte != -1);
 
     updateFileContents(SD, datafile, tempFile);
 

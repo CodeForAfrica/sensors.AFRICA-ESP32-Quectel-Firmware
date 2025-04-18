@@ -109,19 +109,12 @@ bool SDattached()
     return true;
 }
 
-String readLine(fs::FS &fs, const char *path, bool &EndOfFileMarker, bool closefile = true)
+String readLine(fs::FS &fs, const char *path, int &next_char, int &last_read_index, int from = 0, bool closefile = true)
 {
     String line = "";
     char c;
 
     File file = fs.open(path);
-
-    if (file.peek() == -1)
-    {
-        EndOfFileMarker = true;
-        Serial.println("End of file reached");
-        return "";
-    }
 
     while (file.available())
     {
@@ -136,6 +129,11 @@ String readLine(fs::FS &fs, const char *path, bool &EndOfFileMarker, bool closef
             line += c;
         }
     }
+
+    last_read_index = file.position();
+    file.seek((last_read_index), SeekMode::SeekSet);
+    next_char = file.read();
+
     if (closefile)
     {
         file.close();
