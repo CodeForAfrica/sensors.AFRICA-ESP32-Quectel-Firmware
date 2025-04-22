@@ -720,7 +720,7 @@ void readSendDelete(const char *datafile)
             if (!sendData(data.c_str(), PMS_API_PIN, HOST_CFA, URL_CFA))
             {
                 // store data in temp file
-                appendFile(SD, tempFile, data.c_str(), false); //? does FS lib support opening multiple files? Otherwise close the previously opened file.
+                appendFile(SD, tempFile, data.c_str(), true); //? does FS lib support opening multiple files? Otherwise close the previously opened file.
             }
         }
     } while (next_byte != -1);
