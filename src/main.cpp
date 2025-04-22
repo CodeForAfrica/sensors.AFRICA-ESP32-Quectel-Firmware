@@ -8,16 +8,19 @@
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 unsigned long act_milli;
 unsigned long last_read_pms = 0;
-int sampling_interval = 30000;
+// int sampling_interval = 30000;
+int sampling_interval = 2 * 60 * 1000; // 2 minutes
 unsigned long starttime = 0;
-unsigned sending_intervall_ms = 1 * 60 * 1000; // 145000;
+unsigned sending_intervall_ms = 30 * 60 * 1000; // 145000;
 unsigned long count_sends = 0;
 
 uint8_t sensor_data_log_count = 0;
+uint8_t sensor_csv_data_log_count = 0;
 const int MAX_PAYLOADS = 48;
+const int MAX_CSV_PAYLOADS = 48 * 5;
 char sensor_data[MAX_PAYLOADS][255];
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
-char csv_data[MAX_PAYLOADS][255] = {};
+char csv_data[MAX_CSV_PAYLOADS][255] = {};
 
 bool SD_Attached = false;
 
@@ -30,7 +33,7 @@ int SD_CS = 39;
 char ROOT_DIR[24] = {};
 char BASE_SENSORS_DATA_DIR[20] = "/SENSORSDATA";
 char CURRENT_SENSORS_DATA_DIR[128] = {};
-char SENSORS_DATA_PATH[128] = {};
+char SENSORS_JSON_DATA_PATH[128] = {};
 char SENSORS_CSV_DATA_PATH[128] = {};
 char SENSORS_FAILED_DATA_SEND_STORE_FILE[40] = "failed_send_payloads.txt";
 char SENSORS_FAILED_DATA_SEND_STORE_PATH[128] = {};
@@ -190,7 +193,7 @@ void loop()
         {
             if (strlen(sensor_data[i]) != 0)
             {
-                appendFile(SD, SENSORS_DATA_PATH, sensor_data[i]);
+                appendFile(SD, SENSORS_JSON_DATA_PATH, sensor_data[i]);
             }
         }
 
@@ -282,7 +285,6 @@ void getPMSREADINGS()
                 Serial.println(result_PMS);
 
                 // Store in payload sensor data buffer
-
                 strcat(sensor_data[sensor_data_log_count], result_PMS);
                 Serial.print("Sensor data: ");
                 Serial.println(sensor_data[sensor_data_log_count]);
@@ -291,6 +293,34 @@ void getPMSREADINGS()
             else
             {
                 Serial.println("Sensor data log count exceeded");
+            }
+
+            // Generate CSV data
+            if (sensor_csv_data_log_count < MAX_CSV_PAYLOADS)
+            {
+
+                snprintf(csv_data[sensor_csv_data_log_count], sizeof(csv_data[sensor_csv_data_log_count]), "%s,%s,%d,ug/m3,PMS", datetime.c_str(), "PM0", pms.pm01);
+                snprintf(csv_data[sensor_csv_data_log_count], sizeof(csv_data[sensor_csv_data_log_count]), "%s,%s,%d,ug/m3,PMS", datetime.c_str(), "PM2.5", pms.pm25);
+                snprintf(csv_data[sensor_csv_data_log_count], sizeof(csv_data[sensor_csv_data_log_count]), "%s,%s,%d,ug/m3,PMS", datetime.c_str(), "PM10", pms.pm10);
+                Serial.print("Sensor data: ");
+                Serial.println(csv_data[sensor_csv_data_log_count]);
+                sensor_csv_data_log_count++;
+            }
+            else
+            {
+                Serial.println("Sensor CSV data log count exceeded.. Appending to file");
+                for (int i = 0; i < sensor_csv_data_log_count; i++)
+                {
+
+                    if (strlen(csv_data[i]) != 0)
+                    {
+                        // Append to file for sending later
+                        appendFile(SD, SENSORS_CSV_DATA_PATH, csv_data[i]);
+
+                        memset(csv_data[i], '\0', 255);
+                    }
+                }
+                sensor_csv_data_log_count = 0;
             }
         }
     }
@@ -603,15 +633,15 @@ void init_SD_loggers()
         return;
     }
 
-    memset(SENSORS_DATA_PATH, 0, sizeof(SENSORS_DATA_PATH));
+    memset(SENSORS_JSON_DATA_PATH, 0, sizeof(SENSORS_JSON_DATA_PATH));
     char month[3] = {};
     getMonthName(current_month, month);
 
     // Update sensors data path
-    strcpy(SENSORS_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
-    strcat(SENSORS_DATA_PATH, "/");
-    strcat(SENSORS_DATA_PATH, month);
-    strcat(SENSORS_DATA_PATH, ".txt");
+    strcpy(SENSORS_JSON_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
+    strcat(SENSORS_JSON_DATA_PATH, "/");
+    strcat(SENSORS_JSON_DATA_PATH, month);
+    strcat(SENSORS_JSON_DATA_PATH, ".txt");
 
     // Update sensors data path
     strcpy(SENSORS_CSV_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
@@ -621,9 +651,9 @@ void init_SD_loggers()
 
     int _from = 0;
     int _to = 0;
-    if (readLine(SD, SENSORS_DATA_PATH, _to, _from, true) != (String)(csv_header))
+    if (readLine(SD, SENSORS_JSON_DATA_PATH, _to, _from, true) != (String)csv_header)
     {
-        // writeFile(SD, SENSORS_DATA_PATH, csv_header);
+        // writeFile(SD, SENSORS_JSON_DATA_PATH, csv_header);
         appendFile(SD, SENSORS_CSV_DATA_PATH, csv_header);
     }
 
@@ -635,7 +665,7 @@ void init_SD_loggers()
     strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, "\0");
 
     // write files to SD
-    // writeFile(SD, SENSORS_DATA_PATH, "");                   // create file if it does not exist
+    // writeFile(SD, SENSORS_JSON_DATA_PATH, "");                   // create file if it does not exist
     // writeFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, ""); // create file if it does not exist
 
     // Debug runtime logger;
@@ -792,3 +822,16 @@ bool validateJson(const char *input)
     JsonDocument doc, filter;
     return deserializeJson(doc, input, DeserializationOption::Filter(filter)) == DeserializationError::Ok;
 }
+
+// void generateCSV_payload(char *res, const char *timestamp, const char *value_type, const char *value, const char *unit, const char *sensor_type)
+// {
+//     strcpy(res, timestamp);
+//     strcat(res, ",");
+//     strcat(res, value_type);
+//     strcat(res, ",");
+//     strcat(res, value);
+//     strcat(res, ",");
+//     strcat(res, unit);
+//     strcat(res, ",");
+//     strcat(res, sensor_type);
+// }
