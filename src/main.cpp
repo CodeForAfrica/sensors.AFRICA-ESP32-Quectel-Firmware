@@ -17,7 +17,6 @@ uint8_t sensor_data_log_count = 0;
 const int MAX_PAYLOADS = 48;
 char sensor_data[MAX_PAYLOADS][255];
 
-bool SD_MOUNT = false;
 bool SD_Attached = false;
 
 #define REASSIGN_PINS 1
@@ -151,31 +150,25 @@ void setup()
 
 // SD INIT
 #ifdef REASSIGN_PINS
-    Serial.print("Init SD ......");
-    delay(5000);
     SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-    if (!SD.begin(SD_CS))
+    if (SD_Init(SD_CS))
     {
 #else
-    if (!SD.begin())
+    if (SD_Init(-1))
     {
 #endif
-        Serial.println("Card Mount Failed");
-        SD_MOUNT = false;
-    }
 
-    else
-    {
-        SD_MOUNT = true;
-    }
-    SD_Attached = SDattached();
+        SD_Attached = SDattached();
 
-    if (SD_Attached)
-    {
-        init_SD_loggers();
+        if (SD_Attached)
+        {
+            init_SD_loggers();
+        }
     }
 
     starttime = millis();
+    while (1)
+        ;
 }
 
 void loop()

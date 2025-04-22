@@ -2,6 +2,42 @@
 #include "SD.h"
 #include "SPI.h"
 
+bool SD_Init(int CS_PIN = -1)
+{
+    bool SD_MOUNT = false;
+    int timeout = 10;
+    Serial.println("Initializing SD card...");
+
+    while (timeout > 0)
+    {
+        if (CS_PIN == -1)
+        {
+            SD_MOUNT = SD.begin();
+        }
+        else
+        {
+            SD_MOUNT = SD.begin(CS_PIN);
+        }
+
+        if (SD_MOUNT)
+        {
+            Serial.println("SD card mounted successfully");
+            break;
+        }
+        else
+        {
+            Serial.print(".");
+        }
+        delay(1000);
+        timeout--;
+    }
+    if (!SD_MOUNT)
+    {
+        Serial.println("SD card mount failed");
+    }
+    return SD_MOUNT;
+}
+
 void createDir(fs::FS &fs, const char *path)
 {
     Serial.printf("Creating Dir: %s\n", path);
