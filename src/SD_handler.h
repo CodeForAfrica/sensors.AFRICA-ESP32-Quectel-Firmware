@@ -109,7 +109,7 @@ bool SDattached()
     return true;
 }
 
-String readLine(fs::FS &fs, const char *path, int &next_char, int &last_read_index, int from = 0, bool closefile = true)
+String readLine(fs::FS &fs, const char *path, int &next_char, int &from, bool closefile = true)
 {
     String line = "";
     char c;
@@ -138,7 +138,7 @@ String readLine(fs::FS &fs, const char *path, int &next_char, int &last_read_ind
         }
     }
 
-    last_read_index = file.position();
+    from = file.position();
     // file.seek((last_read_index), SeekMode::SeekSet);
     next_char = file.read();
 

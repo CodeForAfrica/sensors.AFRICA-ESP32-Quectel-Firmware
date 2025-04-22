@@ -692,16 +692,14 @@ void readSendDelete(const char *datafile)
 
     Serial.println("Attempting to send data that previoudly failed to send.");
 
-    int last_readindex = 0;
-    int read_from = 0;
     int next_byte = -1;
+    int next_line_index = 0;
 
     // readline continously
     do
     {
 
-        data = readLine(SD, datafile, next_byte, last_readindex, read_from, false);
-        read_from = last_readindex;
+        data = readLine(SD, datafile, next_byte, next_line_index, false);
 
         if (next_byte == -1) // End of file reached
         {
