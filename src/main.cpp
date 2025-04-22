@@ -16,6 +16,8 @@ unsigned long count_sends = 0;
 uint8_t sensor_data_log_count = 0;
 const int MAX_PAYLOADS = 48;
 char sensor_data[MAX_PAYLOADS][255];
+char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
+char csv_data[MAX_PAYLOADS][255] = {};
 
 bool SD_Attached = false;
 
@@ -29,6 +31,7 @@ char ROOT_DIR[24] = {};
 char BASE_SENSORS_DATA_DIR[20] = "/SENSORSDATA";
 char CURRENT_SENSORS_DATA_DIR[128] = {};
 char SENSORS_DATA_PATH[128] = {};
+char SENSORS_CSV_DATA_PATH[128] = {};
 char SENSORS_FAILED_DATA_SEND_STORE_FILE[40] = "failed_send_payloads.txt";
 char SENSORS_FAILED_DATA_SEND_STORE_PATH[128] = {};
 
@@ -167,8 +170,6 @@ void setup()
     }
 
     starttime = millis();
-    while (1)
-        ;
 }
 
 void loop()
@@ -611,6 +612,20 @@ void init_SD_loggers()
     strcat(SENSORS_DATA_PATH, "/");
     strcat(SENSORS_DATA_PATH, month);
     strcat(SENSORS_DATA_PATH, ".txt");
+
+    // Update sensors data path
+    strcpy(SENSORS_CSV_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
+    strcat(SENSORS_CSV_DATA_PATH, "/");
+    strcat(SENSORS_CSV_DATA_PATH, month);
+    strcat(SENSORS_CSV_DATA_PATH, ".csv");
+
+    int _from = 0;
+    int _to = 0;
+    if (readLine(SD, SENSORS_DATA_PATH, _to, _from, true) != (String)(csv_header))
+    {
+        // writeFile(SD, SENSORS_DATA_PATH, csv_header);
+        appendFile(SD, SENSORS_CSV_DATA_PATH, csv_header);
+    }
 
     // Init logger paths
     strcpy(SENSORS_FAILED_DATA_SEND_STORE_PATH, ROOT_DIR);
