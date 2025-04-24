@@ -11,9 +11,8 @@ unsigned long last_read_pms = 0;
 int sampling_interval = 30000;
 // int sampling_interval = 2 * 60 * 1000; // 2 minutes
 unsigned long starttime = 0;
-unsigned sending_intervall_ms = 10 * 60 * 1000; // 145000;
+unsigned sending_intervall_ms = 30 * 60 * 1000; // 145000;
 unsigned long count_sends = 0;
-
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
 
 bool SD_Attached = false;
@@ -80,6 +79,13 @@ void memoryDataLog(LOGGER &logger, const char *data);
 void fileDataLog(LOGGER &logger);
 void resetLogger(LOGGER &logger);
 void sendFromMemoryLog(LOGGER &logger);
+
+template <typename T>
+void generateCSV_payload(char *res, size_t res_size, const char *timestamp, const char *value_type, T value, const char *unit, const char *sensor_type)
+{
+    // ToDo: check if the value is a string or number (int, float, etc.)
+    snprintf(res, res_size, "%s,%s,%d,%s,%s", timestamp, value_type, value, unit, sensor_type);
+}
 
 enum Month
 {
@@ -273,11 +279,12 @@ void getPMSREADINGS()
             memoryDataLog(JSON_PAYLOAD_LOGGER, result_PMS);
 
             // Generate CSV data and log to memory
-            snprintf(result_PMS, sizeof(result_PMS), "%s,%s,%d,ug/m3,PMS", datetime.c_str(), "PM0", pms.pm01);
+
+            generateCSV_payload(result_PMS, sizeof(result_PMS), datetime.c_str(), "PM0", pms.pm01, "ug/m3", "PMS");
             memoryDataLog(CSV_PAYLOAD_LOGGER, result_PMS);
-            snprintf(result_PMS, sizeof(result_PMS), "%s,%s,%d,ug/m3,PMS", datetime.c_str(), "PM2.5", pms.pm25);
+            generateCSV_payload(result_PMS, sizeof(result_PMS), datetime.c_str(), "PM2.5", pms.pm25, "ug/m3", "PMS");
             memoryDataLog(CSV_PAYLOAD_LOGGER, result_PMS);
-            snprintf(result_PMS, sizeof(result_PMS), "%s,%s,%d,ug/m3,PMS", datetime.c_str(), "PM10", pms.pm10);
+            generateCSV_payload(result_PMS, sizeof(result_PMS), datetime.c_str(), "PM10", pms.pm10, "ug/m3", "PMS");
             memoryDataLog(CSV_PAYLOAD_LOGGER, result_PMS);
         }
     }
@@ -820,6 +827,7 @@ void memoryDataLog(LOGGER &logger, const char *data)
 
 void fileDataLog(LOGGER &logger)
 {
+    Serial.println("Logging data to file: " + String(logger.path));
     for (int i = 0; i < logger.MAX_ENTRIES; i++)
     {
         if (strlen(logger.DATA_STORE[i]) != 0)
@@ -855,15 +863,3 @@ void sendFromMemoryLog(LOGGER &logger)
     //? call resetLogger(logger) to reset the logger
     //? or just clear the memory
 }
-// void generateCSV_payload(char *res, const char *timestamp, const char *value_type, const char *value, const char *unit, const char *sensor_type)
-// {
-//     strcpy(res, timestamp);
-//     strcat(res, ",");
-//     strcat(res, value_type);
-//     strcat(res, ",")
-//     strcat(res, value);
-//     strcat(res, ",");
-//     strcat(res, unit);
-//     strcat(res, ",");
-//     strcat(res, sensor_type);
-// }
