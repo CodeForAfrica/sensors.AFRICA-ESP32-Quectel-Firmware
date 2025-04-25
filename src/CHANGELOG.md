@@ -15,3 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   
 ### Removed
  - Deprecated add_Value2Json function
+
+## 2025-04-24
+
+### Added
+ - Generic structure for data loggers
+ - CSV data generation and logging
+
+### Improvements
+ - JSON payload validation
+ - Format failed-to-send-payloads text file with `/r/n`
+ - Breakdown functionalities for logging and reading data.
