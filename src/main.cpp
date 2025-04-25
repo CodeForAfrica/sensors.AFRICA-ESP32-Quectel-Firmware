@@ -1,3 +1,49 @@
+/**
+ * @file main.cpp
+ * @brief Implementation of an ESP32-based sensor data logger and transmitter.
+ *
+ * This program is designed to collect data from sensors (e.g., PMS5003), log the data in memory and on an SD card,
+ * and transmit the data to a remote server using GSM/GPRS. The program supports JSON and CSV data formats for logging
+ * and transmission. It also handles network time synchronization and manages failed data transmissions by retrying
+ * them later.
+ *
+ * @details
+ * - The program initializes the PMS5003 sensor and GSM module (if available).
+ * - Data is collected at regular intervals and logged in memory or on an SD card.
+ * - Data is transmitted to a server at specified intervals.
+ * - Failed transmissions are stored and retried later.
+ * - The program uses the ArduinoJson library for JSON handling and the TimeLib library for time management.
+ * - SD card operations are performed using a custom file handling API.
+ *
+ * @note The program assumes the presence of specific hardware components, including an SD card module, PMS5003 sensor,
+ * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
+ *
+ * @author Gdieon Maina
+ * @date 2025-04-25
+ * @version 1.1.0
+ *
+ * @dependencies
+ * - ArduinoJson
+ * - TimeLib
+ * - PMserial
+ * - SD_handler
+ * - GSM_handler
+ *
+ * @hardware
+ * - ESP32 microcontroller
+ * - PMS5003 sensor
+ * - GSM module
+ * - SD card module
+ *
+ * @todo
+ * - Implement support for other network connections (e.g., WiFi, LoRa).
+ * - Improve JSON validation logic.
+ * - Add error handling for SD card operations.
+ * - Optimize memory usage for large data sets.
+ * - Improve time handling.
+ * - Improve power management for battery-operated devices.
+ */
+
 #include "global_configs.h"
 #include "PMserial.h"
 #include "SD_handler.h"
@@ -8,10 +54,9 @@
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 unsigned long act_milli;
 unsigned long last_read_pms = 0;
-int sampling_interval = 30000;
-// int sampling_interval = 2 * 60 * 1000; // 2 minutes
+int sampling_interval = 5 * 60 * 1000; // 5 minutes
 unsigned long starttime = 0;
-unsigned sending_intervall_ms = 30 * 60 * 1000; // 145000;
+unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
 
@@ -375,6 +420,15 @@ void printPM_Error()
     }
 }
 
+/**
+    @brief Generate JSON payload
+    @param res : buffer to store the generated JSON payload
+    @param data : JSON document containing the sensor data
+    @param timestamp : timestamp of the data
+    @param pin : sensor pin type as configured in the API
+    @param size : size of the buffer
+    @return : void
+**/
 void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size)
 {
     JsonDocument payload;
@@ -517,6 +571,14 @@ String formatDateTime(time_t t, String timezone)
 /*****************************************************************
  * send data to rest api                                         *
  *****************************************************************/
+/**
+    @brief: Send data to the server
+    @param data : JSON payload to send
+    @param _pin : pin number of the sensor as configured in the API
+    @param host : host name of the server
+    @param url : url path to send the data
+    @return: true if data is sent successfully, false otherwise
+**/
 bool sendData(const char *data, const int _pin, const char *host, const char *url)
 {
     // unsigned long start_send = millis();
@@ -646,9 +708,12 @@ void init_SD_loggers()
     // Debug runtime logger;
 }
 
-/// @brief convert number of month to name
-/// @param month_num : range from 1 to 12
-/// @param month : name of the month
+/**
+    @brief convert number of month to name
+    @param month_num : range from 1 to 12
+    @param month : name of the month
+    @return : void
+**/
 void getMonthName(int month_num, char *month)
 {
     switch (month_num)
@@ -698,6 +763,11 @@ void getMonthName(int month_num, char *month)
     }
 }
 
+/// @brief : Read data from SD card and send it to the server
+/// @param datafile : file name to read from
+/// @return : void
+/// @note : The function will read the data from the file and send it to the server. If the send fails, the data will be appended to a temporary file for later sending.
+/// @note : The function will also update the file contents to remove the data that was sent successfully.
 void readSendDelete(const char *datafile)
 {
     String data;
@@ -784,6 +854,13 @@ void initCalenderFromNetworkTime()
     }
 }
 
+/**
+    @brief Add value to JSON array
+    @param arr : JSON array to add the value to
+    @param key : key for the value
+    @param value : value to add
+    @return : void
+**/
 void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value)
 {
     JsonDocument doc;
@@ -792,12 +869,25 @@ void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value)
     arr.add(doc);
 }
 
+/**
+    @brief Validate JSON data
+    @param input : JSON data to validate
+    @return : true if valid, false otherwise
+    @note : //! This function is not full proof. Raw strings that don't look like incomplete or empty JSON are validated.
+**/
 bool validateJson(const char *input)
 {
     JsonDocument doc, filter;
     return deserializeJson(doc, input, DeserializationOption::Filter(filter)) == DeserializationError::Ok;
 }
 
+/**
+    @brief Log data to memory
+    @param logger : logger to log the data to
+    @param data : data to log
+    @return : void
+    @note : The function will log the data to the logger. If the logger is full, it will append the data to a file.
+**/
 void memoryDataLog(LOGGER &logger, const char *data)
 {
 
@@ -825,6 +915,12 @@ void memoryDataLog(LOGGER &logger, const char *data)
     }
 }
 
+/**
+    @brief Log data to file
+    @param logger : logger to log the data to
+    @return : void
+    @note : The function will log the data to the file. If the file is full, it will append the data to a new file.
+**/
 void fileDataLog(LOGGER &logger)
 {
     Serial.println("Logging data to file: " + String(logger.path));
@@ -837,6 +933,12 @@ void fileDataLog(LOGGER &logger)
     }
 }
 
+/**
+    @brief Reset logger
+    @param logger : logger to reset
+    @return : void
+    @note : The function will reset the logger. It will clear the data store and set the log count to 0.
+**/
 void resetLogger(LOGGER &logger)
 {
     logger.log_count = 0;
@@ -844,6 +946,12 @@ void resetLogger(LOGGER &logger)
     //? or this logger.DATA_STORE = {};
 }
 
+/**
+    @brief Send data from memory loggers
+    @param logger : logger to send data from
+    @return : void
+    @note : The function will send the data from the logger. If the send fails, the data will be appended to a file for later sending.
+**/
 void sendFromMemoryLog(LOGGER &logger)
 {
     for (int i = 0; i < logger.log_count; i++)
