@@ -2,6 +2,42 @@
 #include "SD.h"
 #include "SPI.h"
 
+bool SD_Init(int CS_PIN = -1)
+{
+    bool SD_MOUNT = false;
+    int timeout = 10;
+    Serial.println("Initializing SD card...");
+
+    while (timeout > 0)
+    {
+        if (CS_PIN == -1)
+        {
+            SD_MOUNT = SD.begin();
+        }
+        else
+        {
+            SD_MOUNT = SD.begin(CS_PIN);
+        }
+
+        if (SD_MOUNT)
+        {
+            Serial.println("SD card mounted successfully");
+            break;
+        }
+        else
+        {
+            Serial.print(".");
+        }
+        delay(1000);
+        timeout--;
+    }
+    if (!SD_MOUNT)
+    {
+        Serial.println("SD card mount failed");
+    }
+    return SD_MOUNT;
+}
+
 void createDir(fs::FS &fs, const char *path)
 {
     Serial.printf("Creating Dir: %s\n", path);
@@ -107,4 +143,58 @@ bool SDattached()
 
     Serial.printf("SD Card Size: %lluMB\n", SD.cardSize() / (1024 * 1024));
     return true;
+}
+
+String readLine(fs::FS &fs, const char *path, int &next_char, int &from, bool closefile = true)
+{
+    String line = "";
+    char c;
+
+    File file = fs.open(path);
+
+    if (!file)
+    {
+        Serial.println("Failed to open file to read line");
+        return "";
+    }
+
+    file.seek(from);
+
+    while (file.available())
+    {
+        c = file.read();
+        if (c == '\n')
+        {
+            break;
+        }
+        // Skip carriage return
+        if (c != '\r')
+        {
+            line += c;
+        }
+    }
+
+    from = file.position();
+    // file.seek((last_read_index), SeekMode::SeekSet);
+    next_char = file.read();
+
+    if (closefile)
+    {
+        file.close();
+    }
+
+    return line;
+}
+
+void updateFileContents(fs::FS &fs, const char *file_to_updated, const char *temp_file)
+{
+
+    fs.remove(file_to_updated);
+    fs.rename(temp_file, file_to_updated);
+}
+
+void closeFile(fs::FS &fs, const char *path)
+{
+    File file = fs.open(path);
+    file.close();
 }
