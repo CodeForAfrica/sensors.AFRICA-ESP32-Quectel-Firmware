@@ -173,6 +173,8 @@ void setup()
     Serial.println("Initializing PMS5003 sensor");
     init_memory_loggers();
     pms.init();
+    delay(2000);
+    pms.sleep();
 
     if (gsm_capable)
     {
@@ -292,16 +294,15 @@ void loop()
 
 void getPMSREADINGS()
 {
-    // pms.wake_up();
-    // delay(30000); // wait for 30 seconds to get a reading
-    // pms.request_reading();
-    // delay(10000); // wait for 10 seconds to get a reading
+    pms.wake();
+    delay(30000); // wait for 30 seconds warm-up to get an accurate reading
+
     // pms.sleep();
     char result_PMS[255] = {};
     pms.read();
     if (pms) // Successfull read
     {
-
+        pms.sleep();
         char read_time[32];
         String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
 
@@ -342,6 +343,7 @@ void getPMSREADINGS()
     }
     else // something went wrong
     {
+        pms.sleep();
         printPM_Error();
     }
 }
