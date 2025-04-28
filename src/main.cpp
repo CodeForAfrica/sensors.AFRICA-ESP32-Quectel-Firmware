@@ -50,6 +50,7 @@
 #include "GSM_handler.h"
 #include <TimeLib.h>
 #include <ArduinoJson.h>
+#include <ESP32Time.h>
 
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 unsigned long act_milli;
@@ -80,7 +81,15 @@ char esp_chipid[18] = {};
 
 bool send_now = false;
 
+ESP32Time RTC;
 char time_buff[32] = {};
+const char *ISO_time_format = "%Y-%m-%dT%H:%M:%S"; // ISO 8601 format
+struct datetimetz
+{
+    tmElements_t datetime;
+    time_t timestamp;
+    char timezone[6] = {}; // e.g. +0300 // +03
+} esp_datetime_tz;
 
 enum SensorAPN_PIN
 {
@@ -112,14 +121,15 @@ void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value);
 void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size);
 bool validateJson(const char *input);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
-String extractDateTime(String datetimeStr);
+datetimetz extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
+String getRTCdatetimetz(const char *format, char *timezone);
 void init_memory_loggers();
 void init_SD_loggers();
 void getMonthName(int month_num, char *month);
 void readSendDelete(const char *datafile);
-void initCalenderFromNetworkTime();
-void updateCalendarFromNetworkTime();
+void initCalender(int year, int month);
+void updateCalendarFromRTC();
 void memoryDataLog(LOGGER &logger, const char *data);
 void fileDataLog(LOGGER &logger);
 void resetLogger(LOGGER &logger);
@@ -150,7 +160,6 @@ enum Month
 };
 
 int current_year, current_month = 0;
-int network_year, network_month = 0;
 
 void setup()
 {
@@ -200,9 +209,12 @@ void setup()
 
                 if (getNetworkTime(time_buff))
                 {
-                    Serial.println("Time: " + String(time_buff));
-                    extractDateTime(String(time_buff));
-                    initCalenderFromNetworkTime();
+
+                    // update RTC time and calendar;
+                    Serial.println("GSM Network Time: " + String(time_buff));
+                    esp_datetime_tz = extractDateTime(String(time_buff));
+                    RTC.setTime(esp_datetime_tz.timestamp);
+                    initCalender(RTC.getYear(), RTC.getMonth() + 1);
                 }
                 else
                 {
@@ -291,24 +303,19 @@ void getPMSREADINGS()
     {
 
         char read_time[32];
-        String datetime = "";
+        String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
 
         last_read_pms = millis();
         // print the results
         printPM_values();
 
-        if (getNetworkTime(read_time))
-        {
-            datetime = extractDateTime(String(read_time));
-        }
-
-        if (datetime == "")
+        if (datetime == "") // ! extra validation needed now that RTC is being used
         {
             Serial.println("Datetime is empty...discarding data point");
         }
         else
         {
-            updateCalendarFromNetworkTime(); // In case we roll into a new year or month.
+            updateCalendarFromRTC(); // In case we roll into a new year or month.
 
             // Generate JSON data
             JsonDocument PM_data_doc;
@@ -458,15 +465,20 @@ void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, 
     serializeJson(payload, res, size);
 }
 
-String extractDateTime(String datetimeStr)
+datetimetz extractDateTime(String datetimeStr)
 {
+    datetimetz dtz;
+    dtz.datetime = {0, 0, 0, 0, 0, 0, 0};
+    dtz.timestamp = 0;
+
     Serial.println("Received date string: " + datetimeStr); //! format looks like "25/02/24,05:55:53+00" and may include the quotes!
 
     // check if received string is empty
     if (datetimeStr == "")
     {
         Serial.println("Datetime string is empty");
-        return "";
+
+        return dtz;
     }
 
     // check if the datetime string has leading or trailing quotes
@@ -490,7 +502,7 @@ String extractDateTime(String datetimeStr)
         _hour < 0 || _hour > 23 || _minute < 0 || _minute > 59 || _second < 0 || _second > 59)
     {
         Serial.println("Invalid date/time values");
-        return "";
+        return dtz;
     }
 
 #if defined(QUECTEL)
@@ -510,38 +522,32 @@ String extractDateTime(String datetimeStr)
     String timezone = datetimeStr.substring(17); // +00
 
 #endif
+    strncpy(dtz.timezone, timezone.c_str(), 6); // copy timezone to the provided buffer
 
-    // Serial.println("Day: " + String(day));
-    // Serial.println("Month: " + String(month));
-    // Serial.println("Year: " + String(year));
-    // Serial.println("Hour: " + String(hour));
-    // Serial.println("Minute: " + String(minute));
-    // Serial.println("Second: " + String(second));
+    Serial.println("Day: " + String(_day));
+    Serial.println("Month: " + String(_month));
+    Serial.println("Year: " + String(_year));
+    Serial.println("Hour: " + String(_hour));
+    Serial.println("Minute: " + String(_minute));
+    Serial.println("Second: " + String(_second));
 
     // Adjust year for TimeLib (TimeLib expects years since 1970)
     _year += 2000; // Assuming 24 is 2024
     _year -= 1970;
 
-    // Create a tmElements_t struct
-    tmElements_t tm;
-    tm.Second = _second;
-    tm.Minute = _minute;
-    tm.Hour = _hour;
-    tm.Day = _day;
-    tm.Month = _month;
-    tm.Year = _year;
+    dtz.datetime.Second = _second;
+    dtz.datetime.Minute = _minute;
+    dtz.datetime.Hour = _hour;
+    dtz.datetime.Day = _day;
+    dtz.datetime.Month = _month;
+    dtz.datetime.Year = _year;
 
     // Create a time_t value
-    time_t t = makeTime(tm);
+    dtz.timestamp = makeTime(dtz.datetime);
+    Serial.print("Parsed timestamp: ");
+    Serial.println(dtz.timestamp); // Print the time_t value
 
-    network_year = year(t);
-    network_month = month(t);
-
-    // Format the time_t value to YYYY-MM-DDThh:mm:ss+HH:MM
-    String formattedDateTime = formatDateTime(t, timezone);
-    Serial.print("Formatted DateTime: ");
-    Serial.println(formattedDateTime);
-    return formattedDateTime;
+    return dtz;
 }
 
 String formatDateTime(time_t t, String timezone)
@@ -566,6 +572,13 @@ String formatDateTime(time_t t, String timezone)
         secondStr = "0" + secondStr;
 
     return yearStr + "-" + monthStr + "-" + dayStr + "T" + hourStr + ":" + minuteStr + ":" + secondStr + timezone;
+}
+
+String getRTCdatetimetz(const char *format, char *timezone)
+{
+    String datetimetz = RTC.getTime(format);
+    datetimetz += timezone;
+    return datetimetz;
 }
 
 /*****************************************************************
@@ -814,29 +827,31 @@ void readSendDelete(const char *datafile)
     closeFile(SD, datafile);
 }
 
-void updateCalendarFromNetworkTime()
+void updateCalendarFromRTC()
 {
     bool calendarUpdated = false;
+    int year = RTC.getYear();
+    int month = RTC.getMonth() + 1; // ESP32Time month is 0 based
 
-    if (network_year > current_year)
+    if (year > current_year)
     {
         Serial.print("Updating year from: ");
         Serial.print(current_year);
         Serial.print(" to: ");
-        Serial.println(network_year);
+        Serial.println(year);
 
-        current_year = network_year;
-        current_month = network_month; // Also update the month. Ideally, Jan.
+        current_year = year;
+        current_month = month; // Also update the month. Ideally, Jan.
         calendarUpdated = true;
     }
-    else if (network_month > current_month)
+    else if (month > current_month)
     {
         Serial.print("Updating year from: ");
         Serial.print(current_month);
         Serial.print(" to: ");
-        Serial.println(network_month);
+        Serial.println(month);
 
-        current_month = network_month;
+        current_month = month;
         calendarUpdated = true;
     }
     if (calendarUpdated)
@@ -845,12 +860,16 @@ void updateCalendarFromNetworkTime()
     }
 }
 
-void initCalenderFromNetworkTime()
+void initCalender(int year, int month)
 {
-    if (network_year != 0 && network_month != 0)
+    Serial.print("Initializing calendar with year: ");
+    Serial.print(year);
+    Serial.print(" and month: ");
+    Serial.println(month);
+    if (year != 0 && month != 0)
     {
-        current_year = network_year;
-        current_month = network_month;
+        current_year = year;
+        current_month = month;
     }
 }
 
