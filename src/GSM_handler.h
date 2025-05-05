@@ -50,6 +50,7 @@ bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long 
 bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
 void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
+void http_preconfig();
 
 void troubleshoot_GSM();
 
@@ -276,6 +277,10 @@ bool GPRS_init()
     {
         GPRS_INIT_FAIL_COUNT += 1;
     }
+    else
+    {
+        http_preconfig();
+    }
     return GPRS_CONNECTED;
 }
 
@@ -327,6 +332,16 @@ void flushSerial()
     Serial.println("##################");
 }
 
+/// @brief Preconfigure HTTP settings
+/// @details This function sets the HTTP configuration for the Quectel module.
+void http_preconfig()
+{
+    sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK");
+}
+
 /// @brief Easy implementation of Quectel HTTP functionality
 /// @param url url for http request sans protocol
 /// @param headers array of request headers
@@ -355,10 +370,6 @@ void QUECTEL_POST(const char *url, char headers[][40], int header_size, const ch
     Serial.println(HTTP_CFG);
 
     sendAndCheck(HTTP_CFG, "OK", 2000);
-    sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK");
 
     for (int i = 0; i < header_size; i++)
     {
