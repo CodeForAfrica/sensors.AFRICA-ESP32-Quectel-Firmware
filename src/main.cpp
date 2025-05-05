@@ -223,6 +223,8 @@ void setup()
                     Serial.println("Failed to fetch time from network");
                 }
             }
+
+            GSM_sleep();
         }
         else
         {
@@ -279,13 +281,13 @@ void loop()
 
             // Send data from memory loggers
             sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
-
             // send payloads from the files that stores data that failed posting previously
             readSendDelete(SENSORS_FAILED_DATA_SEND_STORE_PATH);
 
             // Serial.println("Time for Sending (ms): " + String(sum_send_time));
 
             // Serial.println("Sent data counts: " + count_sends);
+            GSM_sleep();
         }
 
         starttime = millis();

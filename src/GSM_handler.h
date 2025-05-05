@@ -51,7 +51,7 @@ bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
 void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
 void http_preconfig();
-
+void GSM_sleep();
 void troubleshoot_GSM();
 
 bool GSM_init()
@@ -791,6 +791,18 @@ void GSMreset(RST_SEQ seq, uint8_t timing_delay)
     delay(30000); // Allow enough time for GSM to warm up
 }
 
+void GSM_sleep()
+{
+
+    if (sendAndCheck("AT+QSCLK=2", "OK"))
+    {
+        Serial.println("GSM module is now in sleep mode. Will only wake up if data is sent on the serial port");
+    }
+    else
+    {
+        Serial.println("Failed to put GSM module in sleep mode");
+    }
+}
 // Testing POST data
 // http://staging.api.sensors.africa/v1/push-sensor-data/
 
