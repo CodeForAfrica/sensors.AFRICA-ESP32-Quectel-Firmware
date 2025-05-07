@@ -760,6 +760,9 @@ bool GSM_Serial_begin()
 #endif
     sendAndCheck("ATI", "OK");
 
+    // Set automatic timezone and update Locate time to RTC
+    sendAndCheck("AT+CTZU=3", "OK");
+
     return comm_init;
 }
 
