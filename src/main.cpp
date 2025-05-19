@@ -261,13 +261,23 @@ void setup()
 
 void loop()
 {
+#ifdef POWER_SAVING_MODE
+
+    if (!send_now) // only send data after the memory logger is full
+    {
+        getPMSREADINGS();
+    }
+#else
+
     unsigned sum_send_time = 0;
     act_milli = millis();
     send_now = act_milli - starttime > sending_intervall_ms;
+
     if (act_milli - last_read_pms > sampling_interval)
     {
         getPMSREADINGS();
     }
+#endif
 
     if (send_now)
     {
