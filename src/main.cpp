@@ -173,6 +173,8 @@ void setup()
     Serial.println("Initializing PMS5003 sensor");
     init_memory_loggers();
     pms.init();
+    delay(2000);
+    pms.sleep();
 
     if (gsm_capable)
     {
@@ -221,6 +223,8 @@ void setup()
                     Serial.println("Failed to fetch time from network");
                 }
             }
+
+            GSM_sleep();
         }
         else
         {
@@ -257,13 +261,23 @@ void setup()
 
 void loop()
 {
+#ifdef POWER_SAVING_MODE
+
+    if (!send_now) // only send data after the memory logger is full
+    {
+        getPMSREADINGS();
+    }
+#else
+
     unsigned sum_send_time = 0;
     act_milli = millis();
     send_now = act_milli - starttime > sending_intervall_ms;
+
     if (act_milli - last_read_pms > sampling_interval)
     {
         getPMSREADINGS();
     }
+#endif
 
     if (send_now)
     {
@@ -277,13 +291,13 @@ void loop()
 
             // Send data from memory loggers
             sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
-
             // send payloads from the files that stores data that failed posting previously
             readSendDelete(SENSORS_FAILED_DATA_SEND_STORE_PATH);
 
             // Serial.println("Time for Sending (ms): " + String(sum_send_time));
 
             // Serial.println("Sent data counts: " + count_sends);
+            GSM_sleep();
         }
 
         starttime = millis();
@@ -292,16 +306,15 @@ void loop()
 
 void getPMSREADINGS()
 {
-    // pms.wake_up();
-    // delay(30000); // wait for 30 seconds to get a reading
-    // pms.request_reading();
-    // delay(10000); // wait for 10 seconds to get a reading
+    pms.wake();
+    delay(30000); // wait for 30 seconds warm-up to get an accurate reading
+
     // pms.sleep();
     char result_PMS[255] = {};
     pms.read();
     if (pms) // Successfull read
     {
-
+        pms.sleep();
         char read_time[32];
         String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
 
@@ -342,6 +355,7 @@ void getPMSREADINGS()
     }
     else // something went wrong
     {
+        pms.sleep();
         printPM_Error();
     }
 }

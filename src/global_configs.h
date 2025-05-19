@@ -13,6 +13,8 @@ constexpr unsigned MED_STR = 256 - 1;
 constexpr unsigned LARGE_STR = 512 - 1;
 constexpr unsigned XLARGE_STR = 1024 - 1;
 
+#define POWER_SAVING_MODE 1
+
 bool gsm_capable = true;
 #define GSM_DEBUG
 

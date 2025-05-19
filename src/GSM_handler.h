@@ -50,7 +50,8 @@ bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long 
 bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
 void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
-
+void http_preconfig();
+void GSM_sleep();
 void troubleshoot_GSM();
 
 bool GSM_init()
@@ -276,6 +277,10 @@ bool GPRS_init()
     {
         GPRS_INIT_FAIL_COUNT += 1;
     }
+    else
+    {
+        http_preconfig();
+    }
     return GPRS_CONNECTED;
 }
 
@@ -327,6 +332,16 @@ void flushSerial()
     Serial.println("##################");
 }
 
+/// @brief Preconfigure HTTP settings
+/// @details This function sets the HTTP configuration for the Quectel module.
+void http_preconfig()
+{
+    sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK");
+}
+
 /// @brief Easy implementation of Quectel HTTP functionality
 /// @param url url for http request sans protocol
 /// @param headers array of request headers
@@ -355,10 +370,6 @@ void QUECTEL_POST(const char *url, char headers[][40], int header_size, const ch
     Serial.println(HTTP_CFG);
 
     sendAndCheck(HTTP_CFG, "OK", 2000);
-    sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK");
 
     for (int i = 0; i < header_size; i++)
     {
@@ -749,6 +760,9 @@ bool GSM_Serial_begin()
 #endif
     sendAndCheck("ATI", "OK");
 
+    // Set automatic timezone and update Locate time to RTC
+    sendAndCheck("AT+CTZU=3", "OK");
+
     return comm_init;
 }
 
@@ -780,6 +794,18 @@ void GSMreset(RST_SEQ seq, uint8_t timing_delay)
     delay(30000); // Allow enough time for GSM to warm up
 }
 
+void GSM_sleep()
+{
+
+    if (sendAndCheck("AT+QSCLK=2", "OK"))
+    {
+        Serial.println("GSM module is now in sleep mode. Will only wake up if data is sent on the serial port");
+    }
+    else
+    {
+        Serial.println("Failed to put GSM module in sleep mode");
+    }
+}
 // Testing POST data
 // http://staging.api.sensors.africa/v1/push-sensor-data/
 
