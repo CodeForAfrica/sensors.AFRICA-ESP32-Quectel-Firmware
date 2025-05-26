@@ -51,7 +51,9 @@
 #include <TimeLib.h>
 #include <ArduinoJson.h>
 #include <ESP32Time.h>
+#include "dhtnew.h"
 
+DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 unsigned long act_milli;
 unsigned long last_read_pms = 0;
@@ -114,6 +116,7 @@ struct LOGGER
     int log_count = 0;
 } JSON_PAYLOAD_LOGGER, CSV_PAYLOAD_LOGGER;
 
+void readDHT();
 void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
@@ -175,6 +178,7 @@ void setup()
     pms.init();
     delay(2000);
     pms.sleep();
+    dht.setType(DHTTYPE);
 
     if (gsm_capable)
     {
@@ -270,6 +274,7 @@ void loop()
     if (act_milli - last_read_pms > sampling_interval && !send_now) // only send data after the memory logger is full
     {
         getPMSREADINGS();
+        readDHT();
     }
 
 #else
@@ -303,6 +308,65 @@ void loop()
         }
 
         starttime = millis();
+    }
+}
+
+void readDHT()
+{
+
+    delay(2000);
+    char resultDHT[255] = {};
+    Serial.print("Reading DHT22...");
+    uint32_t start = millis();
+    int chk = dht.read();
+    uint32_t stop = millis();
+
+    switch (chk)
+    {
+    case DHTLIB_OK:
+    {
+        uint32_t duration = stop - start;
+        Serial.print("DHT read duration: ");
+        Serial.println(duration);
+        char buf[128] = {};
+        float temperature = dht.getTemperature();
+        float humidity = dht.getHumidity();
+        String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
+        sprintf(buf, "Temperature %0.1f C, Humidity %0.1f %% RH", temperature, humidity);
+
+        Serial.println(buf);
+
+        break;
+    }
+    case DHTLIB_ERROR_CHECKSUM:
+        Serial.print("Checksum error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_A:
+        Serial.print("Time out A error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_B:
+        Serial.print("Time out B error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_C:
+        Serial.print("Time out C error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_D:
+        Serial.print("Time out D error,\t");
+        break;
+    case DHTLIB_ERROR_SENSOR_NOT_READY:
+        Serial.print("Sensor not ready,\t");
+        break;
+    case DHTLIB_ERROR_BIT_SHIFT:
+        Serial.print("Bit shift error,\t");
+        break;
+    case DHTLIB_WAITING_FOR_READ:
+        Serial.print("Waiting for read,\t");
+        break;
+    default:
+        Serial.print("Unknown: ");
+        Serial.print(chk);
+        Serial.print(",\t");
+        break;
     }
 }
 
