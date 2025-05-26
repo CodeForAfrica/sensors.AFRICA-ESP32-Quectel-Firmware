@@ -26,3 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  - JSON payload validation
  - Format failed-to-send-payloads text file with `/r/n`
  - Breakdown functionalities for logging and reading data.
+
+## 2025-05-26
+
+### Added
+  - Custom board configuration file for `ESP32-S3-WROOM-1-N16R8`.
