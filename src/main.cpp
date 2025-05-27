@@ -140,8 +140,23 @@ void sendFromMemoryLog(LOGGER &logger);
 template <typename T>
 void generateCSV_payload(char *res, size_t res_size, const char *timestamp, const char *value_type, T value, const char *unit, const char *sensor_type)
 {
-    // ToDo: check if the value is a string or number (int, float, etc.)
-    snprintf(res, res_size, "%s,%s,%d,%s,%s", timestamp, value_type, value, unit, sensor_type);
+    // Use type traits to check type at compile time
+    if constexpr (std::is_integral<T>::value)
+    {
+        snprintf(res, res_size, "%s,%s,%d,%s,%s", timestamp, value_type, static_cast<int>(value), unit, sensor_type);
+    }
+    else if constexpr (std::is_floating_point<T>::value)
+    {
+        snprintf(res, res_size, "%s,%s,%.2f,%s,%s", timestamp, value_type, static_cast<double>(value), unit, sensor_type);
+    }
+    else if constexpr (std::is_same<T, const char *>::value || std::is_same<T, char *>::value)
+    {
+        snprintf(res, res_size, "%s,%s,%s,%s,%s", timestamp, value_type, value, unit, sensor_type);
+    }
+    else
+    {
+        Serial.println("Unsupported type for CSV payload generation");
+    }
 }
 
 /**
