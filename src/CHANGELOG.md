@@ -31,3 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
   - Custom board configuration file for `ESP32-S3-WROOM-1-N16R8`.
+
+## 2025-05-27
+
+### Added 
+ - DHT support and logging
+ - C++17 support
+  
+### Improvements
+ - Templatize add_value2JSON_array to support both integers and floats
+ - Template type checking for CSV generator
+ - Extract sensor API_PIN from logged data
+  
+  
