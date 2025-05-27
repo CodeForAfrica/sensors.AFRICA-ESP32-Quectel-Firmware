@@ -19,8 +19,8 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gdieon Maina
- * @date 2025-04-25
- * @version 1.1.0
+ * @date 2025-05-27
+ * @version 1.2.0
  *
  * @dependencies
  * - ArduinoJson
@@ -28,6 +28,7 @@
  * - PMserial
  * - SD_handler
  * - GSM_handler
+ * - dhtnew : https://github.com/RobTillaart/DHTNew
  *
  * @hardware
  * - ESP32 microcontroller
@@ -365,6 +366,23 @@ void readDHT()
         sprintf(buf, "Temperature %0.1f C, Humidity %0.1f %% RH", temperature, humidity);
 
         Serial.println(buf);
+        if (datetime != "")
+        {
+            updateCalendarFromRTC(); // In case we roll into a new year or month.
+            // Generate JSON data
+            JsonDocument DHT_data_doc;
+            JsonArray DHT_data = DHT_data_doc.to<JsonArray>();
+            add_value2JSON_array(DHT_data, "Temperature", temperature);
+            add_value2JSON_array(DHT_data, "Humidity", humidity);
+            // serializeJsonPretty(DHT_data_doc, Serial);
+            generateJSON_payload(resultDHT, DHT_data_doc, datetime.c_str(), SensorAPN_PIN::DHT, sizeof(resultDHT));
+            memoryDataLog(JSON_PAYLOAD_LOGGER, resultDHT);
+
+            // Generate CSV data and log to memory
+            generateCSV_payload(resultDHT, sizeof(resultDHT), datetime.c_str(), "temperature", temperature, "°C", "DHT22");
+            generateCSV_payload(resultDHT, sizeof(resultDHT), datetime.c_str(), "humidity", humidity, "%", "DHT22");
+            memoryDataLog(CSV_PAYLOAD_LOGGER, resultDHT);
+        }
 
         break;
     }
