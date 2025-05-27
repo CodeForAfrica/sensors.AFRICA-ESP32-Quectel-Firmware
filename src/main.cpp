@@ -120,7 +120,6 @@ void readDHT();
 void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
-void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value);
 void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size);
 bool validateJson(const char *input);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
@@ -143,6 +142,22 @@ void generateCSV_payload(char *res, size_t res_size, const char *timestamp, cons
 {
     // ToDo: check if the value is a string or number (int, float, etc.)
     snprintf(res, res_size, "%s,%s,%d,%s,%s", timestamp, value_type, value, unit, sensor_type);
+}
+
+/**
+    @brief Add value to JSON array
+    @param arr : JSON array to add the value to
+    @param key : key for the value
+    @param value : value to add
+    @return : void
+**/
+template <typename T>
+void add_value2JSON_array(JsonArray arr, const char *key, T &value)
+{
+    JsonDocument doc;
+    doc["value_type"] = key;
+    doc["value"] = value;
+    arr.add(doc);
 }
 
 enum Month
@@ -951,21 +966,6 @@ void initCalender(int year, int month)
         current_year = year;
         current_month = month;
     }
-}
-
-/**
-    @brief Add value to JSON array
-    @param arr : JSON array to add the value to
-    @param key : key for the value
-    @param value : value to add
-    @return : void
-**/
-void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value)
-{
-    JsonDocument doc;
-    doc["value_type"] = key;
-    doc["value"] = value;
-    arr.add(doc);
 }
 
 /**
