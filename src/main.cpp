@@ -2,13 +2,13 @@
  * @file main.cpp
  * @brief Implementation of an ESP32-based sensor data logger and transmitter.
  *
- * This program is designed to collect data from sensors (e.g., PMS5003), log the data in memory and on an SD card,
+ * This program is designed to collect data from sensors (e.g., PMS5003, DHT22), log the data in memory and on an SD card,
  * and transmit the data to a remote server using GSM/GPRS. The program supports JSON and CSV data formats for logging
  * and transmission. It also handles network time synchronization and manages failed data transmissions by retrying
  * them later.
  *
  * @details
- * - The program initializes the PMS5003 sensor and GSM module (if available).
+ * - The program initializes the PMS5003 sensor, DHT22 sensor (if available), and GSM module (if available).
  * - Data is collected at regular intervals and logged in memory or on an SD card.
  * - Data is transmitted to a server at specified intervals.
  * - Failed transmissions are stored and retried later.
@@ -35,6 +35,7 @@
  * - PMS5003 sensor
  * - GSM module
  * - SD card module
+ * - DHT22 sensor (optional)
  *
  * @todo
  * - Implement support for other network connections (e.g., WiFi, LoRa).
@@ -57,7 +58,7 @@
 DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 unsigned long act_milli;
-unsigned long last_read_pms = 0;
+unsigned long last_read_sensors_data = 0;
 int sampling_interval = 5 * 60 * 1000; // 5 minutes
 unsigned long starttime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
@@ -302,18 +303,21 @@ void loop()
 
 #if defined(POWER_SAVING_MODE)
 
-    if (act_milli - last_read_pms > sampling_interval && !send_now) // only send data after the memory logger is full
+    if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
     {
         getPMSREADINGS();
         readDHT();
+        last_read_sensors_data = millis();
     }
 
 #else
     send_now = act_milli - starttime > sending_intervall_ms;
 
-    if (act_milli - last_read_pms > sampling_interval)
+    if (act_milli - last_read_sensors_data > sampling_interval)
     {
         getPMSREADINGS();
+        readDHT();
+        last_read_sensors_data = millis();
     }
 #endif
 
@@ -432,7 +436,6 @@ void getPMSREADINGS()
         char read_time[32];
         String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
 
-        last_read_pms = millis();
         // print the results
         printPM_values();
 
