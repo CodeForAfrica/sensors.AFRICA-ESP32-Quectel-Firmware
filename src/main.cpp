@@ -941,10 +941,18 @@ void readSendDelete(const char *datafile)
 
         if (data != "")
         {
-            // Todo: check senor type to determine which API pin to use
+            JsonDocument doc;
+            deserializeJson(doc, data);        // Extract APN_PIN from the JSON data
+            int api_pin = doc["APN_PIN"] | -1; // Default to -1 if not found
+
+            if (api_pin == -1)
+            {
+                Serial.println("APN_PIN not found in JSON data ");
+                continue; // Skip this data if API_PIN is not found
+            }
             // Attempt send payload
             // Serial.println("Attempting to send data from SD card: " + data);
-            if (!sendData(data.c_str(), PMS_API_PIN, HOST_CFA, URL_CFA))
+            if (!sendData(data.c_str(), api_pin, HOST_CFA, URL_CFA))
             {
                 // store data in temp file
                 appendFile(SD, tempFile, data.c_str(), true); //? does FS lib support opening multiple files? Otherwise close the previously opened file.
