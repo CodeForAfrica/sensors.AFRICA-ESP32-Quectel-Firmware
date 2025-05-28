@@ -376,8 +376,8 @@ void readDHT()
             // Generate JSON data
             JsonDocument DHT_data_doc;
             JsonArray DHT_data = DHT_data_doc.to<JsonArray>();
-            add_value2JSON_array(DHT_data, "Temperature", temperature);
-            add_value2JSON_array(DHT_data, "Humidity", humidity);
+            add_value2JSON_array(DHT_data, "temperature", temperature);
+            add_value2JSON_array(DHT_data, "humidity", humidity);
             // serializeJsonPretty(DHT_data_doc, Serial);
             generateJSON_payload(resultDHT, DHT_data_doc, datetime.c_str(), SensorAPN_PIN::DHT, sizeof(resultDHT));
             memoryDataLog(JSON_PAYLOAD_LOGGER, resultDHT);
