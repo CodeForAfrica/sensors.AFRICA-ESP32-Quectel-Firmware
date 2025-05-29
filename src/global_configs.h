@@ -42,6 +42,7 @@ bool gsm_capable = true;
 // #if defined(ESP32)
 // define pin for one wire sensors
 #define ONEWIRE_PIN 36 // PIN 29
+#define DHTTYPE 22     // DHT22 sensor type
 
 // define pins for status LEDs
 #define PMS_LED 35 // PIN 28

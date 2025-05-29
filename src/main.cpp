@@ -2,13 +2,13 @@
  * @file main.cpp
  * @brief Implementation of an ESP32-based sensor data logger and transmitter.
  *
- * This program is designed to collect data from sensors (e.g., PMS5003), log the data in memory and on an SD card,
+ * This program is designed to collect data from sensors (e.g., PMS5003, DHT22), log the data in memory and on an SD card,
  * and transmit the data to a remote server using GSM/GPRS. The program supports JSON and CSV data formats for logging
  * and transmission. It also handles network time synchronization and manages failed data transmissions by retrying
  * them later.
  *
  * @details
- * - The program initializes the PMS5003 sensor and GSM module (if available).
+ * - The program initializes the PMS5003 sensor, DHT22 sensor (if available), and GSM module (if available).
  * - Data is collected at regular intervals and logged in memory or on an SD card.
  * - Data is transmitted to a server at specified intervals.
  * - Failed transmissions are stored and retried later.
@@ -19,8 +19,8 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gdieon Maina
- * @date 2025-04-25
- * @version 1.1.0
+ * @date 2025-05-27
+ * @version 1.2.0
  *
  * @dependencies
  * - ArduinoJson
@@ -28,12 +28,14 @@
  * - PMserial
  * - SD_handler
  * - GSM_handler
+ * - dhtnew : https://github.com/RobTillaart/DHTNew
  *
  * @hardware
  * - ESP32 microcontroller
  * - PMS5003 sensor
  * - GSM module
  * - SD card module
+ * - DHT22 sensor (optional)
  *
  * @todo
  * - Implement support for other network connections (e.g., WiFi, LoRa).
@@ -51,10 +53,12 @@
 #include <TimeLib.h>
 #include <ArduinoJson.h>
 #include <ESP32Time.h>
+#include "dhtnew.h"
 
+DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 unsigned long act_milli;
-unsigned long last_read_pms = 0;
+unsigned long last_read_sensors_data = 0;
 int sampling_interval = 5 * 60 * 1000; // 5 minutes
 unsigned long starttime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
@@ -114,10 +118,10 @@ struct LOGGER
     int log_count = 0;
 } JSON_PAYLOAD_LOGGER, CSV_PAYLOAD_LOGGER;
 
+void readDHT();
 void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
-void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value);
 void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size);
 bool validateJson(const char *input);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
@@ -138,8 +142,39 @@ void sendFromMemoryLog(LOGGER &logger);
 template <typename T>
 void generateCSV_payload(char *res, size_t res_size, const char *timestamp, const char *value_type, T value, const char *unit, const char *sensor_type)
 {
-    // ToDo: check if the value is a string or number (int, float, etc.)
-    snprintf(res, res_size, "%s,%s,%d,%s,%s", timestamp, value_type, value, unit, sensor_type);
+    // Use type traits to check type at compile time
+    if constexpr (std::is_integral<T>::value)
+    {
+        snprintf(res, res_size, "%s,%s,%d,%s,%s", timestamp, value_type, static_cast<int>(value), unit, sensor_type);
+    }
+    else if constexpr (std::is_floating_point<T>::value)
+    {
+        snprintf(res, res_size, "%s,%s,%.2f,%s,%s", timestamp, value_type, static_cast<double>(value), unit, sensor_type);
+    }
+    else if constexpr (std::is_same<T, const char *>::value || std::is_same<T, char *>::value)
+    {
+        snprintf(res, res_size, "%s,%s,%s,%s,%s", timestamp, value_type, value, unit, sensor_type);
+    }
+    else
+    {
+        Serial.println("Unsupported type for CSV payload generation");
+    }
+}
+
+/**
+    @brief Add value to JSON array
+    @param arr : JSON array to add the value to
+    @param key : key for the value
+    @param value : value to add
+    @return : void
+**/
+template <typename T>
+void add_value2JSON_array(JsonArray arr, const char *key, T &value)
+{
+    JsonDocument doc;
+    doc["value_type"] = key;
+    doc["value"] = value;
+    arr.add(doc);
 }
 
 enum Month
@@ -175,6 +210,7 @@ void setup()
     pms.init();
     delay(2000);
     pms.sleep();
+    dht.setType(DHTTYPE);
 
     if (gsm_capable)
     {
@@ -267,17 +303,21 @@ void loop()
 
 #if defined(POWER_SAVING_MODE)
 
-    if (act_milli - last_read_pms > sampling_interval && !send_now) // only send data after the memory logger is full
+    if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
     {
         getPMSREADINGS();
+        readDHT();
+        last_read_sensors_data = millis();
     }
 
 #else
     send_now = act_milli - starttime > sending_intervall_ms;
 
-    if (act_milli - last_read_pms > sampling_interval)
+    if (act_milli - last_read_sensors_data > sampling_interval)
     {
         getPMSREADINGS();
+        readDHT();
+        last_read_sensors_data = millis();
     }
 #endif
 
@@ -306,6 +346,82 @@ void loop()
     }
 }
 
+void readDHT()
+{
+
+    delay(2000);
+    char resultDHT[255] = {};
+    Serial.print("Reading DHT22...");
+    uint32_t start = millis();
+    int chk = dht.read();
+    uint32_t stop = millis();
+
+    switch (chk)
+    {
+    case DHTLIB_OK:
+    {
+        uint32_t duration = stop - start;
+        Serial.print("DHT read duration: ");
+        Serial.println(duration);
+        char buf[128] = {};
+        float temperature = dht.getTemperature();
+        float humidity = dht.getHumidity();
+        String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
+        sprintf(buf, "Temperature %0.1f C, Humidity %0.1f %% RH", temperature, humidity);
+
+        Serial.println(buf);
+        if (datetime != "")
+        {
+            updateCalendarFromRTC(); // In case we roll into a new year or month.
+            // Generate JSON data
+            JsonDocument DHT_data_doc;
+            JsonArray DHT_data = DHT_data_doc.to<JsonArray>();
+            add_value2JSON_array(DHT_data, "temperature", temperature);
+            add_value2JSON_array(DHT_data, "humidity", humidity);
+            // serializeJsonPretty(DHT_data_doc, Serial);
+            generateJSON_payload(resultDHT, DHT_data_doc, datetime.c_str(), SensorAPN_PIN::DHT, sizeof(resultDHT));
+            memoryDataLog(JSON_PAYLOAD_LOGGER, resultDHT);
+
+            // Generate CSV data and log to memory
+            generateCSV_payload(resultDHT, sizeof(resultDHT), datetime.c_str(), "temperature", temperature, "°C", "DHT22");
+            generateCSV_payload(resultDHT, sizeof(resultDHT), datetime.c_str(), "humidity", humidity, "%", "DHT22");
+            memoryDataLog(CSV_PAYLOAD_LOGGER, resultDHT);
+        }
+
+        break;
+    }
+    case DHTLIB_ERROR_CHECKSUM:
+        Serial.print("Checksum error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_A:
+        Serial.print("Time out A error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_B:
+        Serial.print("Time out B error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_C:
+        Serial.print("Time out C error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_D:
+        Serial.print("Time out D error,\t");
+        break;
+    case DHTLIB_ERROR_SENSOR_NOT_READY:
+        Serial.print("Sensor not ready,\t");
+        break;
+    case DHTLIB_ERROR_BIT_SHIFT:
+        Serial.print("Bit shift error,\t");
+        break;
+    case DHTLIB_WAITING_FOR_READ:
+        Serial.print("Waiting for read,\t");
+        break;
+    default:
+        Serial.print("Unknown: ");
+        Serial.print(chk);
+        Serial.print(",\t");
+        break;
+    }
+}
+
 void getPMSREADINGS()
 {
     pms.wake();
@@ -320,7 +436,6 @@ void getPMSREADINGS()
         char read_time[32];
         String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
 
-        last_read_pms = millis();
         // print the results
         printPM_values();
 
@@ -826,10 +941,18 @@ void readSendDelete(const char *datafile)
 
         if (data != "")
         {
-            // Todo: check senor type to determine which API pin to use
+            JsonDocument doc;
+            deserializeJson(doc, data);        // Extract APN_PIN from the JSON data
+            int api_pin = doc["APN_PIN"] | -1; // Default to -1 if not found
+
+            if (api_pin == -1)
+            {
+                Serial.println("APN_PIN not found in JSON data ");
+                continue; // Skip this data if API_PIN is not found
+            }
             // Attempt send payload
             // Serial.println("Attempting to send data from SD card: " + data);
-            if (!sendData(data.c_str(), PMS_API_PIN, HOST_CFA, URL_CFA))
+            if (!sendData(data.c_str(), api_pin, HOST_CFA, URL_CFA))
             {
                 // store data in temp file
                 appendFile(SD, tempFile, data.c_str(), true); //? does FS lib support opening multiple files? Otherwise close the previously opened file.
@@ -887,21 +1010,6 @@ void initCalender(int year, int month)
         current_year = year;
         current_month = month;
     }
-}
-
-/**
-    @brief Add value to JSON array
-    @param arr : JSON array to add the value to
-    @param key : key for the value
-    @param value : value to add
-    @return : void
-**/
-void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value)
-{
-    JsonDocument doc;
-    doc["value_type"] = key;
-    doc["value"] = value;
-    arr.add(doc);
 }
 
 /**
