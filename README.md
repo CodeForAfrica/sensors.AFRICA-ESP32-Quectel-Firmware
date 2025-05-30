@@ -6,6 +6,10 @@ This firmware is developed for an environmental monitoring project measuring par
 
 The firmware is built and tested for a board running on **ESP32-S3 N16R8** microcontroller and a **Quectel EC200U-CN GSM** module.
 
+<img width="916" alt="PCB with ES32-S3 and Quectel modem" title="PCB with ES32-S3 and Quectel modem" src="https://github.com/user-attachments/assets/2cd0dc95-dc52-4207-b7c3-d389645c5e6b" />
+<br> <figcaption>PCB with ES32-S3 and Quectel modem</figcaption>   
+
+
 ## Features
  - SD card logging.
  - RTC update via network carrier local time.
