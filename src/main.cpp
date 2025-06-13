@@ -58,12 +58,17 @@
 
 DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
+
+const unsigned long ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
+const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS / 28; // force a reboot every month /
+
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
 int sampling_interval = 5 * 60 * 1000; // 5 minutes
-unsigned long starttime = 0;
+unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
+
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
 
 bool SD_Attached = false;
@@ -155,7 +160,7 @@ int current_year, current_month = 0;
 void setup()
 {
     Serial.begin(115200);
-
+    boottime = millis();
     uint64_t chipid_num;
     chipid_num = ESP.getEfuseMac();
     snprintf(esp_chipid, sizeof(esp_chipid), "%llX", chipid_num);
@@ -299,6 +304,11 @@ void loop()
         }
 
         starttime = millis();
+    }
+
+    if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
+    {
+        ESP.restart();
     }
 }
 
