@@ -34,10 +34,11 @@ bool gsm_capable = true;
 #define PM_SERIAL_TX 45 // PIN 23
 
 // SD CARD
-// #define SD_SCK 38
-// #define SD_MISO 41
-// #define SD_MOSI 40
-// #define SD_CS 39
+#define REASSIGN_PINS 1
+int SD_SCK = 38;
+int SD_MISO = 41;
+int SD_MOSI = 40;
+int SD_CS = 39;
 
 // #if defined(ESP32)
 // define pin for one wire sensors
