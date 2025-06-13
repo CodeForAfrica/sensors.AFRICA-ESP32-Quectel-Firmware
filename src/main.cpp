@@ -19,7 +19,7 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gdieon Maina
- * @date 2025-05-27
+ * @date 2025-06-13
  * @version 1.2.0
  *
  * @dependencies
@@ -47,34 +47,31 @@
  */
 
 #include "global_configs.h"
+#include "helpers.h"
 #include "PMserial.h"
 #include "utils/SD_handler.h"
 #include "utils/GSM_handler.h"
 #include <TimeLib.h>
-#include <ArduinoJson.h>
 #include <ESP32Time.h>
+#include <ArduinoJson.h>
 #include "dhtnew.h"
-
-#define uS_TO_S_FACTOR 1000000ULL /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP 30
 
 DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
+
+const unsigned long ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
+const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS / 28; // force a reboot every month /
+
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
 int sampling_interval = 5 * 60 * 1000; // 5 minutes
-unsigned long starttime = 0;
+unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
+
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
 
 bool SD_Attached = false;
-
-#define REASSIGN_PINS 1
-int SD_SCK = 38;
-int SD_MISO = 41;
-int SD_MOSI = 40;
-int SD_CS = 39;
 
 char ROOT_DIR[24] = {};
 char BASE_SENSORS_DATA_DIR[20] = "/SENSORSDATA";
@@ -126,7 +123,6 @@ void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
 void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size);
-bool validateJson(const char *input);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
 datetimetz extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
@@ -141,45 +137,6 @@ void memoryDataLog(LOGGER &logger, const char *data);
 void fileDataLog(LOGGER &logger);
 void resetLogger(LOGGER &logger);
 void sendFromMemoryLog(LOGGER &logger);
-void print_wakeup_reason();
-
-template <typename T>
-void generateCSV_payload(char *res, size_t res_size, const char *timestamp, const char *value_type, T value, const char *unit, const char *sensor_type)
-{
-    // Use type traits to check type at compile time
-    if constexpr (std::is_integral<T>::value)
-    {
-        snprintf(res, res_size, "%s,%s,%d,%s,%s", timestamp, value_type, static_cast<int>(value), unit, sensor_type);
-    }
-    else if constexpr (std::is_floating_point<T>::value)
-    {
-        snprintf(res, res_size, "%s,%s,%.2f,%s,%s", timestamp, value_type, static_cast<double>(value), unit, sensor_type);
-    }
-    else if constexpr (std::is_same<T, const char *>::value || std::is_same<T, char *>::value)
-    {
-        snprintf(res, res_size, "%s,%s,%s,%s,%s", timestamp, value_type, value, unit, sensor_type);
-    }
-    else
-    {
-        Serial.println("Unsupported type for CSV payload generation");
-    }
-}
-
-/**
-    @brief Add value to JSON array
-    @param arr : JSON array to add the value to
-    @param key : key for the value
-    @param value : value to add
-    @return : void
-**/
-template <typename T>
-void add_value2JSON_array(JsonArray arr, const char *key, T &value)
-{
-    JsonDocument doc;
-    doc["value_type"] = key;
-    doc["value"] = value;
-    arr.add(doc);
-}
 
 enum Month
 {
@@ -203,7 +160,7 @@ int current_year, current_month = 0;
 void setup()
 {
     Serial.begin(115200);
-
+    boottime = millis();
     uint64_t chipid_num;
     chipid_num = ESP.getEfuseMac();
     snprintf(esp_chipid, sizeof(esp_chipid), "%llX", chipid_num);
@@ -215,17 +172,6 @@ void setup()
     delay(2000);
     pms.sleep();
     dht.setType(DHTTYPE);
-
-    esp_err_t result = esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-
-    if (result == ESP_OK)
-    {
-        Serial.println("Timer Wake-Up set successfully as wake-up source.");
-    }
-    else
-    {
-        Serial.println("Failed to set Timer Wake-Up as wake-up source.");
-    }
 
     if (gsm_capable)
     {
@@ -315,30 +261,26 @@ void loop()
 {
     unsigned sum_send_time = 0;
     act_milli = millis();
-    print_wakeup_reason();
 
-    // #if defined(POWER_SAVING_MODE)
+#if defined(POWER_SAVING_MODE)
 
-    //     if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
-    //     {
-    //         getPMSREADINGS();
-    //         readDHT();
-    //         last_read_sensors_data = millis();
-    //     }
+    if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
+    {
+        getPMSREADINGS();
+        readDHT();
+        last_read_sensors_data = millis();
+    }
 
-    // #else
-    //     send_now = act_milli - starttime > sending_intervall_ms;
+#else
+    send_now = act_milli - starttime > sending_intervall_ms;
 
-    //     if (act_milli - last_read_sensors_data > sampling_interval)
-    //     {
-    //         getPMSREADINGS();
-    //         readDHT();
-    //         last_read_sensors_data = millis();
-    //     }
-    // #endif
-
-    getPMSREADINGS();
-    readDHT();
+    if (act_milli - last_read_sensors_data > sampling_interval)
+    {
+        getPMSREADINGS();
+        readDHT();
+        last_read_sensors_data = millis();
+    }
+#endif
 
     if (send_now)
     {
@@ -363,7 +305,11 @@ void loop()
 
         starttime = millis();
     }
-    esp_light_sleep_start();
+
+    if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
+    {
+        ESP.restart();
+    }
 }
 
 void readDHT()
@@ -508,40 +454,6 @@ void printPM_values()
     Serial.print(F("PM10 "));
     Serial.print(pms.pm10);
     Serial.println(F(" [ug/m3]"));
-
-    // if (pms.has_number_concentration())
-    // {
-    //     Serial.print(F("N0.3 "));
-    //     Serial.print(pms.n0p3);
-    //     Serial.print(F(", "));
-    //     Serial.print(F("N0.5 "));
-    //     Serial.print(pms.n0p5);
-    //     Serial.print(F(", "));
-    //     Serial.print(F("N1.0 "));
-    //     Serial.print(pms.n1p0);
-    //     Serial.print(F(", "));
-    //     Serial.print(F("N2.5 "));
-    //     Serial.print(pms.n2p5);
-    //     Serial.print(F(", "));
-    //     Serial.print(F("N5.0 "));
-    //     Serial.print(pms.n5p0);
-    //     Serial.print(F(", "));
-    //     Serial.print(F("N10 "));
-    //     Serial.print(pms.n10p0);
-    //     Serial.println(F(" [#/100cc]"));
-    // }
-
-    // if (pms.has_temperature_humidity() || pms.has_formaldehyde())
-    // {
-    //     Serial.print(pms.temp, 1);
-    //     Serial.print(F(" °C"));
-    //     Serial.print(F(", "));
-    //     Serial.print(pms.rhum, 1);
-    //     Serial.print(F(" %rh"));
-    //     Serial.print(F(", "));
-    //     Serial.print(pms.hcho, 2);
-    //     Serial.println(F(" mg/m3 HCHO"));
-    // }
 }
 
 void printPM_Error()
@@ -975,7 +887,7 @@ void readSendDelete(const char *datafile)
             if (!sendData(data.c_str(), api_pin, HOST_CFA, URL_CFA))
             {
                 // store data in temp file
-                appendFile(SD, tempFile, data.c_str(), true); //? does FS lib support opening multiple files? Otherwise close the previously opened file.
+                appendFile(SD, tempFile, data.c_str(), true);
             }
         }
     } while (next_byte != -1);
@@ -1030,18 +942,6 @@ void initCalender(int year, int month)
         current_year = year;
         current_month = month;
     }
-}
-
-/**
-    @brief Validate JSON data
-    @param input : JSON data to validate
-    @return : true if valid, false otherwise
-    @note : //! This function is not full proof. Raw strings that don't look like incomplete or empty JSON are validated.
-**/
-bool validateJson(const char *input)
-{
-    JsonDocument doc, filter;
-    return deserializeJson(doc, input, DeserializationOption::Filter(filter)) == DeserializationError::Ok;
 }
 
 /**
@@ -1105,8 +1005,7 @@ void fileDataLog(LOGGER &logger)
 void resetLogger(LOGGER &logger)
 {
     logger.log_count = 0;
-    memset(logger.DATA_STORE, 0, sizeof(logger.DATA_STORE)); // ToDo: check if this works
-    //? or this logger.DATA_STORE = {};
+    memset(logger.DATA_STORE, 0, sizeof(logger.DATA_STORE));
 }
 
 /**
@@ -1133,33 +1032,4 @@ void sendFromMemoryLog(LOGGER &logger)
 
     //? call resetLogger(logger) to reset the logger
     //? or just clear the memory
-}
-
-void print_wakeup_reason()
-{
-    esp_sleep_wakeup_cause_t wakeup_reason;
-
-    wakeup_reason = esp_sleep_get_wakeup_cause();
-
-    switch (wakeup_reason)
-    {
-    case ESP_SLEEP_WAKEUP_EXT0:
-        Serial.println("Wakeup caused by external signal using RTC_IO");
-        break;
-    case ESP_SLEEP_WAKEUP_EXT1:
-        Serial.println("Wakeup caused by external signal using RTC_CNTL");
-        break;
-    case ESP_SLEEP_WAKEUP_TIMER:
-        Serial.println("Wakeup caused by timer");
-        break;
-    case ESP_SLEEP_WAKEUP_TOUCHPAD:
-        Serial.println("Wakeup caused by touchpad");
-        break;
-    case ESP_SLEEP_WAKEUP_ULP:
-        Serial.println("Wakeup caused by ULP program");
-        break;
-    default:
-        Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
-        break;
-    }
 }
