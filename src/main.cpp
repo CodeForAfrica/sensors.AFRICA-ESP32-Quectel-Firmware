@@ -56,9 +56,6 @@
 #include <ArduinoJson.h>
 #include "dhtnew.h"
 
-#define uS_TO_S_FACTOR 1000000ULL /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP 30
-
 DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 unsigned long act_milli;
@@ -135,7 +132,6 @@ void memoryDataLog(LOGGER &logger, const char *data);
 void fileDataLog(LOGGER &logger);
 void resetLogger(LOGGER &logger);
 void sendFromMemoryLog(LOGGER &logger);
-void print_wakeup_reason();
 
 enum Month
 {
@@ -171,17 +167,6 @@ void setup()
     delay(2000);
     pms.sleep();
     dht.setType(DHTTYPE);
-
-    esp_err_t result = esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-
-    if (result == ESP_OK)
-    {
-        Serial.println("Timer Wake-Up set successfully as wake-up source.");
-    }
-    else
-    {
-        Serial.println("Failed to set Timer Wake-Up as wake-up source.");
-    }
 
     if (gsm_capable)
     {
@@ -271,30 +256,26 @@ void loop()
 {
     unsigned sum_send_time = 0;
     act_milli = millis();
-    print_wakeup_reason();
 
-    // #if defined(POWER_SAVING_MODE)
+#if defined(POWER_SAVING_MODE)
 
-    //     if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
-    //     {
-    //         getPMSREADINGS();
-    //         readDHT();
-    //         last_read_sensors_data = millis();
-    //     }
+    if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
+    {
+        getPMSREADINGS();
+        readDHT();
+        last_read_sensors_data = millis();
+    }
 
-    // #else
-    //     send_now = act_milli - starttime > sending_intervall_ms;
+#else
+    send_now = act_milli - starttime > sending_intervall_ms;
 
-    //     if (act_milli - last_read_sensors_data > sampling_interval)
-    //     {
-    //         getPMSREADINGS();
-    //         readDHT();
-    //         last_read_sensors_data = millis();
-    //     }
-    // #endif
-
-    getPMSREADINGS();
-    readDHT();
+    if (act_milli - last_read_sensors_data > sampling_interval)
+    {
+        getPMSREADINGS();
+        readDHT();
+        last_read_sensors_data = millis();
+    }
+#endif
 
     if (send_now)
     {
@@ -319,7 +300,6 @@ void loop()
 
         starttime = millis();
     }
-    esp_light_sleep_start();
 }
 
 void readDHT()
@@ -1042,33 +1022,4 @@ void sendFromMemoryLog(LOGGER &logger)
 
     //? call resetLogger(logger) to reset the logger
     //? or just clear the memory
-}
-
-void print_wakeup_reason()
-{
-    esp_sleep_wakeup_cause_t wakeup_reason;
-
-    wakeup_reason = esp_sleep_get_wakeup_cause();
-
-    switch (wakeup_reason)
-    {
-    case ESP_SLEEP_WAKEUP_EXT0:
-        Serial.println("Wakeup caused by external signal using RTC_IO");
-        break;
-    case ESP_SLEEP_WAKEUP_EXT1:
-        Serial.println("Wakeup caused by external signal using RTC_CNTL");
-        break;
-    case ESP_SLEEP_WAKEUP_TIMER:
-        Serial.println("Wakeup caused by timer");
-        break;
-    case ESP_SLEEP_WAKEUP_TOUCHPAD:
-        Serial.println("Wakeup caused by touchpad");
-        break;
-    case ESP_SLEEP_WAKEUP_ULP:
-        Serial.println("Wakeup caused by ULP program");
-        break;
-    default:
-        Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
-        break;
-    }
 }
