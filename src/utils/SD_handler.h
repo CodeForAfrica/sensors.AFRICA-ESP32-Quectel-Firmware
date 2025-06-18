@@ -2,7 +2,7 @@
 #include "SD.h"
 #include "SPI.h"
 
-bool SD_Init(int CS_PIN = -1)
+static bool SD_Init(int CS_PIN = -1)
 {
     bool SD_MOUNT = false;
     int timeout = 10;
@@ -38,7 +38,7 @@ bool SD_Init(int CS_PIN = -1)
     return SD_MOUNT;
 }
 
-void createDir(fs::FS &fs, const char *path)
+static void createDir(fs::FS &fs, const char *path)
 {
     Serial.printf("Creating Dir: %s\n", path);
     if (fs.mkdir(path))
@@ -51,7 +51,7 @@ void createDir(fs::FS &fs, const char *path)
     }
 }
 
-String readFile(fs::FS &fs, const char *path)
+static String readFile(fs::FS &fs, const char *path)
 {
     Serial.printf("Reading file: %s\n", path);
     String file_contents = "";
@@ -71,7 +71,7 @@ String readFile(fs::FS &fs, const char *path)
     return file_contents;
 }
 
-void writeFile(fs::FS &fs, const char *path, const char *message)
+static void writeFile(fs::FS &fs, const char *path, const char *message)
 {
     Serial.printf("Writing file: %s\n", path);
 
@@ -92,7 +92,7 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
     file.close();
 }
 
-void appendFile(fs::FS &fs, const char *path, const char *message, bool newline = true)
+static void appendFile(fs::FS &fs, const char *path, const char *message, bool newline = true)
 {
     Serial.print("Appending to file: ");
     Serial.println(path);
@@ -117,7 +117,7 @@ void appendFile(fs::FS &fs, const char *path, const char *message, bool newline 
     file.close();
 }
 
-bool SDattached()
+static bool SDattached()
 {
     if (SD.cardType() == CARD_NONE)
     {
@@ -146,7 +146,7 @@ bool SDattached()
     return true;
 }
 
-String readLine(fs::FS &fs, const char *path, int &next_char, int &from, bool closefile = true)
+static String readLine(fs::FS &fs, const char *path, int &next_char, int &from, bool closefile = true)
 {
     String line = "";
     char c;
@@ -187,14 +187,14 @@ String readLine(fs::FS &fs, const char *path, int &next_char, int &from, bool cl
     return line;
 }
 
-void updateFileContents(fs::FS &fs, const char *file_to_updated, const char *temp_file)
+static void updateFileContents(fs::FS &fs, const char *file_to_updated, const char *temp_file)
 {
 
     fs.remove(file_to_updated);
     fs.rename(temp_file, file_to_updated);
 }
 
-void closeFile(fs::FS &fs, const char *path)
+static void closeFile(fs::FS &fs, const char *path)
 {
     File file = fs.open(path);
     file.close();

@@ -1,4 +1,3 @@
-
 #ifndef GLOBAL_CONFIGS_H
 #define GLOBAL_CONFIGS_H
 
@@ -15,8 +14,8 @@ constexpr unsigned XLARGE_STR = 1024 - 1;
 
 #define POWER_SAVING_MODE 1
 
-bool gsm_capable = true;
-bool use_wifi = false;
+static bool gsm_capable = true;
+static bool use_wifi = false;
 #define GSM_DEBUG
 
 #define QUECTEL EC200CN
@@ -36,10 +35,10 @@ bool use_wifi = false;
 
 // SD CARD
 #define REASSIGN_PINS 1
-int SD_SCK = 38;
-int SD_MISO = 41;
-int SD_MOSI = 40;
-int SD_CS = 39;
+static int SD_SCK = 38;
+static int SD_MISO = 41;
+static int SD_MOSI = 40;
+static int SD_CS = 39;
 
 // #if defined(ESP32)
 // define pin for one wire sensors
