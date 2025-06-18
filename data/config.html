@@ -4,16 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Device Config</title>
-    <!-- Google Fonts for Material look -->
-    <link
-      href="https://fonts.googleapis.com/css?family=Roboto:400,500&display=swap"
-      rel="stylesheet"
-    />
-    <!-- Material Icons -->
-    <link
-      href="https://fonts.googleapis.com/icon?family=Material+Icons"
-      rel="stylesheet"
-    />
+ 
     <style>
       body {
         font-family: "Roboto", Arial, sans-serif;
@@ -29,11 +20,19 @@
         box-shadow: 0 4px 24px rgba(60, 72, 88, 0.12);
         padding: 32px 28px 24px 28px;
       }
-      h2 {
-        font-weight: 500;
+      h1 {
+        color: #3f51b5;
+        font-size: 1.3rem;
+        font-weight: 600;
+      }
+      #configForm h2 {
         color: #3f51b5;
         margin-bottom: 18px;
         font-size: 1.2rem;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
       }
       .form-group {
         margin-bottom: 22px;
@@ -124,35 +123,71 @@
       .submit-btn:hover {
         background: #283593;
       }
+      .fa-center{
+       display: flex;
+        align-items: center;
+       
+      }
+      .hotspots{padding-left:4px;}
+      .hotspots li {
+        gap:2rem;
+        div{
+          gap:0.5rem;
+        }
+        img{
+          width:1rem;
+          height:1rem;
+        }
+      }
     </style>
   </head>
-  <body>
+  <body onload="loadDeviceSettings()">
     <div class="container">
+      <div class="wifi_config">
+        <h1>Available WiFi hotspots</h1>
+        <div>
+          <ol class="hotspots">
+            <li class="fa-center" >
+              <span class="ssid">hotspot1</span> <div class="fa-center"><span>49%</span
+              ><img src="icons/lock.svg" /><div>
+            </li>
+            <li class="fa-center"><span class="ssid">hotspot2</span> <div class="fa-center"><span>72%</span></div></li>
+            <li class="fa-center">
+              <span class="ssid">hotspot3</span> <div class="fa-center"><span>20%</span
+              ><img src="icons/lock.svg" /></div>
+            </li>
+          </ol>
+        </div>
+      </div>
       <form id="configForm" autocomplete="off">
-        <h2>
-          <span class="material-icons" style="vertical-align: middle"
-            >wifi</span
-          >
+        <h2 class="wifi_config">
+          <span> <img src="icons/wifi.svg" alt="wifi_icon" /></span>
           WiFi Settings
         </h2>
-        <div class="form-group">
+        <div class="form-group wifi_config">
           <label for="ssid">WiFi SSID</label>
-          <input type="text" id="ssid" name="ssid" required />
+          <input type="text" id="ssid" name="ssid" />
         </div>
-        <div class="form-group">
+        <div class="form-group wifi_config">
           <label for="wifiPwd">WiFi Password</label>
           <input type="password" id="wifiPwd" name="wifiPwd" />
         </div>
         <h2>
-          <span class="material-icons" style="vertical-align: middle"
-            >cell_tower</span
-          >
+          <span> <img src="icons/cell_tower.svg" alt="cell_tower" /></span>
           GSM Config
         </h2>
         <div class="form-group">
           <label for="apn">APN</label>
-          <input type="text" id="apn" name="apn" required />
+          <input type="text" id="apn" name="apn" />
         </div>
+        <div class="form-group">
+          <label for="apn_pwd">PWD</label>
+          <input type="text" id="apn_pwd" name="apn_wd" />
+        </div>
+        <h2>
+          <span> <img src="icons/simcard.svg" alt="cell_tower" /></span>
+          SIM config
+        </h2>
         <div class="form-group">
           <label for="simPin">SIM PIN</label>
           <input type="password" id="simPin" name="simPin" maxlength="8" />
@@ -173,10 +208,23 @@
         .addEventListener("submit", function (e) {
           e.preventDefault();
           if (confirm("Are you sure you want to save these settings?")) {
-            // You can handle the form submission here
             alert("Settings saved!");
           }
         });
+        function loadDeviceSettings() {
+        const xhttp = new XMLHttpRequest();
+        xhttp.onload = function() {
+          let device_info=JSON.parse(this.responseText);
+          if(!device_info[wifi_available]){
+            const elems = document.querySelectorAll('.wifi_config');
+            for (el in elems){
+              el.style.display='none';
+            }
+          }
+        }
+        xhttp.open("GET", "/device-info.json", true);
+        xhttp.send();
+  }
     </script>
   </body>
 </html>
