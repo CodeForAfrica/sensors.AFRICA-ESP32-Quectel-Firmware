@@ -54,6 +54,7 @@
 #include <TimeLib.h>
 #include <ESP32Time.h>
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 #include "dhtnew.h"
 
 DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
@@ -137,6 +138,9 @@ void memoryDataLog(LOGGER &logger, const char *data);
 void fileDataLog(LOGGER &logger);
 void resetLogger(LOGGER &logger);
 void sendFromMemoryLog(LOGGER &logger);
+JsonDocument getDeviceConfig();
+void updateDeviceConfig();
+void saveConfig(JsonDocument &doc);
 
 enum Month
 {
@@ -1032,4 +1036,37 @@ void sendFromMemoryLog(LOGGER &logger)
 
     //? call resetLogger(logger) to reset the logger
     //? or just clear the memory
+}
+
+JsonDocument getDeviceConfig()
+{
+    JsonDocument doc;
+    String config_data = readFile(LittleFS, "/config.json");
+    if (config_data != "" && validateJson(config_data.c_str()))
+    {
+        deserializeJson(doc, config_data);
+        return doc;
+    }
+
+    return doc;
+}
+
+void updateDeviceConfig()
+{
+
+    JsonDocument config = getDeviceConfig();
+
+    config["gsm_capable"] = gsm_capable;
+    config["wifi_available"] = use_wifi;
+
+    saveConfig(config);
+}
+
+void saveConfig(JsonDocument &doc)
+{
+    const char *new_config_file = "/config.json.new";
+    String json_stringified = "";
+    serializeJson(doc, json_stringified);
+    writeFile(LittleFS, new_config_file, json_stringified.c_str());
+    updateFileContents(LittleFS, "/config.json", new_config_file);
 }

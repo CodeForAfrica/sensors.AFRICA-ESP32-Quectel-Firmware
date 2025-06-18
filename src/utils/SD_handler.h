@@ -51,23 +51,24 @@ void createDir(fs::FS &fs, const char *path)
     }
 }
 
-void readFile(fs::FS &fs, const char *path)
+String readFile(fs::FS &fs, const char *path)
 {
     Serial.printf("Reading file: %s\n", path);
-
+    String file_contents = "";
     File file = fs.open(path);
     if (!file)
     {
         Serial.println("Failed to open file for reading");
-        return;
+        return "";
     }
 
     Serial.print("Read from file: ");
     while (file.available())
     {
-        Serial.write(file.read());
+        file_contents += file.read();
     }
     file.close();
+    return file_contents;
 }
 
 void writeFile(fs::FS &fs, const char *path, const char *message)

@@ -16,6 +16,7 @@ constexpr unsigned XLARGE_STR = 1024 - 1;
 #define POWER_SAVING_MODE 1
 
 bool gsm_capable = true;
+bool use_wifi = false;
 #define GSM_DEBUG
 
 #define QUECTEL EC200CN
