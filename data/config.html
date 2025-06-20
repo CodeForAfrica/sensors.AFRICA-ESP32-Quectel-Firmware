@@ -146,7 +146,7 @@
       <div class="wifi_config">
         <h1>Available WiFi hotspots</h1>
         <div>
-          <ol class="hotspots">
+          <ol class="hotspots" id="hotspots">
             <li class="fa-center" >
               <span class="ssid">hotspot1</span> <div class="fa-center"><span>49%</span
               ><img src="icons/lock.svg" /><div>
@@ -221,9 +221,37 @@
               el.style.display='none';
             }
           }
+          else{
+            getAvailableWifiHotspots();
+          }
         }
         xhttp.open("GET", "/device-info.json", true);
         xhttp.send();
+  }
+
+  function getAvailableWifiHotspots(){
+        const hotspots_container=getElementById("hotspots");
+        let hotsposts_ui_list="";
+        const xhttp = new XMLHttpRequest();
+        xhttp.onload = function() {
+          const hotspots=JSON.parse(this.responseText);
+          for(const ssid in hotspots){
+            let el=`<li class="fa-center" >
+              <span class="ssid">${ssid}</span> <div class="fa-center"><span>${hotspots[ssid].rssi}dBm</span
+              >`;
+             if(hotspots[ssid].encType>0){
+               el+=`<img src="icons/lock.svg" /><div>`
+
+               }
+
+             el+=`</li>`
+             hotsposts_ui_list+=el;
+          }
+           hotspots_container+=hotsposts_ui_list;
+        }
+        xhttp.open("GET", "/device-info.json", true);
+        xhttp.send();
+
   }
     </script>
   </body>
