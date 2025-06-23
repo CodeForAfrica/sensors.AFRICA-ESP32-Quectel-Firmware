@@ -19,6 +19,14 @@ void setup_webserver()
               { request->send(LittleFS, "/config.html"); });
     server.on("/sensors_logo.png", HTTP_GET, [](AsyncWebServerRequest *request)
               { request->send(200, "image/png", SENSORSAFRICA_LOGO, SENSORSAFRICA_LOGO_PNG_SIZE); });
+    server.on("/icons/wifi.svg", HTTP_GET, [](AsyncWebServerRequest *request)
+              { request->send(LittleFS, "/icons/wifi.svg"); });
+    server.on("/icons/simcard.svg", HTTP_GET, [](AsyncWebServerRequest *request)
+              { request->send(LittleFS, "/icons/simcard.svg"); });
+    server.on("/icons/lock.svg", HTTP_GET, [](AsyncWebServerRequest *request)
+              { request->send(LittleFS, "/icons/lock.svg"); });
+    server.on("/icons/cell_tower.svg", HTTP_GET, [](AsyncWebServerRequest *request)
+              { request->send(LittleFS, "/icons/cell-tower.svg"); });
     server.on("/device-config.json", [](AsyncWebServerRequest *request)
               {
         JsonDocument data=getDeviceConfig();
