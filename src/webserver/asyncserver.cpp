@@ -26,7 +26,7 @@ void setup_webserver()
     server.on("/icons/lock.svg", HTTP_GET, [](AsyncWebServerRequest *request)
               { request->send(LittleFS, "/icons/lock.svg"); });
     server.on("/icons/cell_tower.svg", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/icons/cell-tower.svg"); });
+              { request->send(LittleFS, "/icons/cell_tower.svg"); });
     server.on("/device-config.json", [](AsyncWebServerRequest *request)
               {
         JsonDocument data=getDeviceConfig();
