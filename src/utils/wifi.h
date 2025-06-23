@@ -1,3 +1,6 @@
+
+#ifndef WIFI_H
+#define WIFI_H
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <DNSServer.h>
@@ -10,23 +13,24 @@ struct struct_wifiInfo
     int32_t channel;
 };
 
-struct struct_wifiInfo *wifiInfo;
-uint8_t count_wifiInfo;
+static struct struct_wifiInfo *wifiInfo;
+static uint8_t count_wifiInfo;
 
-const IPAddress AP_IP(192, 168, 4, 1);
-DNSServer dnsServer;
+static const IPAddress AP_IP(192, 168, 4, 1);
+static DNSServer dnsServer;
 
 // extern bool wificonfig_loop;
 
 // Function declarations;
-void wifi_networks_scan();
+static void wifi_networks_scan();
 static void wifiAPbegin(const char *WIFI_AP_ID, const char *WIFI_AP_PWD);
 static int selectChannelForAp();
 static void wifi_Config();
 static void waitForWifiToConnect(int maxRetries);
-static void connectWifi();
+static void wifiAPstop();
+// static void connectWifi();
 
-void wifi_networks_scan()
+static void wifi_networks_scan()
 {
     WiFi.disconnect(true);
     Serial.println("Scanning for WiFi networks..");
@@ -52,9 +56,9 @@ static void wifiAPbegin(const char *WIFI_AP_ID, const char *WIFI_AP_PWD)
 {
     Serial.print("Starting WiFiManager: ");
     Serial.print("AP ID: ");
-    // Serial.print(WIFI_AP_ID);
-    // Serial.print(" Password: ");
-    // Serial.println(WIFI_AP_PWD);
+    Serial.print(WIFI_AP_ID);
+    Serial.print(" Password: ");
+    Serial.println(WIFI_AP_PWD);
 
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
@@ -89,6 +93,13 @@ static void wifi_Config()
 
     // WiFi.begin(cfg::wlanssid, cfg::wlanpwd);
     // wificonfig_loop = false;
+}
+
+static void wifiAPstop()
+{
+    WiFi.softAPdisconnect(true);
+    dnsServer.stop();
+    delay(100);
 }
 
 static int selectChannelForAp()
@@ -198,6 +209,7 @@ static void connectWifi(const char *WLANSSID, const char *WLANPWD)
     }
 }
 
+#endif
 // // FROM OLD FIRMWARE
 
 // // init_config();
