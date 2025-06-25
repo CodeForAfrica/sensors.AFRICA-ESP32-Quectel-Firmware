@@ -13,8 +13,8 @@ struct struct_wifiInfo
     int32_t channel;
 };
 
-static struct struct_wifiInfo *wifiInfo;
-static uint8_t count_wifiInfo;
+extern struct_wifiInfo *wifiInfo;
+extern uint8_t count_wifiInfo;
 
 static const IPAddress AP_IP(192, 168, 4, 1);
 static DNSServer dnsServer;
@@ -22,7 +22,7 @@ static DNSServer dnsServer;
 // extern bool wificonfig_loop;
 
 // Function declarations;
-static void wifi_networks_scan();
+static void wifi_networks_scan(struct_wifiInfo *wifiInfo, uint8_t &count_wifiInfo);
 static void wifiAPbegin(const char *WIFI_AP_ID, const char *WIFI_AP_PWD);
 static int selectChannelForAp();
 static void wifi_Config();
@@ -30,14 +30,15 @@ static void waitForWifiToConnect(int maxRetries);
 static void wifiAPstop();
 // static void connectWifi();
 
-static void wifi_networks_scan()
+static void wifi_networks_scan(struct_wifiInfo *wifiInfo, uint8_t &count_wifiInfo)
 {
     WiFi.disconnect(true);
     Serial.println("Scanning for WiFi networks..");
     count_wifiInfo = WiFi.scanNetworks(false /* scan async */, true /* show hidden networks */);
     delete[] wifiInfo;
     wifiInfo = new struct_wifiInfo[count_wifiInfo];
-
+    Serial.println("\n----Available hotspots---");
+    Serial.println("SSID\tEncryption\tRSSI");
     for (int i = 0; i < count_wifiInfo; i++)
     {
         String SSID;
@@ -49,6 +50,12 @@ static void wifi_networks_scan()
                             wifiInfo[i].RSSI, BSSID, wifiInfo[i].channel);
 
         SSID.toCharArray(wifiInfo[i].ssid, sizeof(wifiInfo[0].ssid));
+
+        Serial.print(SSID);
+        Serial.print("\t");
+        Serial.print(wifiInfo[i].encryptionType);
+        Serial.print("\t");
+        Serial.println(wifiInfo[i].RSSI);
     }
 }
 

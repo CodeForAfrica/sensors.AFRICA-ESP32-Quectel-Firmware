@@ -214,8 +214,10 @@
         function loadDeviceSettings() {
         const xhttp = new XMLHttpRequest();
         xhttp.onload = function() {
+          console.log("Received response: ");
+          console.log(this.responseText);
           let device_info=JSON.parse(this.responseText);
-          if(!device_info[wifi_available]){
+          if(device_info&&device_info[wifi_available]!=undefined){
             const elems = document.querySelectorAll('.wifi_config');
             for (el in elems){
               el.style.display='none';
@@ -230,11 +232,12 @@
   }
 
   function getAvailableWifiHotspots(){
-        const hotspots_container=getElementById("hotspots");
+        let hotspots_container=document.getElementById("hotspots");
         let hotsposts_ui_list="";
         const xhttp = new XMLHttpRequest();
         xhttp.onload = function() {
           const hotspots=JSON.parse(this.responseText);
+          console.log("hotspots: ",hotspots);
           for(const ssid in hotspots){
             let el=`<li class="fa-center" >
               <span class="ssid">${ssid}</span> <div class="fa-center"><span>${hotspots[ssid].rssi}dBm</span
@@ -247,11 +250,10 @@
              el+=`</li>`
              hotsposts_ui_list+=el;
           }
-           hotspots_container+=hotsposts_ui_list;
+           hotspots_container.innerHTML=hotsposts_ui_list;
         }
-        xhttp.open("GET", "/device-info.json", true);
+        xhttp.open("GET", "/available-hotspots", true);
         xhttp.send();
-
   }
     </script>
   </body>

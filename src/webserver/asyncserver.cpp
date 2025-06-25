@@ -8,6 +8,8 @@
 #include "../utils/wifi.h"
 
 AsyncWebServer server(80);
+extern struct_wifiInfo *wifiInfo;
+extern uint8_t count_wifiInfo;
 
 void setup_webserver()
 {
@@ -27,7 +29,7 @@ void setup_webserver()
               { request->send(LittleFS, "/icons/lock.svg"); });
     server.on("/icons/cell_tower.svg", HTTP_GET, [](AsyncWebServerRequest *request)
               { request->send(LittleFS, "/icons/cell_tower.svg"); });
-    server.on("/device-config.json", [](AsyncWebServerRequest *request)
+    server.on("/device-info.json", [](AsyncWebServerRequest *request)
               {
         JsonDocument data=getDeviceConfig();
         String data_str;
@@ -36,15 +38,18 @@ void setup_webserver()
     server.on("/available-hotspots", HTTP_GET, [](AsyncWebServerRequest *request)
               {
                   JsonDocument doc;
-
+                  Serial.print("Wifi hotspots: ");
+                  Serial.println(count_wifiInfo);
                   for (uint8_t i = 0; i < count_wifiInfo; i++)
-                  {   
+                  {
+                    Serial.println(wifiInfo[i].ssid);
                     JsonObject SSID = doc[wifiInfo[i].ssid].to<JsonObject>();
                     SSID["rssi"] = wifiInfo[i].RSSI;
                     SSID["encType"] = wifiInfo[i].encryptionType;
                   }
 
                   String hotspots;
+                  serializeJsonPretty(doc,Serial);
                   serializeJson(doc, hotspots);
                   request->send(200,"application/json",hotspots); });
     server.begin();
