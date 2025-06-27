@@ -95,7 +95,7 @@ struct datetimetz
     char timezone[6] = {}; // e.g. +0300 // +03
 } esp_datetime_tz;
 
-enum SensorAPN_PIN
+enum SensorAPI_PIN
 {
     PMS = PMS_API_PIN,
     DHT = 7
@@ -122,7 +122,7 @@ void readDHT();
 void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
-void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size);
+void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPI_PIN pin, size_t size);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
 datetimetz extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
@@ -345,7 +345,7 @@ void readDHT()
             add_value2JSON_array(DHT_data, "temperature", temperature);
             add_value2JSON_array(DHT_data, "humidity", humidity);
             // serializeJsonPretty(DHT_data_doc, Serial);
-            generateJSON_payload(resultDHT, DHT_data_doc, datetime.c_str(), SensorAPN_PIN::DHT, sizeof(resultDHT));
+            generateJSON_payload(resultDHT, DHT_data_doc, datetime.c_str(), SensorAPI_PIN::DHT, sizeof(resultDHT));
             memoryDataLog(JSON_PAYLOAD_LOGGER, resultDHT);
 
             // Generate CSV data and log to memory
@@ -422,7 +422,7 @@ void getPMSREADINGS()
             add_value2JSON_array(PM_data, "P2", pms.pm10);
 
             // serializeJsonPretty(PM_data_doc, Serial);
-            generateJSON_payload(result_PMS, PM_data_doc, datetime.c_str(), SensorAPN_PIN::PMS, sizeof(result_PMS));
+            generateJSON_payload(result_PMS, PM_data_doc, datetime.c_str(), SensorAPI_PIN::PMS, sizeof(result_PMS));
 
             memoryDataLog(JSON_PAYLOAD_LOGGER, result_PMS);
 
@@ -499,7 +499,7 @@ void printPM_Error()
     @param size : size of the buffer
     @return : void
 **/
-void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size)
+void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPI_PIN pin, size_t size)
 {
     JsonDocument payload;
 
@@ -510,15 +510,15 @@ void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, 
     // char sensor_type[24] = ",\"type\":\"";
     switch (pin)
     {
-    case SensorAPN_PIN::PMS:
+    case SensorAPI_PIN::PMS:
         // strcat(res, "PMS\"");
         payload["sensor_type"] = "PMS";
-        payload["APN_PIN"] = pin;
+        payload["API_PIN"] = pin;
         break;
-    case SensorAPN_PIN::DHT:
+    case SensorAPI_PIN::DHT:
         // strcat(res, "DHT\"");
         payload["sensor_type"] = "DHT";
-        payload["APN_PIN"] = pin;
+        payload["API_PIN"] = pin;
         break;
     default:
         Serial.println("Unsupported sensor pin");
@@ -874,12 +874,12 @@ void readSendDelete(const char *datafile)
         if (data != "")
         {
             JsonDocument doc;
-            deserializeJson(doc, data);        // Extract APN_PIN from the JSON data
-            int api_pin = doc["APN_PIN"] | -1; // Default to -1 if not found
+            deserializeJson(doc, data);        // Extract API_PIN from the JSON data
+            int api_pin = doc["API_PIN"] | -1; // Default to -1 if not found
 
             if (api_pin == -1)
             {
-                Serial.println("APN_PIN not found in JSON data ");
+                Serial.println("API_PIN not found in JSON data ");
                 continue; // Skip this data if API_PIN is not found
             }
             // Attempt send payload
