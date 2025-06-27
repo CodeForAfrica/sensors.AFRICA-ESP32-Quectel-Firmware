@@ -6,7 +6,7 @@ static const char HOST_CFA[] = "staging.api.sensors.africa";
 static const char URL_CFA[] = "/v1/push-sensor-data/";
 #define PORT_CFA 80
 
-static const char SENSOR_PREFIX[] = "esp32-";
+static const char SENSOR_PREFIX[] = "ESP32-";
 
 constexpr unsigned SMALL_STR = 64 - 1;
 constexpr unsigned MED_STR = 256 - 1;
