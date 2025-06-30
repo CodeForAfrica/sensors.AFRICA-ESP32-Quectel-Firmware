@@ -418,8 +418,8 @@ void getPMSREADINGS()
             JsonArray PM_data = PM_data_doc.to<JsonArray>();
 
             add_value2JSON_array(PM_data, "P0", pms.pm01);
-            add_value2JSON_array(PM_data, "P1", pms.pm25);
-            add_value2JSON_array(PM_data, "P2", pms.pm10);
+            add_value2JSON_array(PM_data, "P1", pms.pm10);
+            add_value2JSON_array(PM_data, "P2", pms.pm25);
 
             // serializeJsonPretty(PM_data_doc, Serial);
             generateJSON_payload(result_PMS, PM_data_doc, datetime.c_str(), SensorAPI_PIN::PMS, sizeof(result_PMS));
