@@ -98,7 +98,7 @@ struct datetimetz
 enum SensorAPI_PIN
 {
     PMS = PMS_API_PIN,
-    DHT = 7
+    DHT = DHT_API_PIN
 };
 
 enum DATA_LOGGERS
@@ -1020,11 +1020,18 @@ void sendFromMemoryLog(LOGGER &logger)
     {
         if (strlen(logger.DATA_STORE[i]) != 0)
         {
-            if (!sendData(logger.DATA_STORE[i], PMS_API_PIN, HOST_CFA, URL_CFA))
+            JsonDocument doc;
+            deserializeJson(doc, logger.DATA_STORE[i]); // Extract API_PIN from the JSON data
+            int api_pin = doc["API_PIN"] | -1;
+            if (api_pin != -1)
             {
-                // Append to file for sending later
-                appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
+                if (!sendData(logger.DATA_STORE[i], api_pin, HOST_CFA, URL_CFA))
+                {
+                    // Append to file for sending later
+                    appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
+                }
             }
+
             memset(logger.DATA_STORE[i], '\0', 255);
         }
     }
