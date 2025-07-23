@@ -125,19 +125,36 @@
       }
       .fa-center{
        display: flex;
-        align-items: center;
+       align-items: center;
        
       }
-      .hotspots{padding-left:4px;}
+      .hotspots{padding-left:4px}
       .hotspots li {
-        gap:2rem;
         div{
-          gap:0.5rem;
+          gap:1rem;
+          width:30%;
+          margin-left:4px;
         }
         img{
           width:1rem;
           height:1rem;
         }
+      }
+      .bordered {
+        border: 1px solid #cfd8dc;
+      }
+  
+      .ssid{
+        font-weight: 500;
+        color: #333;
+        padding: 0.2rem 0;
+        width:70%;
+      }
+      .c-primary{
+        color:#283593;
+      }
+      .b-right{
+        border-right:1px solid #cfd8dc;
       }
     </style>
   </head>
@@ -146,12 +163,26 @@
       <div class="wifi_config">
         <h1>Available WiFi hotspots</h1>
         <div>
+          <ol class="hotspots bordered c-primary">
+            <li class="fa-center " >
+              <span class="ssid b-right c-primary">SSID</span> <div class="fa-center"><span>RSSI</span
+              ><span>Security</span></div>
+            </li>
+          </ol>
+        </div>
+        <div>
           <ol class="hotspots" id="hotspots">
             <li class="fa-center" >
-              <span class="ssid">hotspot1</span> <div class="fa-center"><span>49%</span
-              ><img src="icons/lock.svg" /><div>
+              <span class="ssid">hotspot1 sjkswklelleeee</span>
+               <div class="fa-center"><span>49%</span
+              ><img src="icons/lock.svg" />
+              <div>
             </li>
-            <li class="fa-center"><span class="ssid">hotspot2</span> <div class="fa-center"><span>72%</span></div></li>
+            <li class="fa-center" >
+              <span class="ssid">hotspot2</span> <div class="fa-center "><span>72%</span
+              ><div>
+            </li>
+           
             <li class="fa-center">
               <span class="ssid">hotspot3</span> <div class="fa-center"><span>20%</span
               ><img src="icons/lock.svg" /></div>
@@ -161,7 +192,9 @@
       </div>
       <form id="configForm" autocomplete="off">
         <h2 class="wifi_config">
-          <span> <img src="icons/wifi.svg" alt="wifi_icon" /></span>
+          <span> 
+            <img src="icons/wifi.svg" alt="wifi_icon" />
+          </span>
           WiFi Settings
         </h2>
         <div class="form-group wifi_config">
@@ -185,7 +218,7 @@
           <input type="text" id="apn_pwd" name="apn_wd" />
         </div>
         <h2>
-          <span> <img src="icons/simcard.svg" alt="cell_tower" /></span>
+          <span> <img src="icons/simcard.svg" alt="simcard" /></span>
           SIM config
         </h2>
         <div class="form-group">
