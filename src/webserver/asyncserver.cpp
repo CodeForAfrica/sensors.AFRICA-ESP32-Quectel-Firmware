@@ -13,30 +13,30 @@ extern uint8_t count_wifiInfo;
 
 void setup_webserver()
 {
-    server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/config.html"); });
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/index.html"); });
-    server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/config.html"); });
-    server.on("/sensors_logo.png", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(200, "image/png", SENSORSAFRICA_LOGO, SENSORSAFRICA_LOGO_PNG_SIZE); });
-    server.on("/icons/wifi.svg", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/icons/wifi.svg"); });
-    server.on("/icons/simcard.svg", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/icons/simcard.svg"); });
-    server.on("/icons/lock.svg", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/icons/lock.svg"); });
-    server.on("/icons/cell_tower.svg", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/icons/cell_tower.svg"); });
-    server.on("/device-info.json", [](AsyncWebServerRequest *request)
-              {
+  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/config.html"); });
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/index.html"); });
+  server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/config.html"); });
+  server.on("/sensors_logo.png", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(200, "image/png", SENSORSAFRICA_LOGO, SENSORSAFRICA_LOGO_PNG_SIZE); });
+  server.on("/icons/wifi.svg", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/icons/wifi.svg", "image/svg+xml"); });
+  server.on("/icons/simcard.svg", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/icons/simcard.svg", "image/svg+xml"); });
+  server.on("/icons/lock.svg", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/icons/lock.svg", "image/svg+xml"); });
+  server.on("/icons/cell_tower.svg", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/icons/cell_tower.svg", "image/svg+xml"); });
+  server.on("/device-info.json", [](AsyncWebServerRequest *request)
+            {
         JsonDocument data=getDeviceConfig();
         String data_str;
         serializeJson(data,data_str);
         request->send(200,"application/json",data_str); });
-    server.on("/available-hotspots", HTTP_GET, [](AsyncWebServerRequest *request)
-              {
+  server.on("/available-hotspots", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
                   JsonDocument doc;
                   Serial.print("Wifi hotspots: ");
                   Serial.println(count_wifiInfo);
@@ -52,5 +52,5 @@ void setup_webserver()
                   serializeJsonPretty(doc,Serial);
                   serializeJson(doc, hotspots);
                   request->send(200,"application/json",hotspots); });
-    server.begin();
+  server.begin();
 }
