@@ -21,6 +21,7 @@ bool gsm_capable = true;
 #define QUECTEL EC200CN
 
 #define PMS_API_PIN 1
+#define DHT_API_PIN 7
 
 // PIN DEFINITIONS
 #define MCU_RXD 17
