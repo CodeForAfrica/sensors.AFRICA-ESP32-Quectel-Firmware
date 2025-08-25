@@ -2,13 +2,13 @@
  * @file main.cpp
  * @brief Implementation of an ESP32-based sensor data logger and transmitter.
  *
- * This program is designed to collect data from sensors (e.g., PMS5003), log the data in memory and on an SD card,
+ * This program is designed to collect data from sensors (e.g., PMS5003, DHT22), log the data in memory and on an SD card,
  * and transmit the data to a remote server using GSM/GPRS. The program supports JSON and CSV data formats for logging
  * and transmission. It also handles network time synchronization and manages failed data transmissions by retrying
  * them later.
  *
  * @details
- * - The program initializes the PMS5003 sensor and GSM module (if available).
+ * - The program initializes the PMS5003 sensor, DHT22 sensor (if available), and GSM module (if available).
  * - Data is collected at regular intervals and logged in memory or on an SD card.
  * - Data is transmitted to a server at specified intervals.
  * - Failed transmissions are stored and retried later.
@@ -19,8 +19,8 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gdieon Maina
- * @date 2025-04-25
- * @version 1.1.0
+ * @date 2025-06-13
+ * @version 1.2.0
  *
  * @dependencies
  * - ArduinoJson
@@ -28,12 +28,14 @@
  * - PMserial
  * - SD_handler
  * - GSM_handler
+ * - dhtnew : https://github.com/RobTillaart/DHTNew
  *
  * @hardware
  * - ESP32 microcontroller
  * - PMS5003 sensor
  * - GSM module
  * - SD card module
+ * - DHT22 sensor (optional)
  *
  * @todo
  * - Implement support for other network connections (e.g., WiFi, LoRa).
@@ -45,28 +47,31 @@
  */
 
 #include "global_configs.h"
+#include "helpers.h"
 #include "PMserial.h"
-#include "SD_handler.h"
-#include "GSM_handler.h"
+#include "utils/SD_handler.h"
+#include "utils/GSM_handler.h"
 #include <TimeLib.h>
+#include <ESP32Time.h>
 #include <ArduinoJson.h>
+#include "dhtnew.h"
 
+DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
+
+const unsigned long ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
+const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS / 28; // force a reboot every month /
+
 unsigned long act_milli;
-unsigned long last_read_pms = 0;
+unsigned long last_read_sensors_data = 0;
 int sampling_interval = 5 * 60 * 1000; // 5 minutes
-unsigned long starttime = 0;
+unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
+
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
 
 bool SD_Attached = false;
-
-#define REASSIGN_PINS 1
-int SD_SCK = 38;
-int SD_MISO = 41;
-int SD_MOSI = 40;
-int SD_CS = 39;
 
 char ROOT_DIR[24] = {};
 char BASE_SENSORS_DATA_DIR[20] = "/SENSORSDATA";
@@ -80,12 +85,20 @@ char esp_chipid[18] = {};
 
 bool send_now = false;
 
+ESP32Time RTC;
 char time_buff[32] = {};
+const char *ISO_time_format = "%Y-%m-%dT%H:%M:%S"; // ISO 8601 format
+struct datetimetz
+{
+    tmElements_t datetime;
+    time_t timestamp;
+    char timezone[6] = {}; // e.g. +0300 // +03
+} esp_datetime_tz;
 
-enum SensorAPN_PIN
+enum SensorAPI_PIN
 {
     PMS = PMS_API_PIN,
-    DHT = 7
+    DHT = DHT_API_PIN
 };
 
 enum DATA_LOGGERS
@@ -105,32 +118,25 @@ struct LOGGER
     int log_count = 0;
 } JSON_PAYLOAD_LOGGER, CSV_PAYLOAD_LOGGER;
 
+void readDHT();
 void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
-void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value);
-void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size);
-bool validateJson(const char *input);
+void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPI_PIN pin, size_t size);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
-String extractDateTime(String datetimeStr);
+datetimetz extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
+String getRTCdatetimetz(const char *format, char *timezone);
 void init_memory_loggers();
 void init_SD_loggers();
 void getMonthName(int month_num, char *month);
 void readSendDelete(const char *datafile);
-void initCalenderFromNetworkTime();
-void updateCalendarFromNetworkTime();
+void initCalender(int year, int month);
+void updateCalendarFromRTC();
 void memoryDataLog(LOGGER &logger, const char *data);
 void fileDataLog(LOGGER &logger);
 void resetLogger(LOGGER &logger);
 void sendFromMemoryLog(LOGGER &logger);
-
-template <typename T>
-void generateCSV_payload(char *res, size_t res_size, const char *timestamp, const char *value_type, T value, const char *unit, const char *sensor_type)
-{
-    // ToDo: check if the value is a string or number (int, float, etc.)
-    snprintf(res, res_size, "%s,%s,%d,%s,%s", timestamp, value_type, value, unit, sensor_type);
-}
 
 enum Month
 {
@@ -150,12 +156,11 @@ enum Month
 };
 
 int current_year, current_month = 0;
-int network_year, network_month = 0;
 
 void setup()
 {
     Serial.begin(115200);
-
+    boottime = millis();
     uint64_t chipid_num;
     chipid_num = ESP.getEfuseMac();
     snprintf(esp_chipid, sizeof(esp_chipid), "%llX", chipid_num);
@@ -164,6 +169,9 @@ void setup()
     Serial.println("Initializing PMS5003 sensor");
     init_memory_loggers();
     pms.init();
+    delay(2000);
+    pms.sleep();
+    dht.setType(DHTTYPE);
 
     if (gsm_capable)
     {
@@ -200,15 +208,20 @@ void setup()
 
                 if (getNetworkTime(time_buff))
                 {
-                    Serial.println("Time: " + String(time_buff));
-                    extractDateTime(String(time_buff));
-                    initCalenderFromNetworkTime();
+
+                    // update RTC time and calendar;
+                    Serial.println("GSM Network Time: " + String(time_buff));
+                    esp_datetime_tz = extractDateTime(String(time_buff));
+                    RTC.setTime(esp_datetime_tz.timestamp);
+                    initCalender(RTC.getYear(), RTC.getMonth() + 1);
                 }
                 else
                 {
                     Serial.println("Failed to fetch time from network");
                 }
             }
+
+            GSM_sleep();
         }
         else
         {
@@ -243,15 +256,31 @@ void setup()
     starttime = millis();
 }
 
+// ToDo: introduce ESP light sleep mode
 void loop()
 {
     unsigned sum_send_time = 0;
     act_milli = millis();
-    send_now = act_milli - starttime > sending_intervall_ms;
-    if (act_milli - last_read_pms > sampling_interval)
+
+#if defined(POWER_SAVING_MODE)
+
+    if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
     {
         getPMSREADINGS();
+        readDHT();
+        last_read_sensors_data = millis();
     }
+
+#else
+    send_now = act_milli - starttime > sending_intervall_ms;
+
+    if (act_milli - last_read_sensors_data > sampling_interval)
+    {
+        getPMSREADINGS();
+        readDHT();
+        last_read_sensors_data = millis();
+    }
+#endif
 
     if (send_now)
     {
@@ -265,61 +294,135 @@ void loop()
 
             // Send data from memory loggers
             sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
-
             // send payloads from the files that stores data that failed posting previously
             readSendDelete(SENSORS_FAILED_DATA_SEND_STORE_PATH);
 
             // Serial.println("Time for Sending (ms): " + String(sum_send_time));
 
             // Serial.println("Sent data counts: " + count_sends);
+            GSM_sleep();
         }
 
         starttime = millis();
+    }
+
+    if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
+    {
+        ESP.restart();
+    }
+}
+
+void readDHT()
+{
+
+    delay(2000);
+    char resultDHT[255] = {};
+    Serial.print("Reading DHT22...");
+    uint32_t start = millis();
+    int chk = dht.read();
+    uint32_t stop = millis();
+
+    switch (chk)
+    {
+    case DHTLIB_OK:
+    {
+        uint32_t duration = stop - start;
+        Serial.print("DHT read duration: ");
+        Serial.println(duration);
+        char buf[128] = {};
+        float temperature = dht.getTemperature();
+        float humidity = dht.getHumidity();
+        String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
+        sprintf(buf, "Temperature %0.1f C, Humidity %0.1f %% RH", temperature, humidity);
+
+        Serial.println(buf);
+        if (datetime != "")
+        {
+            updateCalendarFromRTC(); // In case we roll into a new year or month.
+            // Generate JSON data
+            JsonDocument DHT_data_doc;
+            JsonArray DHT_data = DHT_data_doc.to<JsonArray>();
+            add_value2JSON_array(DHT_data, "temperature", temperature);
+            add_value2JSON_array(DHT_data, "humidity", humidity);
+            // serializeJsonPretty(DHT_data_doc, Serial);
+            generateJSON_payload(resultDHT, DHT_data_doc, datetime.c_str(), SensorAPI_PIN::DHT, sizeof(resultDHT));
+            memoryDataLog(JSON_PAYLOAD_LOGGER, resultDHT);
+
+            // Generate CSV data and log to memory
+            generateCSV_payload(resultDHT, sizeof(resultDHT), datetime.c_str(), "temperature", temperature, "°C", "DHT22");
+            generateCSV_payload(resultDHT, sizeof(resultDHT), datetime.c_str(), "humidity", humidity, "%", "DHT22");
+            memoryDataLog(CSV_PAYLOAD_LOGGER, resultDHT);
+        }
+
+        break;
+    }
+    case DHTLIB_ERROR_CHECKSUM:
+        Serial.print("Checksum error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_A:
+        Serial.print("Time out A error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_B:
+        Serial.print("Time out B error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_C:
+        Serial.print("Time out C error,\t");
+        break;
+    case DHTLIB_ERROR_TIMEOUT_D:
+        Serial.print("Time out D error,\t");
+        break;
+    case DHTLIB_ERROR_SENSOR_NOT_READY:
+        Serial.print("Sensor not ready,\t");
+        break;
+    case DHTLIB_ERROR_BIT_SHIFT:
+        Serial.print("Bit shift error,\t");
+        break;
+    case DHTLIB_WAITING_FOR_READ:
+        Serial.print("Waiting for read,\t");
+        break;
+    default:
+        Serial.print("Unknown: ");
+        Serial.print(chk);
+        Serial.print(",\t");
+        break;
     }
 }
 
 void getPMSREADINGS()
 {
-    // pms.wake_up();
-    // delay(30000); // wait for 30 seconds to get a reading
-    // pms.request_reading();
-    // delay(10000); // wait for 10 seconds to get a reading
+    pms.wake();
+    delay(30000); // wait for 30 seconds warm-up to get an accurate reading
+
     // pms.sleep();
     char result_PMS[255] = {};
     pms.read();
     if (pms) // Successfull read
     {
-
+        pms.sleep();
         char read_time[32];
-        String datetime = "";
+        String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
 
-        last_read_pms = millis();
         // print the results
         printPM_values();
 
-        if (getNetworkTime(read_time))
-        {
-            datetime = extractDateTime(String(read_time));
-        }
-
-        if (datetime == "")
+        if (datetime == "") // ! extra validation needed now that RTC is being used
         {
             Serial.println("Datetime is empty...discarding data point");
         }
         else
         {
-            updateCalendarFromNetworkTime(); // In case we roll into a new year or month.
+            updateCalendarFromRTC(); // In case we roll into a new year or month.
 
             // Generate JSON data
             JsonDocument PM_data_doc;
             JsonArray PM_data = PM_data_doc.to<JsonArray>();
 
             add_value2JSON_array(PM_data, "P0", pms.pm01);
-            add_value2JSON_array(PM_data, "P1", pms.pm25);
-            add_value2JSON_array(PM_data, "P2", pms.pm10);
+            add_value2JSON_array(PM_data, "P1", pms.pm10);
+            add_value2JSON_array(PM_data, "P2", pms.pm25);
 
             // serializeJsonPretty(PM_data_doc, Serial);
-            generateJSON_payload(result_PMS, PM_data_doc, datetime.c_str(), SensorAPN_PIN::PMS, sizeof(result_PMS));
+            generateJSON_payload(result_PMS, PM_data_doc, datetime.c_str(), SensorAPI_PIN::PMS, sizeof(result_PMS));
 
             memoryDataLog(JSON_PAYLOAD_LOGGER, result_PMS);
 
@@ -335,6 +438,7 @@ void getPMSREADINGS()
     }
     else // something went wrong
     {
+        pms.sleep();
         printPM_Error();
     }
 }
@@ -350,40 +454,6 @@ void printPM_values()
     Serial.print(F("PM10 "));
     Serial.print(pms.pm10);
     Serial.println(F(" [ug/m3]"));
-
-    // if (pms.has_number_concentration())
-    // {
-    //     Serial.print(F("N0.3 "));
-    //     Serial.print(pms.n0p3);
-    //     Serial.print(F(", "));
-    //     Serial.print(F("N0.5 "));
-    //     Serial.print(pms.n0p5);
-    //     Serial.print(F(", "));
-    //     Serial.print(F("N1.0 "));
-    //     Serial.print(pms.n1p0);
-    //     Serial.print(F(", "));
-    //     Serial.print(F("N2.5 "));
-    //     Serial.print(pms.n2p5);
-    //     Serial.print(F(", "));
-    //     Serial.print(F("N5.0 "));
-    //     Serial.print(pms.n5p0);
-    //     Serial.print(F(", "));
-    //     Serial.print(F("N10 "));
-    //     Serial.print(pms.n10p0);
-    //     Serial.println(F(" [#/100cc]"));
-    // }
-
-    // if (pms.has_temperature_humidity() || pms.has_formaldehyde())
-    // {
-    //     Serial.print(pms.temp, 1);
-    //     Serial.print(F(" °C"));
-    //     Serial.print(F(", "));
-    //     Serial.print(pms.rhum, 1);
-    //     Serial.print(F(" %rh"));
-    //     Serial.print(F(", "));
-    //     Serial.print(pms.hcho, 2);
-    //     Serial.println(F(" mg/m3 HCHO"));
-    // }
 }
 
 void printPM_Error()
@@ -429,7 +499,7 @@ void printPM_Error()
     @param size : size of the buffer
     @return : void
 **/
-void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size)
+void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPI_PIN pin, size_t size)
 {
     JsonDocument payload;
 
@@ -440,15 +510,15 @@ void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, 
     // char sensor_type[24] = ",\"type\":\"";
     switch (pin)
     {
-    case SensorAPN_PIN::PMS:
+    case SensorAPI_PIN::PMS:
         // strcat(res, "PMS\"");
         payload["sensor_type"] = "PMS";
-        payload["APN_PIN"] = pin;
+        payload["API_PIN"] = pin;
         break;
-    case SensorAPN_PIN::DHT:
+    case SensorAPI_PIN::DHT:
         // strcat(res, "DHT\"");
         payload["sensor_type"] = "DHT";
-        payload["APN_PIN"] = pin;
+        payload["API_PIN"] = pin;
         break;
     default:
         Serial.println("Unsupported sensor pin");
@@ -458,15 +528,20 @@ void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, 
     serializeJson(payload, res, size);
 }
 
-String extractDateTime(String datetimeStr)
+datetimetz extractDateTime(String datetimeStr)
 {
+    datetimetz dtz;
+    dtz.datetime = {0, 0, 0, 0, 0, 0, 0};
+    dtz.timestamp = 0;
+
     Serial.println("Received date string: " + datetimeStr); //! format looks like "25/02/24,05:55:53+00" and may include the quotes!
 
     // check if received string is empty
     if (datetimeStr == "")
     {
         Serial.println("Datetime string is empty");
-        return "";
+
+        return dtz;
     }
 
     // check if the datetime string has leading or trailing quotes
@@ -490,7 +565,7 @@ String extractDateTime(String datetimeStr)
         _hour < 0 || _hour > 23 || _minute < 0 || _minute > 59 || _second < 0 || _second > 59)
     {
         Serial.println("Invalid date/time values");
-        return "";
+        return dtz;
     }
 
 #if defined(QUECTEL)
@@ -510,38 +585,32 @@ String extractDateTime(String datetimeStr)
     String timezone = datetimeStr.substring(17); // +00
 
 #endif
+    strncpy(dtz.timezone, timezone.c_str(), 6); // copy timezone to the provided buffer
 
-    // Serial.println("Day: " + String(day));
-    // Serial.println("Month: " + String(month));
-    // Serial.println("Year: " + String(year));
-    // Serial.println("Hour: " + String(hour));
-    // Serial.println("Minute: " + String(minute));
-    // Serial.println("Second: " + String(second));
+    Serial.println("Day: " + String(_day));
+    Serial.println("Month: " + String(_month));
+    Serial.println("Year: " + String(_year));
+    Serial.println("Hour: " + String(_hour));
+    Serial.println("Minute: " + String(_minute));
+    Serial.println("Second: " + String(_second));
 
     // Adjust year for TimeLib (TimeLib expects years since 1970)
     _year += 2000; // Assuming 24 is 2024
     _year -= 1970;
 
-    // Create a tmElements_t struct
-    tmElements_t tm;
-    tm.Second = _second;
-    tm.Minute = _minute;
-    tm.Hour = _hour;
-    tm.Day = _day;
-    tm.Month = _month;
-    tm.Year = _year;
+    dtz.datetime.Second = _second;
+    dtz.datetime.Minute = _minute;
+    dtz.datetime.Hour = _hour;
+    dtz.datetime.Day = _day;
+    dtz.datetime.Month = _month;
+    dtz.datetime.Year = _year;
 
     // Create a time_t value
-    time_t t = makeTime(tm);
+    dtz.timestamp = makeTime(dtz.datetime);
+    Serial.print("Parsed timestamp: ");
+    Serial.println(dtz.timestamp); // Print the time_t value
 
-    network_year = year(t);
-    network_month = month(t);
-
-    // Format the time_t value to YYYY-MM-DDThh:mm:ss+HH:MM
-    String formattedDateTime = formatDateTime(t, timezone);
-    Serial.print("Formatted DateTime: ");
-    Serial.println(formattedDateTime);
-    return formattedDateTime;
+    return dtz;
 }
 
 String formatDateTime(time_t t, String timezone)
@@ -566,6 +635,13 @@ String formatDateTime(time_t t, String timezone)
         secondStr = "0" + secondStr;
 
     return yearStr + "-" + monthStr + "-" + dayStr + "T" + hourStr + ":" + minuteStr + ":" + secondStr + timezone;
+}
+
+String getRTCdatetimetz(const char *format, char *timezone)
+{
+    String datetimetz = RTC.getTime(format);
+    datetimetz += timezone;
+    return datetimetz;
 }
 
 /*****************************************************************
@@ -797,13 +873,21 @@ void readSendDelete(const char *datafile)
 
         if (data != "")
         {
-            // Todo: check senor type to determine which API pin to use
+            JsonDocument doc;
+            deserializeJson(doc, data);        // Extract API_PIN from the JSON data
+            int api_pin = doc["API_PIN"] | -1; // Default to -1 if not found
+
+            if (api_pin == -1)
+            {
+                Serial.println("API_PIN not found in JSON data ");
+                continue; // Skip this data if API_PIN is not found
+            }
             // Attempt send payload
             // Serial.println("Attempting to send data from SD card: " + data);
-            if (!sendData(data.c_str(), PMS_API_PIN, HOST_CFA, URL_CFA))
+            if (!sendData(data.c_str(), api_pin, HOST_CFA, URL_CFA))
             {
                 // store data in temp file
-                appendFile(SD, tempFile, data.c_str(), true); //? does FS lib support opening multiple files? Otherwise close the previously opened file.
+                appendFile(SD, tempFile, data.c_str(), true);
             }
         }
     } while (next_byte != -1);
@@ -814,29 +898,31 @@ void readSendDelete(const char *datafile)
     closeFile(SD, datafile);
 }
 
-void updateCalendarFromNetworkTime()
+void updateCalendarFromRTC()
 {
     bool calendarUpdated = false;
+    int year = RTC.getYear();
+    int month = RTC.getMonth() + 1; // ESP32Time month is 0 based
 
-    if (network_year > current_year)
+    if (year > current_year)
     {
         Serial.print("Updating year from: ");
         Serial.print(current_year);
         Serial.print(" to: ");
-        Serial.println(network_year);
+        Serial.println(year);
 
-        current_year = network_year;
-        current_month = network_month; // Also update the month. Ideally, Jan.
+        current_year = year;
+        current_month = month; // Also update the month. Ideally, Jan.
         calendarUpdated = true;
     }
-    else if (network_month > current_month)
+    else if (month > current_month)
     {
         Serial.print("Updating year from: ");
         Serial.print(current_month);
         Serial.print(" to: ");
-        Serial.println(network_month);
+        Serial.println(month);
 
-        current_month = network_month;
+        current_month = month;
         calendarUpdated = true;
     }
     if (calendarUpdated)
@@ -845,40 +931,17 @@ void updateCalendarFromNetworkTime()
     }
 }
 
-void initCalenderFromNetworkTime()
+void initCalender(int year, int month)
 {
-    if (network_year != 0 && network_month != 0)
+    Serial.print("Initializing calendar with year: ");
+    Serial.print(year);
+    Serial.print(" and month: ");
+    Serial.println(month);
+    if (year != 0 && month != 0)
     {
-        current_year = network_year;
-        current_month = network_month;
+        current_year = year;
+        current_month = month;
     }
-}
-
-/**
-    @brief Add value to JSON array
-    @param arr : JSON array to add the value to
-    @param key : key for the value
-    @param value : value to add
-    @return : void
-**/
-void add_value2JSON_array(JsonArray arr, const char *key, uint16_t &value)
-{
-    JsonDocument doc;
-    doc["value_type"] = key;
-    doc["value"] = value;
-    arr.add(doc);
-}
-
-/**
-    @brief Validate JSON data
-    @param input : JSON data to validate
-    @return : true if valid, false otherwise
-    @note : //! This function is not full proof. Raw strings that don't look like incomplete or empty JSON are validated.
-**/
-bool validateJson(const char *input)
-{
-    JsonDocument doc, filter;
-    return deserializeJson(doc, input, DeserializationOption::Filter(filter)) == DeserializationError::Ok;
 }
 
 /**
@@ -942,8 +1005,7 @@ void fileDataLog(LOGGER &logger)
 void resetLogger(LOGGER &logger)
 {
     logger.log_count = 0;
-    memset(logger.DATA_STORE, 0, sizeof(logger.DATA_STORE)); // ToDo: check if this works
-    //? or this logger.DATA_STORE = {};
+    memset(logger.DATA_STORE, 0, sizeof(logger.DATA_STORE));
 }
 
 /**
@@ -958,11 +1020,18 @@ void sendFromMemoryLog(LOGGER &logger)
     {
         if (strlen(logger.DATA_STORE[i]) != 0)
         {
-            if (!sendData(logger.DATA_STORE[i], PMS_API_PIN, HOST_CFA, URL_CFA))
+            JsonDocument doc;
+            deserializeJson(doc, logger.DATA_STORE[i]); // Extract API_PIN from the JSON data
+            int api_pin = doc["API_PIN"] | -1;
+            if (api_pin != -1)
             {
-                // Append to file for sending later
-                appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
+                if (!sendData(logger.DATA_STORE[i], api_pin, HOST_CFA, URL_CFA))
+                {
+                    // Append to file for sending later
+                    appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
+                }
             }
+
             memset(logger.DATA_STORE[i], '\0', 255);
         }
     }
