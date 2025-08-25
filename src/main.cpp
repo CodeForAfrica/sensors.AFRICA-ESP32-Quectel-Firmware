@@ -18,7 +18,7 @@
  * @note The program assumes the presence of specific hardware components, including an SD card module, PMS5003 sensor,
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
- * @author Gdieon Maina
+ * @author Gideon Maina
  * @date 2025-06-13
  * @version 1.2.0
  *
@@ -60,7 +60,7 @@ DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 
 const unsigned long ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
-const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS / 28; // force a reboot every month /
+const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS * 28; // force a reboot every month /
 
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
