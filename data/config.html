@@ -285,8 +285,30 @@
         .addEventListener("submit", function (e) {
           e.preventDefault();
           if (confirm("Are you sure you want to save these settings?")) {
-            alert("Settings saved!");
+            alert("Saving settings...");
           }
+          const formData = new FormData(document.getElementById("configForm"));
+          const data = {};
+          formData.forEach((value, key) => {
+            //ToDo: Check if value is empty
+            data[key] = value;
+          });
+          if (Object.keys(data).length === 0) {
+            alert("Cannot submit and empty form!");
+            return;
+          }
+
+          console.log("Form data: ", data);
+          // Example: send to server
+          fetch("/save-config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          })
+            .then((res) => res.json())
+            .then((result) => {
+              console.log(result);
+            });
         });
 
       function loadDeviceSettings() {
