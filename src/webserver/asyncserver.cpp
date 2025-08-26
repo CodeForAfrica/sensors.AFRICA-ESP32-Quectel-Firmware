@@ -52,5 +52,68 @@ void setup_webserver()
                   serializeJsonPretty(doc,Serial);
                   serializeJson(doc, hotspots);
                   request->send(200,"application/json",hotspots); });
+
+  server.on("/save-config", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+              JsonDocument new_config;
+              DeserializationError error = deserializeJson(new_config, data, len);
+              if (error)
+              {
+                request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+                return;
+              }
+              request->send(200, "application/json", "{\"status\":\"Config received\"}");
+
+              JsonDocument current_config = getDeviceConfig();
+
+              size_t numKeys = 0;
+              for (JsonPair kv : new_config.as<JsonObject>())
+              {
+                numKeys++;
+              }
+
+              // String keyNames = "[";
+              // bool first = true;
+              // for (JsonPair kv : current_config.as<JsonObject>()) {
+              //   if (!first) keyNames += ",";
+              //   keyNames += "\"" + String(kv.key().c_str()) + "\"";
+              //   first = false;
+              // }
+              // keyNames += "]";
+              // Serial.println("Config keys: " + keyNames);
+
+              // Create a String array to hold the key names
+              String keyNamesArr[numKeys];
+              size_t idx = 0;
+              for (JsonPair kv : new_config.as<JsonObject>())
+              {
+                keyNamesArr[idx++] = String(kv.key().c_str());
+              }
+              // for (JsonPair kv : current_config.as<JsonObject>()) {
+              //   keyArray.add(kv.key().c_str());
+              // }
+              Serial.println("Key\tCurrentValue\tNewValue");
+              for (int i = 0; i < numKeys; i++)
+              {
+                Serial.print(keyNamesArr[i]);
+                Serial.print("\t");
+                Serial.print(String(current_config[keyNamesArr[i]]));
+                Serial.print("\t");
+                Serial.println(String(new_config[keyNamesArr[i]]));
+
+                // check if value is empty
+                if (new_config[keyNamesArr[i]].isNull() || String(new_config[keyNamesArr[i]]).length() == 0)
+                {
+                  // skip empty values
+                  continue;
+                }
+                current_config[keyNamesArr[i]] = new_config[keyNamesArr[i]];
+              }
+
+              // Display updated config
+              Serial.println("\nUpdated Config:");
+              serializeJsonPretty(current_config, Serial);
+              saveConfig(current_config); });
+
   server.begin();
 }
