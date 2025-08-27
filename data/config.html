@@ -300,6 +300,9 @@
             formData.delete("apn_pwd");
           }
 
+          // ! make sure the value of Power Saver checkbox is parsed whether true or false
+          if (!formData.get("powerSaver")) formData.set("powerSaver", "off");
+
           formData.forEach((value, key) => {
             // Check if value is not empty
             if (value.trim() !== "") data[key] = value;
