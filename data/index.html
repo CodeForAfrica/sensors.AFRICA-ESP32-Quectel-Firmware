@@ -63,6 +63,27 @@
           display: block;
         }
       }
+
+      .sensordata-overview {
+        max-width: 600px;
+        height: 100%;
+        margin: 0.2em auto 1em;
+        padding: 1em;
+        background: #f9f9f9;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+      }
+
+      .sensor-group h3 {
+        color: #06913e;
+        margin-bottom: 0.5em;
+      }
+      .data-populate {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1em;
+        align-items: center;
+      }
     </style>
   </head>
   <body>
@@ -77,7 +98,74 @@
       </div>
     </nav>
     <main>
-      <h1>Page under construction</h1>
+      <section class="sensordata-overview">
+        <h2 style="text-align: center; color: #2fb56b">Sensor Data Overview</h2>
+        <div style="display: flex; flex-direction: column; gap: 1em">
+          <!-- Air Quality Group -->
+          <div class="sensor-group">
+            <h3>Air Quality</h3>
+            <div class="data-populate">
+              <div><strong>PM 1:</strong> <span id="pm1">12 µg/m³</span></div>
+              <div>
+                <strong>PM 2.5:</strong> <span id="pm25">25 µg/m³</span>
+              </div>
+              <div><strong>PM 10:</strong> <span id="pm10">40 µg/m³</span></div>
+              <div><strong>VOC:</strong> <span id="voc">0.45 ppm</span></div>
+              <div><strong>SOx:</strong> <span id="sox">0.02 ppm</span></div>
+            </div>
+          </div>
+          <!-- Environment Group -->
+          <div class="sensor-group">
+            <h3>Environment</h3>
+            <div class="data-populate">
+              <div>
+                <strong>Temperature:</strong>
+                <span
+                  id="temperature"
+                  style="display: inline-block; vertical-align: middle"
+                >
+                  <span
+                    style="
+                      display: inline-block;
+                      width: 56px;
+                      height: 56px;
+                      padding: 2px;
+                      background: linear-gradient(
+                        135deg,
+                        #ff9800 60%,
+                        #fff3e0 100%
+                      );
+                      border-radius: 50%;
+                      text-align: center;
+                      line-height: 48px;
+                      font-size: 1.3em;
+                      font-weight: bold;
+                      color: #fff;
+                      margin-right: 0.5em;
+                      box-shadow: 0 2px 6px rgba(255, 152, 0, 0.15);
+                      border: 2px solid #ff9800;
+                      box-sizing: border-box;
+                    "
+                    >22°C</span
+                  >
+                </span>
+              </div>
+              <div>
+                <strong>Humidity:</strong>
+                <span id="humidity">55%</span>
+              </div>
+            </div>
+          </div>
+          <!-- Location Group -->
+          <div class="sensor-group">
+            <h3>Location</h3>
+            <div>
+              <strong>GPS Coordinates: </strong>
+              <span id="gps"> -1.2921, 36.8219</span>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
     <script>
       function toggleNavbar() {
