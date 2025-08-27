@@ -4,8 +4,86 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Home</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+      }
+      .navbar {
+        display: flex;
+        background: #2fb56b;
+        color: #fff;
+        align-items: center;
+        flex-wrap: wrap;
+        font-size: 20px;
+      }
+      .navbar-brand {
+        font-weight: bold;
+        font-size: 1.2em;
+        padding: 0.5em 1em;
+      }
+      .navbar-toggle {
+        display: none;
+        font-size: 1.5em;
+        background: none;
+        border: none;
+        color: #fff;
+        margin-left: auto;
+        cursor: pointer;
+      }
+      .navbar-links {
+        display: flex;
+        flex-direction: row;
+        gap: 1em;
+        margin: auto;
+      }
+      .navbar-links a {
+        color: #fff;
+        text-decoration: none;
+        transition: background 0.2s;
+        padding: 1em;
+      }
+      .navbar-links a:hover {
+        background: #06913e;
+      }
+      @media (max-width: 600px) {
+        .navbar-links {
+          flex-direction: column;
+          width: 100%;
+          display: none;
+          gap: 0;
+        }
+        .navbar-links a {
+          padding: 0.5em 1em;
+        }
+        .navbar-links.active {
+          display: flex;
+        }
+        .navbar-toggle {
+          display: block;
+        }
+      }
+    </style>
   </head>
   <body>
-    <h1>Page under construction</h1>
+    <nav class="navbar">
+      <span class="navbar-brand">Sensors Logo</span>
+      <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
+      <div class="navbar-links" id="navbarLinks">
+        <a href="index.html">Home</a>
+        <a href="device-details.html">Device Details</a>
+        <a href="ota.html">OTA</a>
+        <a href="advanced-settings.html">Advanced Settings</a>
+      </div>
+    </nav>
+    <main>
+      <h1>Page under construction</h1>
+    </main>
+    <script>
+      function toggleNavbar() {
+        var links = document.getElementById("navbarLinks");
+        links.classList.toggle("active");
+      }
+    </script>
   </body>
 </html>
