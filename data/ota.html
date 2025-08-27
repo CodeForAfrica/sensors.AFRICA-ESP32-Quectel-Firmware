@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OTA Update</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+      }
+      .navbar {
+        display: flex;
+        background: #2fb56b;
+        color: #fff;
+        align-items: center;
+        flex-wrap: wrap;
+        font-size: 20px;
+      }
+      .navbar-brand {
+        font-weight: bold;
+        font-size: 1.2em;
+        padding: 0.5em 1em;
+      }
+      .navbar-toggle {
+        display: none;
+        font-size: 1.5em;
+        background: none;
+        border: none;
+        color: #fff;
+        margin-left: auto;
+        cursor: pointer;
+      }
+      .navbar-links {
+        display: flex;
+        flex-direction: row;
+        gap: 1em;
+        margin: auto;
+      }
+      .navbar-links a {
+        color: #fff;
+        text-decoration: none;
+        transition: background 0.2s;
+        padding: 1em;
+      }
+      .navbar-links a:hover {
+        background: #06913e;
+      }
+      @media (max-width: 600px) {
+        .navbar-links {
+          flex-direction: column;
+          width: 100%;
+          display: none;
+          gap: 0;
+        }
+        .navbar-links a {
+          padding: 0.5em 1em;
+        }
+        .navbar-links.active {
+          display: flex;
+        }
+        .navbar-toggle {
+          display: block;
+        }
+      }
+      #form_wrapper {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background-color: rgba(7, 42, 36, 0.1);
+        padding: 8px;
+        min-height: 70vh;
+      }
+      #progress_wrapper {
+        display: none;
+        align-items: center;
+        gap: 1rem;
+      }
+      progress {
+        height: 32px;
+        min-width: 250px;
+      }
+      form {
+        min-width: 300px;
+        margin-top: 2rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        padding: 2rem 1rem;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        background-color: #fff;
+        border-radius: 0.5rem;
+        align-items: center;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      input[type="submit"] {
+        padding: 0.5rem 1rem;
+        font-size: 20px;
+        background-color: #008334;
+        color: #fff;
+        border-radius: 5px;
+        border: none;
+        cursor: pointer;
+      }
+      input[type="file"]::file-selector-button {
+        cursor: pointer;
+        margin: 1rem 0;
+        padding: 0 1rem;
+        height: 3rem;
+        background-color: inherit;
+        border: 1px solid rgba(3, 156, 97, 0.3);
+        border-radius: 0.4rem;
+        box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+        margin-right: 1rem;
+        transition: background-color 0.3s;
+      }
+      input[type="file"]::file-selector-button:hover {
+        background-color: #06913e;
+        color: #fff;
+      }
+      .input-container {
+        display: flex;
+        flex-direction: column;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar">
+      <span class="navbar-brand">Sensors Logo</span>
+      <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
+      <div class="navbar-links" id="navbarLinks">
+        <a href="index.html">Home</a>
+        <a href="device-details.html">Device Details</a>
+        <a href="ota.html">OTA</a>
+        <a href="advanced-settings.html">Advanced Settings</a>
+      </div>
+    </nav>
+    <main>
+      <div id="form_wrapper">
+        <div id="progress_wrapper">
+          <progress id="ota_progress" value="0" max="100"></progress>
+          <div><span>Uploaded </span><span id="progress_text">0%</span></div>
+        </div>
+        <form method="POST" id="ota_form" enctype="multipart/form-data">
+          <div class="input-container">
+            <label for="firmware">Choose a firmware bin file (2MB max): </label>
+            <input
+              type="file"
+              name="firmware"
+              id="firmware"
+              accept=".bin"
+              required
+            />
+          </div>
+          <input type="submit" value="Upload" />
+        </form>
+      </div>
+
+      <script>
+        const form = document.querySelector("#ota_form"),
+          inputFile = document.querySelector("#firmware"),
+          progressWrapper = document.querySelector("#progress_wrapper"),
+          progressBar = document.querySelector("#ota_progress");
+        (progressText = document.querySelector("#progress_text")),
+          (log = document.createElement("p"));
+        form.addEventListener("submit", submitForm);
+
+        const maxFileSize = 2 * 1024 * 1024; // 2MB in bytes
+
+        function msgLogger(e, o) {
+          (log.innerText = e),
+            (log.style.color = "error" === o ? "red" : "#00a080"),
+            form.appendChild(log);
+        }
+
+        function submitForm(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          const fileName = inputFile.value;
+          const file = inputFile.files[0];
+          const fileSize = file ? file.size : 0;
+          const extension = fileName.split(".").pop();
+          if (extension !== "bin") {
+            return void msgLogger("File must be bin file!", "error");
+          } else if (fileSize > maxFileSize) {
+            return msgLogger("File too large!", "error");
+          }
+
+          if (!confirm("I am sure about this.")) return;
+          console.log("Sending form data");
+
+          let xhr = new XMLHttpRequest();
+          xhr.timeout = 3e4;
+
+          const data = new FormData(form);
+          const files = new FormData();
+          files.append("firmware", data.get("firmware"));
+
+          xhr.onreadystatechange = function () {
+            if (xhr.readyState === 4 && xhr.status === 200) {
+              console.log(xhr.responseText);
+              let res_content_type = xhr.getResponseHeader("Content-Type");
+              if (res_content_type.includes("text/html")) {
+                document.body.innerHTML = xhr.responseText;
+              } else {
+                msgLogger(xhr.responseText);
+                setTimeout(() => {
+                  let e =
+                    "<p>File Saved Successfully!</p><p>Attempting firmware update...</p>";
+                  document.body.innerHTML = e;
+                }, 2e3);
+              }
+            }
+          };
+
+          xhr.upload.onloadstart = function (e) {
+            console.log("upload started"),
+              console.log(`Event bytes: ${e.total} `),
+              (progressWrapper.style.display = "flex");
+          };
+
+          xhr.upload.onprogress = function (e) {
+            console.log(`Loaded ${e.loaded} bytes of ${e.total}`),
+              (progressBar.max = e.total),
+              (progressBar.value = e.loaded),
+              (progressText.innerText =
+                Math.ceil((e.loaded / e.total) * 100) + "%");
+          };
+
+          xhr.upload.ontimeout = function () {
+            msgLogger("Upload timeout", "error");
+          };
+
+          xhr.open("POST", "/ota_upload");
+          xhr.send(files);
+        }
+
+        //   function handleSubmit(e) {
+        //     if (
+        //       (e.preventDefault(),
+        //       e.stopPropagation(),
+        //       (fileName = inputFile.value),
+        //       (extension = fileName.split(".").pop()),
+        //       "bin" !== extension)
+        //     )
+        //       return void console.log("Sending form data");
+        //     const o = "/ota_upload",
+        //       t = "POST";
+        //     let r = new XMLHttpRequest();
+        //     const n = new FormData(form),
+        //       s = new FormData();
+        //     s.append("firmware", n.get("firmware"));
+        //     for (const [e, o] of n) console.log(`${e}: ${o}`);
+        //     (r.onreadystatechange = function () {
+        //       if (4 === r.readyState && 200 === r.status) {
+        //         console.log(r.responseText);
+        //         let e = r.getResponseHeader("Content-Type");
+        //         e.includes("text/html")
+        //           ? (document.body.innerHTML = r.responseText)
+        //           : (msgLogger(r.responseText),
+        //             setTimeout(() => {
+        //               let e =
+        //                 " <p>File Saved Successfully!</p><p>Attempting firmware update...</p>";
+        //               document.body.innerHTML = e;
+        //             }, 2e3));
+        //       }
+        //     }),
+        //       (r.upload.onloadstart = function (e) {
+        //         console.log("upload started"),
+        //           console.log(`Event bytes: ${e.total} `),
+        //           (progressWrapper.style.display = "flex");
+        //       }),
+        //       (r.upload.onprogress = function (e) {
+        //         console.log(`Loaded ${e.loaded} bytes of ${e.total}`),
+        //           (progressBar.max = e.total),
+        //           (progressBar.value = e.loaded),
+        //           (progressText.innerText =
+        //             Math.ceil((e.loaded / e.total) * 100) + "%");
+        //       }),
+        //       (r.upload.ontimeout = function () {
+        //         msgLogger("Upload timeout", "error");
+        //       }),
+        //       (r.upload.onerror = function () {
+        //         msgLogger("Error uploading file", "error");
+        //       });
+        //     (r.timeout = 3e4), r.open(t, o), r.send(s);
+        //   }
+        //   const form = document.querySelector("#ota_form"),
+        //     inputFile = document.querySelector("#firmware"),
+        //     progressWrapper = document.querySelector("#progress_wrapper"),
+        //     progressBar = document.querySelector("#ota_progress");
+        //   (progressText = document.querySelector("#progress_text")),
+        //     (log = document.createElement("p"));
+        //   form.addEventListener("submit", handleSubmit);
+      </script>
+      <script>
+        function toggleNavbar() {
+          var links = document.getElementById("navbarLinks");
+          links.classList.toggle("active");
+        }
+      </script>
+    </main>
+  </body>
+</html>
