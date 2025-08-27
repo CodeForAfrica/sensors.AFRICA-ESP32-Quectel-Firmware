@@ -289,9 +289,20 @@
           }
           const formData = new FormData(document.getElementById("configForm"));
           const data = {};
+
+          // Extra validation
+          if (formData.get("ssid") === "") {
+            formData.delete("ssid");
+            formData.delete("wifiPwd");
+          }
+          if (formData.get("apn") === "") {
+            formData.delete("apn");
+            formData.delete("apn_pwd");
+          }
+
           formData.forEach((value, key) => {
-            //ToDo: Check if value is empty
-            data[key] = value;
+            // Check if value is not empty
+            if (value.trim() !== "") data[key] = value;
           });
           if (Object.keys(data).length === 0) {
             alert("Cannot submit and empty form!");
