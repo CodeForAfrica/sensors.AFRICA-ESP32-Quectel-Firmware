@@ -18,7 +18,7 @@
  * @note The program assumes the presence of specific hardware components, including an SD card module, PMS5003 sensor,
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
- * @author Gdieon Maina
+ * @author Gideon Maina
  * @date 2025-06-13
  * @version 1.2.0
  *
@@ -67,7 +67,7 @@ DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 
 const unsigned long ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
-const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS / 28; // force a reboot every month /
+const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS * 28; // force a reboot every month /
 
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
@@ -102,10 +102,10 @@ struct datetimetz
     char timezone[6] = {}; // e.g. +0300 // +03
 } esp_datetime_tz;
 
-enum SensorAPN_PIN
+enum SensorAPI_PIN
 {
     PMS = PMS_API_PIN,
-    DHT = 7
+    DHT = DHT_API_PIN
 };
 
 enum DATA_LOGGERS
@@ -129,7 +129,7 @@ void readDHT();
 void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
-void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size);
+void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPI_PIN pin, size_t size);
 bool sendData(const char *data, const int _pin, const char *host, const char *url);
 datetimetz extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
@@ -377,7 +377,7 @@ void readDHT()
             add_value2JSON_array(DHT_data, "temperature", temperature);
             add_value2JSON_array(DHT_data, "humidity", humidity);
             // serializeJsonPretty(DHT_data_doc, Serial);
-            generateJSON_payload(resultDHT, DHT_data_doc, datetime.c_str(), SensorAPN_PIN::DHT, sizeof(resultDHT));
+            generateJSON_payload(resultDHT, DHT_data_doc, datetime.c_str(), SensorAPI_PIN::DHT, sizeof(resultDHT));
             memoryDataLog(JSON_PAYLOAD_LOGGER, resultDHT);
 
             // Generate CSV data and log to memory
@@ -450,11 +450,11 @@ void getPMSREADINGS()
             JsonArray PM_data = PM_data_doc.to<JsonArray>();
 
             add_value2JSON_array(PM_data, "P0", pms.pm01);
-            add_value2JSON_array(PM_data, "P1", pms.pm25);
-            add_value2JSON_array(PM_data, "P2", pms.pm10);
+            add_value2JSON_array(PM_data, "P1", pms.pm10);
+            add_value2JSON_array(PM_data, "P2", pms.pm25);
 
             // serializeJsonPretty(PM_data_doc, Serial);
-            generateJSON_payload(result_PMS, PM_data_doc, datetime.c_str(), SensorAPN_PIN::PMS, sizeof(result_PMS));
+            generateJSON_payload(result_PMS, PM_data_doc, datetime.c_str(), SensorAPI_PIN::PMS, sizeof(result_PMS));
 
             memoryDataLog(JSON_PAYLOAD_LOGGER, result_PMS);
 
@@ -531,7 +531,7 @@ void printPM_Error()
     @param size : size of the buffer
     @return : void
 **/
-void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPN_PIN pin, size_t size)
+void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPI_PIN pin, size_t size)
 {
     JsonDocument payload;
 
@@ -542,15 +542,15 @@ void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, 
     // char sensor_type[24] = ",\"type\":\"";
     switch (pin)
     {
-    case SensorAPN_PIN::PMS:
+    case SensorAPI_PIN::PMS:
         // strcat(res, "PMS\"");
         payload["sensor_type"] = "PMS";
-        payload["APN_PIN"] = pin;
+        payload["API_PIN"] = pin;
         break;
-    case SensorAPN_PIN::DHT:
+    case SensorAPI_PIN::DHT:
         // strcat(res, "DHT\"");
         payload["sensor_type"] = "DHT";
-        payload["APN_PIN"] = pin;
+        payload["API_PIN"] = pin;
         break;
     default:
         Serial.println("Unsupported sensor pin");
@@ -906,12 +906,12 @@ void readSendDelete(const char *datafile)
         if (data != "")
         {
             JsonDocument doc;
-            deserializeJson(doc, data);        // Extract APN_PIN from the JSON data
-            int api_pin = doc["APN_PIN"] | -1; // Default to -1 if not found
+            deserializeJson(doc, data);        // Extract API_PIN from the JSON data
+            int api_pin = doc["API_PIN"] | -1; // Default to -1 if not found
 
             if (api_pin == -1)
             {
-                Serial.println("APN_PIN not found in JSON data ");
+                Serial.println("API_PIN not found in JSON data ");
                 continue; // Skip this data if API_PIN is not found
             }
             // Attempt send payload
@@ -1052,11 +1052,18 @@ void sendFromMemoryLog(LOGGER &logger)
     {
         if (strlen(logger.DATA_STORE[i]) != 0)
         {
-            if (!sendData(logger.DATA_STORE[i], PMS_API_PIN, HOST_CFA, URL_CFA))
+            JsonDocument doc;
+            deserializeJson(doc, logger.DATA_STORE[i]); // Extract API_PIN from the JSON data
+            int api_pin = doc["API_PIN"] | -1;
+            if (api_pin != -1)
             {
-                // Append to file for sending later
-                appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
+                if (!sendData(logger.DATA_STORE[i], api_pin, HOST_CFA, URL_CFA))
+                {
+                    // Append to file for sending later
+                    appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
+                }
             }
+
             memset(logger.DATA_STORE[i], '\0', 255);
         }
     }

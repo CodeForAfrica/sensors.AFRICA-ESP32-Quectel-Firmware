@@ -5,7 +5,7 @@ static const char HOST_CFA[] = "staging.api.sensors.africa";
 static const char URL_CFA[] = "/v1/push-sensor-data/";
 #define PORT_CFA 80
 
-static const char SENSOR_PREFIX[] = "esp32-";
+static const char SENSOR_PREFIX[] = "ESP32-";
 
 constexpr unsigned SMALL_STR = 64 - 1;
 constexpr unsigned MED_STR = 256 - 1;
@@ -21,6 +21,7 @@ static bool use_wifi = false;
 #define QUECTEL EC200CN
 
 #define PMS_API_PIN 1
+#define DHT_API_PIN 7
 
 // PIN DEFINITIONS
 #define MCU_RXD 17
