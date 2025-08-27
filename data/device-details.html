@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Home</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+      }
+      .navbar {
+        display: flex;
+        background: #2fb56b;
+        color: #fff;
+        align-items: center;
+        flex-wrap: wrap;
+        font-size: 20px;
+      }
+      .navbar-brand {
+        font-weight: bold;
+        font-size: 1.2em;
+        padding: 0.5em 1em;
+      }
+      .navbar-toggle {
+        display: none;
+        font-size: 1.5em;
+        background: none;
+        border: none;
+        color: #fff;
+        margin-left: auto;
+        cursor: pointer;
+      }
+      .navbar-links {
+        display: flex;
+        flex-direction: row;
+        gap: 1em;
+        margin: auto;
+      }
+      .navbar-links a {
+        color: #fff;
+        text-decoration: none;
+        transition: background 0.2s;
+        padding: 1em;
+      }
+      .navbar-links a:hover {
+        background: #06913e;
+      }
+      @media (max-width: 600px) {
+        .navbar-links {
+          flex-direction: column;
+          width: 100%;
+          display: none;
+          gap: 0;
+        }
+        .navbar-links a {
+          padding: 0.5em 1em;
+        }
+        .navbar-links.active {
+          display: flex;
+        }
+        .navbar-toggle {
+          display: block;
+        }
+      }
+      .device-info-wrapper {
+        max-width: 700px;
+        margin: 2em auto;
+        padding: 2.5em 2em;
+        background: #f9f9f9;
+        border-radius: 12px;
+        box-shadow: 0 4px 16px rgba(47, 181, 107, 0.1);
+        border: 1px solid #e3e3e3;
+      }
+      .info-group {
+        margin-bottom: 1.5em;
+        color: #181819;
+      }
+      .info-group h3 {
+        color: #06913e;
+      }
+      ul {
+        padding: 0;
+      }
+      ul li {
+        list-style-type: none;
+        padding: 0.2em 0;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar">
+      <span class="navbar-brand">Sensors Logo</span>
+      <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
+      <div class="navbar-links" id="navbarLinks">
+        <a href="index.html">Home</a>
+        <a href="device-details.html">Device Details</a>
+        <a href="ota.html">OTA</a>
+        <a href="advanced-settings.html">Advanced Settings</a>
+      </div>
+    </nav>
+    <main>
+      <section class="device-info-wrapper">
+        <h2 style="text-align: center; color: #2fb56b">Device Details</h2>
+        <div class="info-group">
+          <h3>GSM &amp; Network</h3>
+          <ul>
+            <li><strong>Network Name:</strong> Safaricom</li>
+            <li><strong>Network Strength:</strong> -85 dBm</li>
+            <li><strong>Network Band:</strong> 4G</li>
+            <li><strong>SIM ICCID:</strong> 8925401234567890123</li>
+          </ul>
+        </div>
+        <div class="info-group">
+          <h3>WiFi Network</h3>
+          <ul>
+            <li><strong>Connected SSID:</strong> SensorsLabWiFi</li>
+            <li><strong>Signal Strength:</strong> -60 dBm</li>
+          </ul>
+        </div>
+        <div class="info-group">
+          <h3>Location Details</h3>
+          <ul>
+            <li><strong>Country Name:</strong> Kenya</li>
+            <li><strong>Location Name:</strong> Nairobi</li>
+            <li><strong>Altitude:</strong> 1795 m</li>
+          </ul>
+        </div>
+        <div class="info-group">
+          <h3>Device Custodian</h3>
+          <ul>
+            <li><strong>Name:</strong> Jane Doe</li>
+            <li><strong>Contact Phone:</strong> +254712345678</li>
+            <li><strong>Contact Email:</strong> jane.doe@example.com</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+    <script>
+      function toggleNavbar() {
+        var links = document.getElementById("navbarLinks");
+        links.classList.toggle("active");
+      }
+    </script>
+  </body>
+</html>
