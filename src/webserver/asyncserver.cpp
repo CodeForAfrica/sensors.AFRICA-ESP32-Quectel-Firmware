@@ -10,6 +10,7 @@
 AsyncWebServer server(80);
 extern struct_wifiInfo *wifiInfo;
 extern uint8_t count_wifiInfo;
+extern JsonDocument getCurrentSensorData();
 
 void setup_webserver()
 {
@@ -114,6 +115,14 @@ void setup_webserver()
               Serial.println("\nUpdated Config:");
               serializeJsonPretty(current_config, Serial);
               saveConfig(current_config); });
+
+  server.on("/sensor-data", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+              // get JSON sensor data
+              JsonDocument sensor_data = getCurrentSensorData();
+              String sensor_data_str;
+              serializeJson(sensor_data, sensor_data_str);
+              request->send(200, "application/json", sensor_data_str); });
 
   server.begin();
 }
