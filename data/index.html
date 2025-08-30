@@ -104,15 +104,7 @@
           <!-- Air Quality Group -->
           <div class="sensor-group">
             <h3>Air Quality</h3>
-            <div class="data-populate">
-              <div><strong>PM 1:</strong> <span id="pm1">12 µg/m³</span></div>
-              <div>
-                <strong>PM 2.5:</strong> <span id="pm25">25 µg/m³</span>
-              </div>
-              <div><strong>PM 10:</strong> <span id="pm10">40 µg/m³</span></div>
-              <div><strong>VOC:</strong> <span id="voc">0.45 ppm</span></div>
-              <div><strong>SOx:</strong> <span id="sox">0.02 ppm</span></div>
-            </div>
+            <div class="data-populate" id="PM_DATA"></div>
           </div>
           <!-- Environment Group -->
           <div class="sensor-group">
@@ -120,11 +112,9 @@
             <div class="data-populate">
               <div>
                 <strong>Temperature:</strong>
-                <span
-                  id="temperature"
-                  style="display: inline-block; vertical-align: middle"
-                >
+                <span style="display: inline-block; vertical-align: middle">
                   <span
+                    id="temperature"
                     style="
                       display: inline-block;
                       width: 56px;
@@ -138,7 +128,7 @@
                       border-radius: 50%;
                       text-align: center;
                       line-height: 48px;
-                      font-size: 1.3em;
+                      font-size: 1em;
                       font-weight: bold;
                       color: #fff;
                       margin-right: 0.5em;
@@ -146,13 +136,12 @@
                       border: 2px solid #ff9800;
                       box-sizing: border-box;
                     "
-                    >22°C</span
-                  >
+                  ></span>
                 </span>
               </div>
               <div>
                 <strong>Humidity:</strong>
-                <span id="humidity">55%</span>
+                <span id="humidity"></span>
               </div>
             </div>
           </div>
@@ -161,7 +150,7 @@
             <h3>Location</h3>
             <div>
               <strong>GPS Coordinates: </strong>
-              <span id="gps"> -1.2921, 36.8219</span>
+              <span id="gps"> unavailable</span>
             </div>
           </div>
         </div>
@@ -172,6 +161,46 @@
         var links = document.getElementById("navbarLinks");
         links.classList.toggle("active");
       }
+    </script>
+
+    <script>
+      const data_el_template = `<div><strong>$param:</strong> <span>$value $units</span></div>`;
+      const PM_data = document.getElementById("PM_DATA");
+      const temperature = document.getElementById("temperature");
+      const humidity = document.getElementById("humidity");
+      const fetchData = () => {
+        fetch("/sensor-data")
+          .then((response) => response.json())
+          .then((data) => {
+            if (data) {
+              console.log("Received sensor data: ", data);
+              if (data["PM"]) {
+                let pm_data_els = "";
+                for (const [pm, val] of Object.entries(data["PM"])) {
+                  let pm_el = data_el_template;
+                  pm_el = pm_el.replace("$param", pm);
+                  pm_el = pm_el.replace("$value", val);
+                  pm_el = pm_el.replace("$units", "ug/m3");
+                  pm_data_els += pm_el;
+                }
+                PM_data.innerHTML = pm_data_els;
+              }
+
+              if (data["DHT"]) {
+                temperature.textContent = data["DHT"]["temperature"] + "°C";
+                humidity.textContent = data["DHT"]["humidity"] + "%";
+              }
+              // document.getElementById("gps").textContent = data.gps;
+              // // Update temperature inside the styled span
+              // const tempSpan = document.querySelector("#temperature span");
+              // if (tempSpan) tempSpan.textContent = data.temperature + "°C";
+            }
+          })
+          .catch((error) => {
+            console.error("Error fetching sensor data:", error);
+          });
+      };
+      setInterval(fetchData, 5 * 60 * 1000);
     </script>
   </body>
 </html>
