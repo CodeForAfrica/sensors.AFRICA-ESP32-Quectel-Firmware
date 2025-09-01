@@ -11,6 +11,7 @@ AsyncWebServer server(80);
 extern struct_wifiInfo *wifiInfo;
 extern uint8_t count_wifiInfo;
 extern JsonDocument getCurrentSensorData();
+extern void listFiles();
 
 void setup_webserver()
 {
@@ -20,6 +21,14 @@ void setup_webserver()
             { request->send(LittleFS, "/index.html"); });
   server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/config.html"); });
+  server.on("/device-details.html", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/device-details.html"); });
+  server.on("/ota.html", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/ota.html"); });
+  server.on("/file-system", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/file-system.html"); });
+  server.on("/advanced-settings.html", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/advanced-settings.html"); });
   server.on("/sensors_logo.png", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(200, "image/png", SENSORSAFRICA_LOGO, SENSORSAFRICA_LOGO_PNG_SIZE); });
   server.on("/icons/wifi.svg", HTTP_GET, [](AsyncWebServerRequest *request)
