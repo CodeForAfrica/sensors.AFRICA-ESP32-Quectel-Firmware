@@ -133,5 +133,100 @@ void setup_webserver()
               serializeJson(sensor_data, sensor_data_str);
               request->send(200, "application/json", sensor_data_str); });
 
+  server.on("/upload-firmware", HTTP_POST, [](AsyncWebServerRequest *request)
+            { request->send(200, "application/json", "{\"status\":\"Upload started\"}"); }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+            {
+              static File uploadFile;
+              if (index == 0)
+              {
+                // Start upload
+                Serial.printf("Upload started: %s\n", filename.c_str());
+                uploadFile = LittleFS.open("/" + filename, "w");
+                if (!uploadFile)
+                {
+                  Serial.println("Failed to open file for writing");
+                  request->send(500, "application/json", "{\"error\":\"Failed to open file\"}");
+                  return;
+                }
+              }
+              if (uploadFile)
+              {
+                uploadFile.write(data, len);
+              }
+              if (final)
+              {
+                if (uploadFile)
+                {
+                  uploadFile.close();
+                  Serial.printf("Upload finished: %s\n", filename.c_str());
+                  request->send(200, "application/json", "{\"status\":\"Upload successful\"}");
+                }
+                else
+                {
+                  request->send(500, "application/json", "{\"error\":\"File not open\"}");
+                }
+              }
+
+              Serial.println("Checking file system if firmware was uploaded");
+              listFiles(); });
+
+  //! For comparison
+  // void uploadFiles()
+  // {
+  //   // upload a new file to the SPIFFS
+  //   HTTPUpload &upload = server.upload();
+  //   if (upload.status == UPLOAD_FILE_START)
+  //   {
+
+  //     fname = upload.filename;
+  //     if (!fname.startsWith("/"))
+  //       fname = "/" + fname;
+  //     Serial.print("Upload File Name: ");
+  //     Serial.println(fname);
+  //     uploadFile = SPIFFS.open(fname, "w"); // Open the file for writing in SPIFFS (create if it doesn't exist)
+  //     if (uploadFile)
+  //     {
+  //       Serial.println("File opened");
+  //     }
+  //     // fname = String();
+  //     Serial.print("fname: ");
+  //     Serial.println(fname);
+  //   }
+  //   else if (upload.status == UPLOAD_FILE_WRITE)
+  //   {
+  //     if (uploadFile)
+  //     {
+  //       uploadFile.write(upload.buf, upload.currentSize);
+  //       // Serial.println("written");
+  //     }
+  //   }
+
+  //   else if (upload.status == UPLOAD_FILE_END)
+  //   {
+  //     if (uploadFile)
+  //     {                     // If the file was successfully created
+  //       uploadFile.close(); // Close the file again
+  //       Serial.print("File Upload Size: ");
+  //       Serial.println(upload.totalSize);
+  //       String msg = "201: Successfully uploaded file ";
+  //       msg += fname;
+  //       server.send(200, "text/plain", msg);
+  //       Serial.println(msg);
+
+  //       if (fname == new_firmware_filename)
+  //       {
+  //         firmware_bin_saved = true;
+  //       }
+  //     }
+  //     else
+  //     {
+  //       String err_msg = "500: failed creating file ";
+  //       err_msg += fname;
+  //       server.send(500, "text/plain", err_msg);
+  //       Serial.println(err_msg);
+  //     }
+  //   }
+  // }
+
   server.begin();
 }
