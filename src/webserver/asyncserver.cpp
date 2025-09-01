@@ -134,7 +134,12 @@ void setup_webserver()
               request->send(200, "application/json", sensor_data_str); });
 
   server.on("/upload-firmware", HTTP_POST, [](AsyncWebServerRequest *request)
-            { request->send(200, "application/json", "{\"status\":\"Upload started\"}"); }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+            {
+              request->send(200, "application/json", "{\"status\":\"Upload started\"}");
+              Serial.println("Checking file system if firmware was uploaded");
+              listFiles();
+            },
+            [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
             {
               static File uploadFile;
               if (index == 0)
@@ -165,10 +170,7 @@ void setup_webserver()
                 {
                   request->send(500, "application/json", "{\"error\":\"File not open\"}");
                 }
-              }
-
-              Serial.println("Checking file system if firmware was uploaded");
-              listFiles(); });
+              } });
 
   //! For comparison
   // void uploadFiles()
