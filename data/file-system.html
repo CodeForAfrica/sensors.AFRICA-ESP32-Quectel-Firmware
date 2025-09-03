@@ -69,9 +69,12 @@
         font-family: monospace;
         margin: 2px 0;
       }
+      .directory {
+        color: #0b409b;
+      }
     </style>
   </head>
-  <body>
+  <body onload="testFileTree()">
     <nav class="navbar">
       <span class="navbar-brand">Sensors Logo</span>
       <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
@@ -91,56 +94,62 @@
       // Recursive function to render directories and files
       function renderTree(node, indent = 0) {
         let html = "";
-        if (node.type === "directory") {
-          html += `<div class="directory" style="margin-left:${
-            indent * 20
-          }px;"><strong>📁 ${node.name}</strong></div>`;
-          if (node.children && node.children.length) {
-            node.children.forEach((child) => {
-              html += renderTree(child, indent + 1);
-            });
+
+        for (const [k, v] of Object.entries(node)) {
+          if (v === "file") {
+            // This is a file - make it clickable for download
+            html += `<div class="file" style="margin-left:${
+              indent * 20
+            }px;">📄 ${k} </div>`;
+          } else if (typeof v === "object" && v !== null) {
+            // This is a directory (object)
+            html += `<div class="directory" style="margin-left:${
+              indent * 20
+            }px;"><strong>📁 ${k}</strong></div>`;
+            html += renderTree(v, indent + 1);
+          } else {
+            console.log("invalid object");
           }
-        } else if (node.type === "file") {
-          html += `<div class="file" style="margin-left:${indent * 20}px;">📄 ${
-            node.name
-          }</div>`;
         }
         return html;
       }
 
+      function testFileTree() {
+        const sampleData = {
+          "config.html": "file",
+          "device-details.html": "file",
+          "file-system.html": "file",
+          icons: {
+            "cell_tower.svg": "file",
+            fontawesome: {
+              "simcard.svg": "file",
+            },
+            "lock.svg": "file",
+            "simcard.svg": "file",
+            "wifi.svg": "file",
+          },
+          "index.html": "file",
+          "ota.html": "file",
+        };
+
+        const file_structure = renderTree(sampleData);
+        document.getElementById("file-system").innerHTML = file_structure;
+      }
+
       // Fetch and display the file system
-      fetch(fetchUrl)
-        .then((response) => response.json())
-        .then((data) => {
-          // Example of the expected JSON object:
-          // {
-          //   "type": "directory",
-          //   "name": "root",
-          //   "children": [
-          //     {
-          //       "type": "directory",
-          //       "name": "subfolder",
-          //       "children": [
-          //         {
-          //           "type": "file",
-          //           "name": "file1.txt"
-          //         }
-          //       ]
-          //     },
-          //     {
-          //       "type": "file",
-          //       "name": "main.js"
-          //     }
-          //   ]
-          // }
-          console.log("Received file structure: ", data);
-          document.getElementById("file-system").innerHTML = renderTree(data);
-        })
-        .catch((err) => {
-          document.getElementById("file-system").textContent =
-            "Failed to load file system.";
-          console.error(err);
-        });
+      function getFiles() {
+        fetch(fetchUrl)
+          .then((response) => response.json())
+          .then((data) => {
+            console.log("Received file structure: ", data);
+            document.getElementById("file-system").innerHTML = renderTree(data);
+          })
+          .catch((err) => {
+            document.getElementById("file-system").textContent =
+              "Failed to load file system.";
+            console.error(err);
+          });
+      }
     </script>
   </body>
 </html>
