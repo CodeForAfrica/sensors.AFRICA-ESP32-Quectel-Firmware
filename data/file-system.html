@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>File Viewer</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+      }
+      .navbar {
+        display: flex;
+        background: #2fb56b;
+        color: #fff;
+        align-items: center;
+        flex-wrap: wrap;
+        font-size: 20px;
+      }
+      .navbar-brand {
+        font-weight: bold;
+        font-size: 1.2em;
+        padding: 0.5em 1em;
+      }
+      .navbar-toggle {
+        display: none;
+        font-size: 1.5em;
+        background: none;
+        border: none;
+        color: #fff;
+        margin-left: auto;
+        cursor: pointer;
+      }
+      .navbar-links {
+        display: flex;
+        flex-direction: row;
+        gap: 1em;
+        margin: auto;
+      }
+      .navbar-links a {
+        color: #fff;
+        text-decoration: none;
+        transition: background 0.2s;
+        padding: 1em;
+      }
+      .navbar-links a:hover {
+        background: #06913e;
+      }
+      @media (max-width: 600px) {
+        .navbar-links {
+          flex-direction: column;
+          width: 100%;
+          display: none;
+          gap: 0;
+        }
+        .navbar-links a {
+          padding: 0.5em 1em;
+        }
+        .navbar-links.active {
+          display: flex;
+        }
+        .navbar-toggle {
+          display: block;
+        }
+      }
+
+      .directory,
+      .file {
+        font-family: monospace;
+        margin: 2px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar">
+      <span class="navbar-brand">Sensors Logo</span>
+      <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
+      <div class="navbar-links" id="navbarLinks">
+        <a href="index.html">Home</a>
+        <a href="device-details.html">Device Details</a>
+        <a href="file-system.html">File Viewer</a>
+        <a href="ota.html">OTA</a>
+        <a href="advanced-settings.html">Advanced Settings</a>
+      </div>
+    </nav>
+    <div id="file-system"></div>
+    <script>
+      // Example fetch URL (replace with your actual endpoint)
+      const fetchUrl = "/list-files";
+
+      // Recursive function to render directories and files
+      function renderTree(node, indent = 0) {
+        let html = "";
+        if (node.type === "directory") {
+          html += `<div class="directory" style="margin-left:${
+            indent * 20
+          }px;"><strong>📁 ${node.name}</strong></div>`;
+          if (node.children && node.children.length) {
+            node.children.forEach((child) => {
+              html += renderTree(child, indent + 1);
+            });
+          }
+        } else if (node.type === "file") {
+          html += `<div class="file" style="margin-left:${indent * 20}px;">📄 ${
+            node.name
+          }</div>`;
+        }
+        return html;
+      }
+
+      // Fetch and display the file system
+      fetch(fetchUrl)
+        .then((response) => response.json())
+        .then((data) => {
+          // Example of the expected JSON object:
+          // {
+          //   "type": "directory",
+          //   "name": "root",
+          //   "children": [
+          //     {
+          //       "type": "directory",
+          //       "name": "subfolder",
+          //       "children": [
+          //         {
+          //           "type": "file",
+          //           "name": "file1.txt"
+          //         }
+          //       ]
+          //     },
+          //     {
+          //       "type": "file",
+          //       "name": "main.js"
+          //     }
+          //   ]
+          // }
+          console.log("Received file structure: ", data);
+          document.getElementById("file-system").innerHTML = renderTree(data);
+        })
+        .catch((err) => {
+          document.getElementById("file-system").textContent =
+            "Failed to load file system.";
+          console.error(err);
+        });
+    </script>
+  </body>
+</html>
