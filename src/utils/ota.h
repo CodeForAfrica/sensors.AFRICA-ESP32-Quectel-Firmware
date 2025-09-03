@@ -22,8 +22,21 @@ bool otaUpdateFromLittleFS(const char *firmwarePath, const char *backupPath)
         return false;
 
     size_t firmwareSize = firmware.size();
+    size_t freeSpace = ESP.getFreeSketchSpace();
     Serial.print("New firmware size: ");
-    Serial.println(firmwareSize);
+    Serial.print(firmwareSize);
+    Serial.print(" bytes");
+    Serial.print("\tFree space: ");
+    Serial.print(freeSpace);
+    Serial.println(" bytes");
+    if (firmwareSize > freeSpace)
+    {
+        Serial.println("Firmware size is large than the free space");
+        // Delete the new firmware
+        LittleFS.remove(firmwarePath);
+        return false;
+    }
+
     if (!Update.begin(firmwareSize))
     {
         firmware.close();
@@ -95,7 +108,7 @@ bool otaUpdateFromLittleFS(const char *firmwarePath, const char *backupPath)
     }
     else
     {
-        LittleFS.rename(firmwarePath, "current_firmware.bin");
+        LittleFS.rename(firmwarePath, "/current_firmware.bin");
     }
 
     Serial.println("Restarting ESP");
