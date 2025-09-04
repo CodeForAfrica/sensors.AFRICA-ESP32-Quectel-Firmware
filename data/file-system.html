@@ -81,32 +81,43 @@
     </style>
   </head>
   <body onload="testFileTree()">
-    <nav class="navbar">
-      <span class="navbar-brand">Sensors Logo</span>
-      <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
-      <div class="navbar-links" id="navbarLinks">
-        <a href="index.html">Home</a>
-        <a href="device-details.html">Device Details</a>
-        <a href="file-system.html">File Viewer</a>
-        <a href="ota.html">OTA</a>
-        <a href="advanced-settings.html">Advanced Settings</a>
+    <main>
+      <nav class="navbar">
+        <span class="navbar-brand">Sensors Logo</span>
+        <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
+        <div class="navbar-links" id="navbarLinks">
+          <a href="index.html">Home</a>
+          <a href="device-details.html">Device Details</a>
+          <a href="file-system.html">File Viewer</a>
+          <a href="ota.html">OTA</a>
+          <a href="advanced-settings.html">Advanced Settings</a>
+        </div>
+      </nav>
+      <div style="text-align: center; padding: 0.5rem 0">
+        <p>Click on the icon ⏬ to download the file.</p>
       </div>
-    </nav>
-    <div id="file-system"></div>
+      <div id="file-system"></div>
+    </main>
     <script>
       // Example fetch URL (replace with your actual endpoint)
       const fetchUrl = "/list-files";
 
       // Recursive function to render directories and files
-      function renderTree(node, indent = 0) {
+      function renderTree(node, indent = 0, currentPath = "") {
         let html = "";
 
         for (const [k, v] of Object.entries(node)) {
+          const fullPath = currentPath + "/" + k;
+
           if (v === "file") {
             // This is a file - make it clickable for download
             html += `<div class="file" style="margin-left:${
               indent * 20
-            }px;">📄 ${k} </div>`;
+            }px;">📄 ${k} 
+            <a href="/download?file=${encodeURIComponent(
+              fullPath
+            )}" class="file-link" download="${k}"><span>⏬</span></a>  
+            </div>`;
           } else if (typeof v === "object" && v !== null) {
             // This is a directory (object)
             html += `<div class="directory" style="margin-left:${
@@ -139,9 +150,12 @@
           const fullPath = currentPath + "/" + key;
 
           if (value === "file") {
-            html += `<div class="file" style="margin-left:${
-              indent * 20
-            }px;">📄 ${key} </div>`;
+            html += `<div class="file" style="margin-left:${indent * 20}px;">📄 
+              ${key}
+               <a href="/download?file=${encodeURIComponent(
+                 fullPath
+               )}" class="file-link" download="${key}"><span>⏬</span></a>
+            </div>`;
           } else if (typeof value === "object" && value !== null) {
             html += `<div class="directory" style="margin-left:${
               indent * 20
