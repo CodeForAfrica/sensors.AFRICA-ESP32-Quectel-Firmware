@@ -11,7 +11,6 @@ AsyncWebServer server(80);
 extern struct_wifiInfo *wifiInfo;
 extern uint8_t count_wifiInfo;
 extern JsonDocument getCurrentSensorData();
-extern void listFiles();
 
 void setup_webserver()
 {
@@ -25,7 +24,7 @@ void setup_webserver()
             { request->send(LittleFS, "/device-details.html"); });
   server.on("/ota.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/ota.html"); });
-  server.on("/file-system", HTTP_GET, [](AsyncWebServerRequest *request)
+  server.on("/file-system.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/file-system.html"); });
   server.on("/advanced-settings.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/advanced-settings.html"); });
@@ -137,7 +136,7 @@ void setup_webserver()
             {
               request->send(200, "application/json", "{\"status\":\"Upload started\"}");
               Serial.println("Checking file system if firmware was uploaded");
-              listFiles();
+              // listFiles();
             },
             [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
             {
@@ -172,63 +171,38 @@ void setup_webserver()
                 }
               } });
 
-  //! For comparison
-  // void uploadFiles()
-  // {
-  //   // upload a new file to the SPIFFS
-  //   HTTPUpload &upload = server.upload();
-  //   if (upload.status == UPLOAD_FILE_START)
-  //   {
+  server.on("/download", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+    // Check for the "file" query parameter
+    if (!request->hasParam("file")) {
+      request->send(400, "text/plain", "Missing 'file' parameter");
+      return;
+    }
 
-  //     fname = upload.filename;
-  //     if (!fname.startsWith("/"))
-  //       fname = "/" + fname;
-  //     Serial.print("Upload File Name: ");
-  //     Serial.println(fname);
-  //     uploadFile = SPIFFS.open(fname, "w"); // Open the file for writing in SPIFFS (create if it doesn't exist)
-  //     if (uploadFile)
-  //     {
-  //       Serial.println("File opened");
-  //     }
-  //     // fname = String();
-  //     Serial.print("fname: ");
-  //     Serial.println(fname);
-  //   }
-  //   else if (upload.status == UPLOAD_FILE_WRITE)
-  //   {
-  //     if (uploadFile)
-  //     {
-  //       uploadFile.write(upload.buf, upload.currentSize);
-  //       // Serial.println("written");
-  //     }
-  //   }
+    // Retrieve and sanitize the file path
+    String filePath = request->getParam("file")->value();
+    if (!filePath.startsWith("/")) {
+      filePath = "/" + filePath;
+    }
 
-  //   else if (upload.status == UPLOAD_FILE_END)
-  //   {
-  //     if (uploadFile)
-  //     {                     // If the file was successfully created
-  //       uploadFile.close(); // Close the file again
-  //       Serial.print("File Upload Size: ");
-  //       Serial.println(upload.totalSize);
-  //       String msg = "201: Successfully uploaded file ";
-  //       msg += fname;
-  //       server.send(200, "text/plain", msg);
-  //       Serial.println(msg);
+    // Verify file exists
+    if (!LittleFS.exists(filePath)) {
+      request->send(404, "text/plain", "File not found");
+      return;
+    }
 
-  //       if (fname == new_firmware_filename)
-  //       {
-  //         firmware_bin_saved = true;
-  //       }
-  //     }
-  //     else
-  //     {
-  //       String err_msg = "500: failed creating file ";
-  //       err_msg += fname;
-  //       server.send(500, "text/plain", err_msg);
-  //       Serial.println(err_msg);
-  //     }
-  //   }
-  // }
+    // Derive a filename for the Content-Disposition header
+    String filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+
+    // Create response and force download
+    AsyncWebServerResponse *response =
+      request->beginResponse(LittleFS, filePath, "application/octet-stream");
+    response->addHeader(
+      "Content-Disposition",
+      "attachment; filename=\"" + filename + "\""
+    );
+
+    request->send(response); });
 
   server.begin();
 }
