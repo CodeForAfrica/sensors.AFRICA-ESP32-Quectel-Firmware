@@ -41,16 +41,17 @@ bool deactivateGPRS();
 int8_t GPRS_status();
 void flushSerial();
 void SerialFlush();
-void QUECTEL_POST(const char *url, char headers[][40], int header_size, const char *data, size_t data_length);
+void QUECTEL_POST(const char *url, char headers[][40], int header_size, const char *data, size_t data_length, uint8_t &response_status);
 bool extractText(char *input, const char *target, char *output, uint8_t output_size, char _until); // ? should go to utils
-void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool fill_buffer = false, unsigned long timeout = 3000);
-int16_t getNumber(char *AT_cmd, char *expected_reply, uint8_t index_from, uint8_t length);
+void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool wait_timeout = false, unsigned long timeout = 3000);
+int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_from, uint8_t length);
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS);
 bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long timeout = 1000);
 bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
 void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
-
+void http_preconfig();
+void GSM_sleep();
 void troubleshoot_GSM();
 
 bool GSM_init()
@@ -276,6 +277,10 @@ bool GPRS_init()
     {
         GPRS_INIT_FAIL_COUNT += 1;
     }
+    else
+    {
+        http_preconfig();
+    }
     return GPRS_CONNECTED;
 }
 
@@ -327,13 +332,24 @@ void flushSerial()
     Serial.println("##################");
 }
 
+/// @brief Preconfigure HTTP settings
+/// @details This function sets the HTTP configuration for the Quectel module.
+void http_preconfig()
+{
+    sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK");
+}
+
 /// @brief Easy implementation of Quectel HTTP functionality
 /// @param url url for http request sans protocol
 /// @param headers array of request headers
 /// @param header_size size of the headers array
 /// @param data post body data
 /// @param data_length length of the data
-void QUECTEL_POST(const char *url, char headers[][40], int header_size, const char *data, size_t data_length)
+/// @param response_status integer address to store the response status
+void QUECTEL_POST(const char *url, char headers[][40], int header_size, const char *data, size_t data_length, uint8_t &response_status)
 {
     /* SETTING request headers
     ! Headers are sent in two formats
@@ -354,10 +370,6 @@ void QUECTEL_POST(const char *url, char headers[][40], int header_size, const ch
     Serial.println(HTTP_CFG);
 
     sendAndCheck(HTTP_CFG, "OK", 2000);
-    sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",1", "OK");
 
     for (int i = 0; i < header_size; i++)
     {
@@ -391,6 +403,7 @@ void QUECTEL_POST(const char *url, char headers[][40], int header_size, const ch
     {
         Serial.println("Posting gprs data..");
         get_http_response_status(data, HTTP_POST_RESPONSE_STATUS);
+        response_status = atoi(HTTP_POST_RESPONSE_STATUS);
     }
     else
     {
@@ -421,7 +434,7 @@ void SerialFlush()
     Serial.println("************");
 }
 
-void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool fill_buffer, unsigned long timeout)
+void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool wait_timeout, unsigned long timeout)
 {
 
     flushSerial();
@@ -457,7 +470,7 @@ void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool fi
         // }
 
         delay(2);
-    } while ((fill_buffer ? fill_buffer : strlen(res_buff) == 0) && (millis() - sendStartMillis < timeout));
+    } while ((wait_timeout ? wait_timeout : strlen(res_buff) == 0) && (millis() - sendStartMillis < timeout));
     Serial.println("\n-------\r\nGSM RAW RESPONSE:");
     Serial.println(res_buff);
     Serial.println("-------");
@@ -511,7 +524,7 @@ bool extractText(char *input, const char *target, char *output, uint8_t output_s
 }
 
 // extract an integer
-int16_t getNumber(char *AT_cmd, char *expected_reply, uint8_t index_from, uint8_t length)
+int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_from, uint8_t length)
 {
 
     int16_t num;
@@ -678,7 +691,7 @@ bool getNetworkTime(char *time)
 
     char AT_response[64];
     size_t AT_res_size = sizeof(AT_response);
-    char time_buff[23];
+    char time_buff[23] = {};
     uint8_t retries = 0;
 
     get_raw_response("AT+CCLK?\0", AT_response, AT_res_size, false, 5000);
@@ -690,8 +703,15 @@ bool getNetworkTime(char *time)
         delay(1000);
     }
 
-    if (strlen(time_buff) > 0)
+    String time_str = String(time_buff);
+
+    if (time_str.charAt(2) == '/' && time_str.charAt(5) == '/' && time_str.charAt(8) == ',' && time_str.charAt(11) == ':' && time_str.charAt(14) == ':')
     {
+
+        // Serial.println("Time length: " + (String)strlen(time_buff));
+        // Serial.println("Time buffer: " + (String)time_buff);
+        // Serial.println("Time buffer size: " + (String)sizeof(time_buff));
+
         strcpy(time, time_buff);
         return true;
     }
@@ -740,6 +760,9 @@ bool GSM_Serial_begin()
 #endif
     sendAndCheck("ATI", "OK");
 
+    // Set automatic timezone and update Locate time to RTC
+    sendAndCheck("AT+CTZU=3", "OK");
+
     return comm_init;
 }
 
@@ -771,6 +794,18 @@ void GSMreset(RST_SEQ seq, uint8_t timing_delay)
     delay(30000); // Allow enough time for GSM to warm up
 }
 
+void GSM_sleep()
+{
+
+    if (sendAndCheck("AT+QSCLK=2", "OK"))
+    {
+        Serial.println("GSM module is now in sleep mode. Will only wake up if data is sent on the serial port");
+    }
+    else
+    {
+        Serial.println("Failed to put GSM module in sleep mode");
+    }
+}
 // Testing POST data
 // http://staging.api.sensors.africa/v1/push-sensor-data/
 
