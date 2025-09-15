@@ -199,3 +199,46 @@ static void closeFile(fs::FS &fs, const char *path)
     File file = fs.open(path);
     file.close();
 }
+
+static String listFiles(fs::FS &fs)
+{
+    JsonDocument doc;
+
+    std::function<void(const String &, JsonObject &)> listDir;
+    listDir = [&](const String &path, JsonObject &obj)
+    {
+        File dir = fs.open(path);
+        if (!dir || !dir.isDirectory())
+            return;
+        File file = dir.openNextFile();
+        while (file)
+        {
+            String name = file.name();
+            if (file.isDirectory())
+            {
+                JsonObject subdir = obj[name].to<JsonObject>();
+                // Build the full path for recursive call
+                String fullPath = path;
+                if (!path.endsWith("/"))
+                {
+                    fullPath += "/";
+                }
+                fullPath += name;
+                listDir(fullPath, subdir); // Use full path instead of just name
+            }
+            else
+            {
+                obj[name] = "file";
+            }
+            file = dir.openNextFile();
+        }
+    };
+
+    JsonObject root = doc.to<JsonObject>();
+    listDir("/", root);
+    // serializeJsonPretty(doc, Serial); // debug
+
+    String file_list;
+    serializeJsonPretty(doc, file_list);
+    return file_list;
+}
