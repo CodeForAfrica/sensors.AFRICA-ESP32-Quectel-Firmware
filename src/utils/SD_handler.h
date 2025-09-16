@@ -240,5 +240,6 @@ static String listFiles(fs::FS &fs)
 
     String file_list;
     serializeJsonPretty(doc, file_list);
+    Serial.println(file_list);
     return file_list;
 }

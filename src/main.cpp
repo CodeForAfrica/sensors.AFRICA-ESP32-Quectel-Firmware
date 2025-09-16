@@ -71,7 +71,7 @@ const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS * 28; // f
 
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
-int sampling_interval = 5 * 60 * 1000; // 5 minutes
+int sampling_interval = 2 * 60 * 1000; // 5 minutes
 unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
@@ -164,6 +164,8 @@ enum Month
 
 int current_year, current_month = 0;
 
+JsonDocument current_sensor_data;
+
 void setup()
 {
     Serial.begin(115200);
@@ -196,13 +198,13 @@ void setup()
         setup_webserver();
 
         // 10 minutes timeout for wifi config
-        unsigned long last_page_load = millis();
-        while ((millis() - last_page_load) < time_for_wifi_config + 500)
-        {
-            dnsServer.processNextRequest();
-            // server.handleClient();
-            yield();
-        }
+        // unsigned long last_page_load = millis();
+        // while ((millis() - last_page_load) < time_for_wifi_config + 500)
+        // {
+        //     dnsServer.processNextRequest();
+        //     // server.handleClient();
+        //     yield();
+        // }
     }
 
     if (gsm_capable)
@@ -384,6 +386,13 @@ void readDHT()
             generateCSV_payload(resultDHT, sizeof(resultDHT), datetime.c_str(), "temperature", temperature, "°C", "DHT22");
             generateCSV_payload(resultDHT, sizeof(resultDHT), datetime.c_str(), "humidity", humidity, "%", "DHT22");
             memoryDataLog(CSV_PAYLOAD_LOGGER, resultDHT);
+
+            // update current sensor data
+            JsonObject dht_obj = DHT_data_doc.to<JsonObject>();
+            dht_obj["temperature"] = temperature;
+            dht_obj["humidity"] = humidity;
+            current_sensor_data["DHT"] = dht_obj;
+            serializeJsonPretty(current_sensor_data, Serial);
         }
 
         break;
@@ -466,6 +475,14 @@ void getPMSREADINGS()
             memoryDataLog(CSV_PAYLOAD_LOGGER, result_PMS);
             generateCSV_payload(result_PMS, sizeof(result_PMS), datetime.c_str(), "PM10", pms.pm10, "ug/m3", "PMS");
             memoryDataLog(CSV_PAYLOAD_LOGGER, result_PMS);
+
+            // update current sensor data
+            JsonObject pm_obj = PM_data_doc.to<JsonObject>();
+            pm_obj["PM2.5"] = pms.pm25;
+            pm_obj["PM10"] = pms.pm10;
+            pm_obj["PM1"] = pms.pm01;
+
+            current_sensor_data["PM"] = pm_obj;
         }
     }
     else // something went wrong
@@ -1071,4 +1088,11 @@ void sendFromMemoryLog(LOGGER &logger)
 
     //? call resetLogger(logger) to reset the logger
     //? or just clear the memory
+}
+
+// Get current sensor data;
+
+JsonDocument getCurrentSensorData()
+{
+    return current_sensor_data;
 }
