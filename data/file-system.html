@@ -102,7 +102,7 @@
             html += `<div class="directory" style="margin-left:${
               indent * 20
             }px;"><strong>📁 ${key}</strong></div>`;
-            html += renderTree(key, indent + 1);
+            html += renderTree(node[key], indent + 1);
           } else if (node[key] === "file") {
             html += `<div class="file" style="margin-left:${
               indent * 20
