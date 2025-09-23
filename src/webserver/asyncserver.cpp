@@ -171,7 +171,7 @@ void setup_webserver()
               } });
 
   server.on("/list-files", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(200, "application/json", listFiles(LittleFS)); });
+            { request->send(200, "application/json", listFiles(SD)); });
 
   //! For comparison
   // void uploadFiles()
