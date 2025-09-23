@@ -11,7 +11,7 @@ AsyncWebServer server(80);
 extern struct_wifiInfo *wifiInfo;
 extern uint8_t count_wifiInfo;
 extern JsonDocument getCurrentSensorData();
-extern String listFiles(fs::FS &fs);
+extern String listFiles(fs::FS &fs, String path);
 
 void setup_webserver()
 {
