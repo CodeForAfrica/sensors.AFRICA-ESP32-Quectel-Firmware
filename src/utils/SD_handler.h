@@ -200,7 +200,7 @@ static void closeFile(fs::FS &fs, const char *path)
     file.close();
 }
 
-static String listFiles(fs::FS &fs)
+static String listFiles(fs::FS &fs, String path = "/")
 {
     JsonDocument doc;
 
@@ -235,10 +235,11 @@ static String listFiles(fs::FS &fs)
     };
 
     JsonObject root = doc.to<JsonObject>();
-    listDir("/", root);
+    listDir(path, root);
     // serializeJsonPretty(doc, Serial); // debug
 
     String file_list;
     serializeJsonPretty(doc, file_list);
+    Serial.println(file_list);
     return file_list;
 }

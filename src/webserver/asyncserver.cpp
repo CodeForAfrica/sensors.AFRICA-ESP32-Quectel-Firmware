@@ -11,7 +11,7 @@ AsyncWebServer server(80);
 extern struct_wifiInfo *wifiInfo;
 extern uint8_t count_wifiInfo;
 extern JsonDocument getCurrentSensorData();
-extern void listFiles();
+extern String listFiles(fs::FS &fs, String path);
 
 void setup_webserver()
 {
@@ -25,7 +25,7 @@ void setup_webserver()
             { request->send(LittleFS, "/device-details.html"); });
   server.on("/ota.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/ota.html"); });
-  server.on("/file-system", HTTP_GET, [](AsyncWebServerRequest *request)
+  server.on("/file-system.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/file-system.html"); });
   server.on("/advanced-settings.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/advanced-settings.html"); });
@@ -137,9 +137,7 @@ void setup_webserver()
             {
               request->send(200, "application/json", "{\"status\":\"Upload started\"}");
               Serial.println("Checking file system if firmware was uploaded");
-              listFiles();
-            },
-            [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+              listFiles(LittleFS); }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
             {
               static File uploadFile;
               if (index == 0)
@@ -156,7 +154,7 @@ void setup_webserver()
               }
               if (uploadFile)
               {
-                uploadFile.write(data, len);
+                 uploadFile.write(data, len);
               }
               if (final)
               {
@@ -171,6 +169,9 @@ void setup_webserver()
                   request->send(500, "application/json", "{\"error\":\"File not open\"}");
                 }
               } });
+
+  server.on("/list-files", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(200, "application/json", listFiles(SD)); });
 
   //! For comparison
   // void uploadFiles()
