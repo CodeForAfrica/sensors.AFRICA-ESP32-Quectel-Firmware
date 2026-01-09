@@ -104,25 +104,25 @@
     const fetchUrl = "/list-files";
 
     // Recursive function to render directories and files
-    function renderTree(node, indent = 0) {
+    function renderTree(node, indent = 0, currentPath = "") {
       let html = "";
 
       for (const key in node) {
         if (node.hasOwnProperty(key)) {
+          const fullPath = currentPath + "/" + key;
           if (typeof node[key] === "object" && node[key] !== null) {
             // remove arrays !Array.isArray(node[key])
             html += `<div class="directory" style="margin-left:${
               indent * 20
             }px;"><strong>📁 ${key}</strong></div>`;
-            html += renderTree(node[key], indent + 1);
+            html += renderTree(node[key], indent + 1, fullPath);
           } else if (node[key] === "file") {
-            const fullPath = currentPath + "/" + node[key];
             html += `<div class="file" style="margin-left:${
               indent * 20
             }px;">📄 ${key}  
               <a href="/download?file=${encodeURIComponent(
                 fullPath
-              )}" class="file-link" download="${k}"><span>⏬</span></a>
+              )}" class="file-link" download="${key}"><span>⏬</span></a>
             </div>`;
           }
         }
