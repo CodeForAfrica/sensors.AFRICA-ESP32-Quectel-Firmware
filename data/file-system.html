@@ -80,7 +80,7 @@
       }
     </style>
   </head>
-  <body onload="testFileTree()">
+  <body>
     <main>
       <nav class="navbar">
         <span class="navbar-brand">Sensors Logo</span>
@@ -93,116 +93,91 @@
           <a href="advanced-settings.html">Advanced Settings</a>
         </div>
       </nav>
+      <div id="file-system"></div>
       <div style="text-align: center; padding: 0.5rem 0">
         <p>Click on the icon ⏬ to download the file.</p>
       </div>
-      <div id="file-system"></div>
     </main>
-    <script>
-      // Example fetch URL (replace with your actual endpoint)
-      const fetchUrl = "/list-files";
+  </body>
 
-      // Recursive function to render directories and files
-      function renderTree(node, indent = 0, currentPath = "") {
-        let html = "";
+  <script>
+    const fetchUrl = "/list-files";
 
-        for (const [k, v] of Object.entries(node)) {
-          const fullPath = currentPath + "/" + k;
+    // Recursive function to render directories and files
+    function renderTree(node, indent = 0, currentPath = "") {
+      let html = "";
 
-          if (v === "file") {
-            // This is a file - make it clickable for download
-            html += `<div class="file" style="margin-left:${
-              indent * 20
-            }px;">📄 ${k} 
-            <a href="/download?file=${encodeURIComponent(
-              fullPath
-            )}" class="file-link" download="${k}"><span>⏬</span></a>  
-            </div>`;
-          } else if (typeof v === "object" && v !== null) {
-            // This is a directory (object)
+      for (const key in node) {
+        if (node.hasOwnProperty(key)) {
+          const fullPath = currentPath + "/" + key;
+          if (typeof node[key] === "object" && node[key] !== null) {
+            // remove arrays !Array.isArray(node[key])
             html += `<div class="directory" style="margin-left:${
               indent * 20
-            }px;"><strong>📁 ${k}</strong></div>`;
-            html += renderTree(v, indent + 1);
-          } else {
-            console.log("invalid object");
+            }px;"><strong>📁 ${key}</strong></div>`;
+            html += renderTree(node[key], indent + 1, fullPath);
+          } else if (node[key] === "file") {
+            html += `<div class="file" style="margin-left:${
+              indent * 20
+            }px;">📄 ${key}  
+              <a href="/download?file=${encodeURIComponent(
+                fullPath
+              )}" class="file-link" download="${key}"><span>⏬</span></a>
+            </div>`;
           }
         }
-        return html;
       }
 
-      // Alternative function that sorts directories first, then files
-      function renderSortedTree(node, indent = 0, currentPath = "") {
-        let html = "";
-        const entries = Object.entries(node);
+      return html;
+    }
 
-        // Sort entries: directories first, then files
-        entries.sort(([keyA, valueA], [keyB, valueB]) => {
-          const aIsDir = typeof valueA === "object" && valueA !== null;
-          const bIsDir = typeof valueB === "object" && valueB !== null;
+    // Alternative function that sorts directories first, then files
+    function renderSortedTree(node, indent = 0, currentPath = "") {
+      let html = "";
+      const entries = Object.entries(node);
 
-          if (aIsDir && !bIsDir) return -1; // a is directory, b is file
-          if (!aIsDir && bIsDir) return 1; // a is file, b is directory
-          return keyA.localeCompare(keyB); // same type, sort alphabetically
-        });
+      // Sort entries: directories first, then files
+      entries.sort(([keyA, valueA], [keyB, valueB]) => {
+        const aIsDir = typeof valueA === "object" && valueA !== null;
+        const bIsDir = typeof valueB === "object" && valueB !== null;
 
-        for (const [key, value] of entries) {
-          const fullPath = currentPath + "/" + key;
+        if (aIsDir && !bIsDir) return -1; // a is directory, b is file
+        if (!aIsDir && bIsDir) return 1; // a is file, b is directory
+        return keyA.localeCompare(keyB); // same type, sort alphabetically
+      });
 
-          if (value === "file") {
-            html += `<div class="file" style="margin-left:${indent * 20}px;">📄 
+      for (const [key, value] of entries) {
+        const fullPath = currentPath + "/" + key;
+
+        if (value === "file") {
+          html += `<div class="file" style="margin-left:${indent * 20}px;">📄 
               ${key}
                <a href="/download?file=${encodeURIComponent(
                  fullPath
                )}" class="file-link" download="${key}"><span>⏬</span></a>
             </div>`;
-          } else if (typeof value === "object" && value !== null) {
-            html += `<div class="directory" style="margin-left:${
-              indent * 20
-            }px;"><strong>📁 ${key}</strong></div>`;
-            html += renderSortedTree(value, indent + 1, fullPath);
-          }
+        } else if (typeof value === "object" && value !== null) {
+          html += `<div class="directory" style="margin-left:${
+            indent * 20
+          }px;"><strong>📁 ${key}</strong></div>`;
+          html += renderSortedTree(value, indent + 1, fullPath);
         }
-
-        return html;
       }
 
-      function testFileTree() {
-        const sampleData = {
-          "config.html": "file",
-          "device-details.html": "file",
-          "file-system.html": "file",
-          icons: {
-            "cell_tower.svg": "file",
-            fontawesome: {
-              "simcard.svg": "file",
-            },
-            "lock.svg": "file",
-            "simcard.svg": "file",
-            "wifi.svg": "file",
-          },
-          "index.html": "file",
-          "ota.html": "file",
-        };
+      return html;
+    }
 
-        const file_structure = renderSortedTree(sampleData);
-        document.getElementById("file-system").innerHTML = file_structure;
-      }
-
-      // Fetch and display the file system
-      function getFiles() {
-        fetch(fetchUrl)
-          .then((response) => response.json())
-          .then((data) => {
-            console.log("Received file structure: ", data);
-            document.getElementById("file-system").innerHTML = renderTree(data);
-          })
-          .catch((err) => {
-            document.getElementById("file-system").textContent =
-              "Failed to load file system.";
-            console.error(err);
-          });
-      }
-    </script>
-  </body>
+    // Fetch and display the file system
+    fetch(fetchUrl)
+      .then((response) => response.json())
+      .then((data) => {
+        console.log("Received file structure: ", data);
+        document.getElementById("file-system").innerHTML = renderTree(data);
+      })
+      .catch((err) => {
+        document.getElementById("file-system").textContent =
+          "Failed to load file system.";
+        console.error(err);
+      });
+  </script>
 </html>

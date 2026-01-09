@@ -11,6 +11,10 @@ AsyncWebServer server(80);
 extern struct_wifiInfo *wifiInfo;
 extern uint8_t count_wifiInfo;
 extern JsonDocument getCurrentSensorData();
+extern String listFiles(fs::FS &fs, String path);
+String pendingFileList = "{}";
+bool fileListReady = false;
+AsyncWebServerRequest *pendingRequest = nullptr;
 
 void setup_webserver()
 {
@@ -136,9 +140,7 @@ void setup_webserver()
             {
               request->send(200, "application/json", "{\"status\":\"Upload started\"}");
               Serial.println("Checking file system if firmware was uploaded");
-              // listFiles();
-            },
-            [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+              listFiles(LittleFS); }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
             {
               static File uploadFile;
               if (index == 0)
@@ -155,7 +157,7 @@ void setup_webserver()
               }
               if (uploadFile)
               {
-                uploadFile.write(data, len);
+                 uploadFile.write(data, len);
               }
               if (final)
               {
@@ -170,6 +172,52 @@ void setup_webserver()
                   request->send(500, "application/json", "{\"error\":\"File not open\"}");
                 }
               } });
+
+  // server.on("/list-files", HTTP_GET, [](AsyncWebServerRequest *request)
+  //           { request->send(200, "application/json", listFiles(SD)); });
+
+  server.on("/list-files", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+              if (fileListReady && pendingRequest == nullptr)
+              {
+                // Previous result is ready, send it
+                request->send(200, "application/json", pendingFileList);
+                return;
+              }
+
+              if (pendingRequest != nullptr)
+              {
+                // Another request is already being processed
+                request->send(503, "text/plain", "Server busy, try again later");
+                return;
+              }
+
+              // Store the request and start the task
+              pendingRequest = request;
+              fileListReady = false;
+
+              xTaskCreatePinnedToCore(
+                  [](void *param)
+                  {
+                    // Get the file list
+                    pendingFileList = listFiles(SD);
+                    fileListReady = true;
+
+                    // Send the response
+                    if (pendingRequest != nullptr)
+                    {
+                      pendingRequest->send(200, "application/json", pendingFileList);
+                      pendingRequest = nullptr;
+                    }
+
+                    vTaskDelete(NULL);
+                  },
+                  "SDListTask",
+                  8192,
+                  nullptr,
+                  1,
+                  nullptr,
+                  1); });
 
   server.on("/download", HTTP_GET, [](AsyncWebServerRequest *request)
             {
@@ -203,6 +251,64 @@ void setup_webserver()
     );
 
     request->send(response); });
+
+  //! For comparison
+  // void uploadFiles()
+  // {
+  //   // upload a new file to the SPIFFS
+  //   HTTPUpload &upload = server.upload();
+  //   if (upload.status == UPLOAD_FILE_START)
+  //   {
+
+  //     fname = upload.filename;
+  //     if (!fname.startsWith("/"))
+  //       fname = "/" + fname;
+  //     Serial.print("Upload File Name: ");
+  //     Serial.println(fname);
+  //     uploadFile = SPIFFS.open(fname, "w"); // Open the file for writing in SPIFFS (create if it doesn't exist)
+  //     if (uploadFile)
+  //     {
+  //       Serial.println("File opened");
+  //     }
+  //     // fname = String();
+  //     Serial.print("fname: ");
+  //     Serial.println(fname);
+  //   }
+  //   else if (upload.status == UPLOAD_FILE_WRITE)
+  //   {
+  //     if (uploadFile)
+  //     {
+  //       uploadFile.write(upload.buf, upload.currentSize);
+  //       // Serial.println("written");
+  //     }
+  //   }
+
+  //   else if (upload.status == UPLOAD_FILE_END)
+  //   {
+  //     if (uploadFile)
+  //     {                     // If the file was successfully created
+  //       uploadFile.close(); // Close the file again
+  //       Serial.print("File Upload Size: ");
+  //       Serial.println(upload.totalSize);
+  //       String msg = "201: Successfully uploaded file ";
+  //       msg += fname;
+  //       server.send(200, "text/plain", msg);
+  //       Serial.println(msg);
+
+  //       if (fname == new_firmware_filename)
+  //       {
+  //         firmware_bin_saved = true;
+  //       }
+  //     }
+  //     else
+  //     {
+  //       String err_msg = "500: failed creating file ";
+  //       err_msg += fname;
+  //       server.send(500, "text/plain", err_msg);
+  //       Serial.println(err_msg);
+  //     }
+  //   }
+  // }
 
   server.begin();
 }
