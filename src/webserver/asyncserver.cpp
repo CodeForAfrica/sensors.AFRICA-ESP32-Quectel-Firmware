@@ -12,6 +12,9 @@ extern struct_wifiInfo *wifiInfo;
 extern uint8_t count_wifiInfo;
 extern JsonDocument getCurrentSensorData();
 extern String listFiles(fs::FS &fs, String path);
+String pendingFileList = "{}";
+bool fileListReady = false;
+AsyncWebServerRequest *pendingRequest = nullptr;
 
 void setup_webserver()
 {
@@ -170,8 +173,84 @@ void setup_webserver()
                 }
               } });
 
+  // server.on("/list-files", HTTP_GET, [](AsyncWebServerRequest *request)
+  //           { request->send(200, "application/json", listFiles(SD)); });
+
   server.on("/list-files", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(200, "application/json", listFiles(SD)); });
+            {
+              if (fileListReady && pendingRequest == nullptr)
+              {
+                // Previous result is ready, send it
+                request->send(200, "application/json", pendingFileList);
+                return;
+              }
+
+              if (pendingRequest != nullptr)
+              {
+                // Another request is already being processed
+                request->send(503, "text/plain", "Server busy, try again later");
+                return;
+              }
+
+              // Store the request and start the task
+              pendingRequest = request;
+              fileListReady = false;
+
+              xTaskCreatePinnedToCore(
+                  [](void *param)
+                  {
+                    // Get the file list
+                    pendingFileList = listFiles(SD);
+                    fileListReady = true;
+
+                    // Send the response
+                    if (pendingRequest != nullptr)
+                    {
+                      pendingRequest->send(200, "application/json", pendingFileList);
+                      pendingRequest = nullptr;
+                    }
+
+                    vTaskDelete(NULL);
+                  },
+                  "SDListTask",
+                  8192,
+                  nullptr,
+                  1,
+                  nullptr,
+                  1); });
+
+  server.on("/download", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+    // Check for the "file" query parameter
+    if (!request->hasParam("file")) {
+      request->send(400, "text/plain", "Missing 'file' parameter");
+      return;
+    }
+
+    // Retrieve and sanitize the file path
+    String filePath = request->getParam("file")->value();
+    if (!filePath.startsWith("/")) {
+      filePath = "/" + filePath;
+    }
+
+    // Verify file exists
+    if (!LittleFS.exists(filePath)) {
+      request->send(404, "text/plain", "File not found");
+      return;
+    }
+
+    // Derive a filename for the Content-Disposition header
+    String filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+
+    // Create response and force download
+    AsyncWebServerResponse *response =
+      request->beginResponse(LittleFS, filePath, "application/octet-stream");
+    response->addHeader(
+      "Content-Disposition",
+      "attachment; filename=\"" + filename + "\""
+    );
+
+    request->send(response); });
 
   //! For comparison
   // void uploadFiles()

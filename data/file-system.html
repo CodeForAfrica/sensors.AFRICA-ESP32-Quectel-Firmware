@@ -64,10 +64,19 @@
         }
       }
 
-      .directory,
       .file {
         font-family: monospace;
         margin: 2px 0;
+        font-size: 1rem;
+      }
+      .directory {
+        color: #0b409b;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 18px;
+        margin-bottom: 0.2rem;
+      }
+      #file-system {
+        padding: 1rem 2rem;
       }
       #file-system {
         padding: 1rem;
@@ -75,39 +84,86 @@
     </style>
   </head>
   <body>
-    <nav class="navbar">
-      <span class="navbar-brand">Sensors Logo</span>
-      <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
-      <div class="navbar-links" id="navbarLinks">
-        <a href="index.html">Home</a>
-        <a href="device-details.html">Device Details</a>
-        <a href="file-system.html">File Viewer</a>
-        <a href="ota.html">OTA</a>
-        <a href="advanced-settings.html">Advanced Settings</a>
+    <main>
+      <nav class="navbar">
+        <span class="navbar-brand">Sensors Logo</span>
+        <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
+        <div class="navbar-links" id="navbarLinks">
+          <a href="index.html">Home</a>
+          <a href="device-details.html">Device Details</a>
+          <a href="file-system.html">File Viewer</a>
+          <a href="ota.html">OTA</a>
+          <a href="advanced-settings.html">Advanced Settings</a>
+        </div>
+      </nav>
+      <div style="text-align: center; padding: 0.5rem 0">
+        <p>Click on the icon ⏬ to download the file.</p>
       </div>
-    </nav>
-    <div id="file-system"></div>
+      <div id="file-system"></div>
+    </main>
   </body>
+
   <script>
     const fetchUrl = "/list-files";
 
     // Recursive function to render directories and files
-    function renderTree(node, indent = 0) {
+    function renderTree(node, indent = 0, currentPath = "") {
       let html = "";
 
       for (const key in node) {
         if (node.hasOwnProperty(key)) {
+          const fullPath = currentPath + "/" + key;
           if (typeof node[key] === "object" && node[key] !== null) {
             // remove arrays !Array.isArray(node[key])
             html += `<div class="directory" style="margin-left:${
               indent * 20
             }px;"><strong>📁 ${key}</strong></div>`;
-            html += renderTree(node[key], indent + 1);
+            html += renderTree(node[key], indent + 1, fullPath);
           } else if (node[key] === "file") {
             html += `<div class="file" style="margin-left:${
               indent * 20
-            }px;">📄 ${key}</div>`;
+            }px;">📄 ${key}  
+              <a href="/download?file=${encodeURIComponent(
+                fullPath
+              )}" class="file-link" download="${key}"><span>⏬</span></a>
+            </div>`;
           }
+        }
+      }
+
+      return html;
+    }
+
+    // Alternative function that sorts directories first, then files
+    function renderSortedTree(node, indent = 0, currentPath = "") {
+      let html = "";
+      const entries = Object.entries(node);
+
+      // Sort entries: directories first, then files
+      entries.sort(([keyA, valueA], [keyB, valueB]) => {
+        const aIsDir = typeof valueA === "object" && valueA !== null;
+        const bIsDir = typeof valueB === "object" && valueB !== null;
+
+        if (aIsDir && !bIsDir) return -1; // a is directory, b is file
+        if (!aIsDir && bIsDir) return 1; // a is file, b is directory
+        return keyA.localeCompare(keyB); // same type, sort alphabetically
+      });
+
+      for (const [key, value] of entries) {
+        const fullPath = currentPath + "/" + key;
+
+        if (value === "file") {
+          html += `<div class="file" style="margin-left:${indent * 20}px;">📄 
+              ${key}
+               <a href="/download?file=${encodeURIComponent(
+                 fullPath
+               )}" class="file-link" download="${key}"><span>⏬</span></a>
+            </div>`;
+        } else if (typeof value === "object" && value !== null) {
+          html += `<div class="directory" style="margin-left:${
+            indent * 20
+          }px;"><strong>📁 ${key}</strong></div>`;
+          html += renderSortedTree(value, indent + 1, fullPath);
         }
       }
 
