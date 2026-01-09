@@ -21,6 +21,13 @@
         font-weight: bold;
         font-size: 1.2em;
         padding: 0.5em 1em;
+        height: 100px;
+        width: 100px;
+      }
+      .navbar-brand img {
+        width: inherit;
+        height: inherit;
+        object-fit: contain;
       }
       .navbar-toggle {
         display: none;
@@ -88,10 +95,12 @@
   </head>
   <body>
     <nav class="navbar">
-      <span class="navbar-brand">Sensors Logo</span>
+      <span class="navbar-brand">
+        <img src="sensors_logo.png" alt="sensors-logo" />
+      </span>
       <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
       <div class="navbar-links" id="navbarLinks">
-        <a href="index.html">Home</a>
+        <a href="/">Home</a>
         <a href="device-details.html">Device Details</a>
         <a href="ota.html">OTA</a>
         <a href="file-system.html">File Viewer</a>
