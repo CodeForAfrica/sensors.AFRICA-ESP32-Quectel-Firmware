@@ -219,6 +219,39 @@ void setup_webserver()
                   nullptr,
                   1); });
 
+  server.on("/download", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+    // Check for the "file" query parameter
+    if (!request->hasParam("file")) {
+      request->send(400, "text/plain", "Missing 'file' parameter");
+      return;
+    }
+
+    // Retrieve and sanitize the file path
+    String filePath = request->getParam("file")->value();
+    if (!filePath.startsWith("/")) {
+      filePath = "/" + filePath;
+    }
+
+    // Verify file exists
+    if (!LittleFS.exists(filePath)) {
+      request->send(404, "text/plain", "File not found");
+      return;
+    }
+
+    // Derive a filename for the Content-Disposition header
+    String filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+
+    // Create response and force download
+    AsyncWebServerResponse *response =
+      request->beginResponse(LittleFS, filePath, "application/octet-stream");
+    response->addHeader(
+      "Content-Disposition",
+      "attachment; filename=\"" + filename + "\""
+    );
+
+    request->send(response); });
+
   //! For comparison
   // void uploadFiles()
   // {
