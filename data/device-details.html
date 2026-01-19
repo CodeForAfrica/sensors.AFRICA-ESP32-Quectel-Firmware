@@ -112,14 +112,7 @@
     <main>
       <section class="device-info-wrapper">
         <h2 style="text-align: center; color: #2fb56b">Device Details</h2>
-        <div class="info-group">
-          <h3>GSM &amp; Network</h3>
-          <ul>
-            <li><strong>Network Name:</strong> Safaricom</li>
-            <li><strong>Network Strength:</strong> -85 dBm</li>
-            <li><strong>Network Band:</strong> 4G</li>
-            <li><strong>SIM ICCID:</strong> 8925401234567890123</li>
-          </ul>
+        <div class="info-group" id="GSM">
         </div>
         <div class="info-group">
           <h3>WiFi Network</h3>
@@ -151,6 +144,31 @@
         var links = document.getElementById("navbarLinks");
         links.classList.toggle("active");
       }
+
+
+   function renderInfo(data,header){
+ let html=`<h3>${header}</h3><ul>`
+for(const [k,v] of Object.entries(data)){
+  let li=`<li><strong>${k}:</strong> ${v}</li>`
+ html+=li;
+}
+html+="</ul>"
+return html;
+
+}
+
+      fetch("/gsm_info")
+      .then((response) => response.json())
+      .then((data) => {
+        console.log("GSM info: ", data);
+        document.getElementById("GSM").innerHTML = renderInfo(data,"GSM &amp; Network");
+      })
+      .catch((err) => {
+        document.getElementById("GSM").textContent =
+          "Failed to load GSM info.";
+        console.error(err);
+      });
+  </script>
     </script>
   </body>
 </html>

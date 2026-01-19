@@ -15,6 +15,7 @@ extern String listFiles(fs::FS &fs, String path);
 String pendingFileList = "{}";
 bool fileListReady = false;
 AsyncWebServerRequest *pendingRequest = nullptr;
+extern JsonDocument gsm_info;
 
 void setup_webserver()
 {
@@ -251,6 +252,12 @@ void setup_webserver()
     );
 
     request->send(response); });
+
+  server.on("/gsm_info", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+              String res;
+              serializeJson(gsm_info,res);
+              request->send(200,"application/json", res); });
 
   //! For comparison
   // void uploadFiles()

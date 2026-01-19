@@ -148,9 +148,6 @@ bool register_to_network()
     }
 
     sendAndCheck("AT+COPS?", "OK");
-    Serial.println(getNetworkName());
-    Serial.println(getSignalStrength());
-    Serial.println(getNetworkBand());
 
     return true;
 }

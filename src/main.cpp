@@ -125,6 +125,8 @@ struct LOGGER
     int log_count = 0;
 } JSON_PAYLOAD_LOGGER, CSV_PAYLOAD_LOGGER;
 
+JsonDocument gsm_info;
+
 void readDHT();
 void getPMSREADINGS();
 void printPM_values();
@@ -229,8 +231,11 @@ void setup()
                     Serial.println("Retrying network registration...");
                 }
 
-                // GPRS init
+                gsm_info["Network Name"] = getNetworkName();
+                gsm_info["Signal Strength"] = getSignalStrength();
+                gsm_info["Network Band"] = getNetworkBand();
 
+                // GPRS init
                 if (!GPRS_init())
                 {
                     Serial.println("Failed to init GPRS");
