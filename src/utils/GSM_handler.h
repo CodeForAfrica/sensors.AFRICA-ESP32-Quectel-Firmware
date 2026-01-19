@@ -55,6 +55,7 @@ void GSM_sleep();
 void troubleshoot_GSM();
 String getNetworkName();
 int8_t getSignalStrength();
+String getNetworkBand();
 
 bool GSM_init()
 {
@@ -149,6 +150,7 @@ bool register_to_network()
     sendAndCheck("AT+COPS?", "OK");
     Serial.println(getNetworkName());
     Serial.println(getSignalStrength());
+    Serial.println(getNetworkBand());
 
     return true;
 }
@@ -760,6 +762,51 @@ int8_t getSignalStrength()
         return atoi(rssi);
     };
     return 99;
+}
+
+String getNetworkBand()
+{
+    char AT_response[64];
+    size_t AT_res_size = sizeof(AT_response);
+
+    const char AT_cmd[] = "AT+QNWINFO";
+    char band[64];
+
+    get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
+
+    // Extract text between second and third comma
+    // Expected response example: +QNWINFO: "FDD LTE","63902","LTE BAND 3",1650
+    if (extractText(AT_response, "+QNWINFO: \"", band, sizeof(band), '\n'))
+    {
+        // ToDo: Extract Access Technology: Particulary interested in "NO SERVICE" as part of response
+        // Find the second occurrence of comma and extract from there
+        const char *start = strchr(AT_response, ',');
+        if (start != nullptr)
+        {
+            start = strchr(start + 1, ',');
+            if (start != nullptr)
+            {
+                start++; // Move past the comma
+                // Skip leading quote if present
+                if (*start == '"')
+                    start++;
+
+                const char *end = strchr(start, '"');
+                if (end != nullptr)
+                {
+                    size_t length = end - start;
+                    if (length < sizeof(band))
+                    {
+                        strncpy(band, start, length);
+                        band[length] = '\0';
+                        return String(band);
+                    }
+                }
+            }
+        }
+    }
+
+    return "";
 }
 
 bool GSM_Serial_begin()
