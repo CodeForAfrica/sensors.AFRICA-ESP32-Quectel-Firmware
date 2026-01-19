@@ -54,6 +54,7 @@ void http_preconfig();
 void GSM_sleep();
 void troubleshoot_GSM();
 String getNetworkName();
+int8_t getSignalStrength();
 
 bool GSM_init()
 {
@@ -147,6 +148,7 @@ bool register_to_network()
 
     sendAndCheck("AT+COPS?", "OK");
     Serial.println(getNetworkName());
+    Serial.println(getSignalStrength());
 
     return true;
 }
@@ -742,6 +744,22 @@ String getNetworkName()
 
     NETWORK_NAME = "";
     return NETWORK_NAME;
+}
+
+int8_t getSignalStrength()
+{
+    char AT_response[64];
+    size_t AT_res_size = sizeof(AT_response);
+
+    const char AT_cmd[] = "AT+CSQ";
+    char rssi[4];
+
+    get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
+    if (extractText(AT_response, "+CSQ: ", rssi, sizeof(rssi), ','))
+    {
+        return atoi(rssi);
+    };
+    return 99;
 }
 
 bool GSM_Serial_begin()
