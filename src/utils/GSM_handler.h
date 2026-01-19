@@ -53,6 +53,7 @@ void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
 void http_preconfig();
 void GSM_sleep();
 void troubleshoot_GSM();
+String getNetworkName();
 
 bool GSM_init()
 {
@@ -145,6 +146,7 @@ bool register_to_network()
     }
 
     sendAndCheck("AT+COPS?", "OK");
+    Serial.println(getNetworkName());
 
     return true;
 }
@@ -719,6 +721,27 @@ bool getNetworkTime(char *time)
     {
         return false;
     }
+}
+
+String getNetworkName()
+{
+
+    char AT_response[255];
+    size_t AT_res_size = sizeof(AT_response);
+
+    const char AT_cmd[] = "AT+QSPN";
+    char NetworkName[64];
+
+    get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
+
+    if (extractText(AT_response, "+QSPN: \"", NetworkName, 64, '"'))
+    {
+        NETWORK_NAME = String(NetworkName);
+        return NETWORK_NAME;
+    };
+
+    NETWORK_NAME = "";
+    return NETWORK_NAME;
 }
 
 bool GSM_Serial_begin()
