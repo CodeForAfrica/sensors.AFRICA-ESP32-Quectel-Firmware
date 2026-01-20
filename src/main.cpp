@@ -234,6 +234,7 @@ void setup()
                 gsm_info["Network Name"] = getNetworkName();
                 gsm_info["Signal Strength"] = getSignalStrength();
                 gsm_info["Network Band"] = getNetworkBand();
+                gsm_info["SIM ICCID"] = SIM_CCID;
 
                 // GPRS init
                 if (!GPRS_init())
