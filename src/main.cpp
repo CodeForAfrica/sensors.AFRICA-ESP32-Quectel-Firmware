@@ -197,9 +197,9 @@ void setup()
 
                 Serial.print("Registered to: ");
                 Serial.print(getNetworkName());
-                Serial.print(" Band: ");
+                Serial.print(", Band: ");
                 Serial.print(getNetworkBand());
-                Serial.print(" Signal Strength (not dBm): ");
+                Serial.print(", Signal Strength (not dBm): ");
                 Serial.println(getSignalStrength());
                 Serial.print("SIM ICCID: ");
                 Serial.println(SIM_CCID);
@@ -543,7 +543,7 @@ datetimetz extractDateTime(String datetimeStr)
     dtz.datetime = {0, 0, 0, 0, 0, 0, 0};
     dtz.timestamp = 0;
 
-    Serial.println("Received date string: " + datetimeStr); //! format looks like "25/02/24,05:55:53+00" and may include the quotes!
+    // Serial.println("Received date string: " + datetimeStr); //! format looks like "25/02/24,05:55:53+00" and may include the quotes!
 
     // check if received string is empty
     if (datetimeStr == "")

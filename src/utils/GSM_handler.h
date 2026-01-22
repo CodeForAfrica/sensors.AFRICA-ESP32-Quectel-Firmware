@@ -247,7 +247,7 @@ bool GPRS_init()
     // Check CGATT status
     Serial.println("\nChecking CGATT Status..");
     CGATT_status = GPRS_status();
-    Serial.println("CGATT_status: " + (String)CGATT_status);
+    // Serial.println("CGATT_status: " + (String)CGATT_status);
 
     if (CGATT_status == 1)
     {
@@ -329,13 +329,13 @@ flushSerial
 *****************************************************************/
 void flushSerial()
 {
-    Serial.println("Flushing GSM serial..\n############");
+    // Serial.println("Flushing GSM serial..\n############");
     while (GSMSerial.available())
     {
-
-        Serial.print(GSMSerial.read());
+        char c = GSMSerial.read();
+        // Serial.print(); //? Only useful for debugging
     }
-    Serial.println("##################");
+    // Serial.println("\n##################");
 }
 
 /// @brief Preconfigure HTTP settings
@@ -498,8 +498,8 @@ bool extractText(char *input, const char *target, char *output, uint8_t output_s
     if (found_target != nullptr)
     {
 
-        Serial.print("Substring found at position: ");
-        Serial.println(found_target - input);
+        // Serial.print("Substring found at position: ");
+        // Serial.println(found_target - input);
 
         // Find the start of the extraction point
         const char *start = found_target + strlen(target);
@@ -549,7 +549,7 @@ int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_
     // get_raw_response(AT_cmd, AT_response, AT_res_size);
     String AT_response = "";
 
-    if (!sendAndCheck(AT_cmd, expected_reply, AT_response))
+    if (!sendAndCheck(AT_cmd, "OK", AT_response))
         return -1;
 
     const char *found_target = strstr(AT_response.c_str(), expected_reply);
@@ -609,7 +609,7 @@ bool waitForReply(const char *expectedReply, unsigned long timeout)
 
             if (buffer.indexOf(expectedReply) >= 0)
             {
-                Serial.println(buffer);
+                // Serial.println(buffer);
                 return true;
             }
 
@@ -637,7 +637,7 @@ bool waitForReply(const char *expectedReply, String &buffer, unsigned long timeo
 
             if (buffer.indexOf(expectedReply) >= 0)
             {
-                Serial.println(buffer);
+                // Serial.println(buffer);
                 return true;
             }
 
@@ -699,8 +699,8 @@ int8_t GPRS_status()
 {
 
     int8_t status = getNumber("AT+CGATT?\0", "+CGATT: ", 0, 1);
-    Serial.print("CGATT status: ");
-    Serial.println(status);
+    // Serial.print("CGATT status: ");
+    // Serial.println(status);
     return status;
 }
 
