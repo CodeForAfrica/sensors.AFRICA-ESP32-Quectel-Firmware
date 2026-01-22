@@ -195,6 +195,15 @@ void setup()
                     Serial.println("Retrying network registration...");
                 }
 
+                Serial.print("Registered to: ");
+                Serial.print(getNetworkName());
+                Serial.print(" Band: ");
+                Serial.print(getNetworkBand());
+                Serial.print(" Signal Strength (not dBm): ");
+                Serial.println(getSignalStrength());
+                Serial.print("SIM ICCID: ");
+                Serial.println(SIM_CCID);
+
                 // GPRS init
 
                 if (!GPRS_init())
