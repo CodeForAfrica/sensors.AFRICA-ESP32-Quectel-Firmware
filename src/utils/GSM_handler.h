@@ -46,7 +46,8 @@ bool extractText(char *input, const char *target, char *output, uint8_t output_s
 void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool wait_timeout = false, unsigned long timeout = 3000);
 int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_from, uint8_t length);
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS);
-bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long timeout = 1000);
+bool sendAndCheck(const char *AT_cmd, const char *expected_reply = "OK", unsigned long timeout = 10000);
+bool waitForReply(const char *expectedReply, unsigned long timeout);
 bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
 void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
@@ -574,16 +575,35 @@ int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_
 /// @return true if expected reply is found
 bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long timeout)
 {
-    char AT_response[255];
-    size_t AT_res_size = sizeof(AT_response);
+    GSMSerial.println(AT_cmd);
+    return waitForReply(expected_reply, timeout);
+}
 
-    get_raw_response(AT_cmd, AT_response, AT_res_size, true, timeout);
+bool waitForReply(const char *expectedReply, unsigned long timeout)
+{
+    unsigned long start = millis();
+    String buffer = "";
 
-    if (strstr(AT_response, expected_reply))
+    while (millis() - start < timeout)
     {
-        return true;
-    }
+        while (GSMSerial.available())
+        {
+            char c = GSMSerial.read();
+            buffer += c;
 
+            if (buffer.indexOf(expectedReply) >= 0)
+            {
+                Serial.println(buffer);
+                return true;
+            }
+
+            // Maintain small buffer size
+            if (buffer.length() > 256)
+            {
+                buffer = buffer.substring(buffer.length() - 128);
+            }
+        }
+    }
     return false;
 }
 
