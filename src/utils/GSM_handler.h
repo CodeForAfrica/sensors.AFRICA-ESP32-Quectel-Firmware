@@ -16,7 +16,6 @@ uint16_t CGATT_status;
 char SIM_CCID[21] = "";
 String GSM_INIT_ERROR = "";
 String NETWORK_NAME = "";
-int8_t roam_status;
 
 // FAIL FLAGS
 #ifdef QUECTEL
@@ -27,14 +26,6 @@ int HTTP_POST_FAIL = 0;
 int REGISTER_TO_NETWORK_FAIL = 0;
 
 uint16_t HTTPOST_RESPONSE_STATUS;
-
-enum NetMode // Quectel
-{
-    AUTO = 0,
-    _2G = 1,
-    _4G = 3,
-};
-NetMode current_network = NetMode::AUTO;
 
 /**** Function Declacrations **/
 bool GSM_init();
@@ -62,7 +53,9 @@ void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
 void http_preconfig();
 void GSM_sleep();
 void troubleshoot_GSM();
-void setNetworkMode(NetMode mode);
+String getNetworkName();
+int8_t getSignalStrength();
+String getNetworkBand();
 
 bool GSM_init()
 {
@@ -106,71 +99,17 @@ bool GSM_init()
     return true;
 }
 
-// bool register_to_network()
-// {
-
-//     String error_msg = "";
-//     bool registered_to_network = false;
-//     int retry_count = 0;
-//     while (!registered_to_network && retry_count < 20)
-//     {
-//         int8_t status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
-
-//         if (status == 1 || status == 5)
-//         {
-//             registered_to_network = true;
-//             break;
-//         }
-
-//         else
-//         {
-//             Serial.println("Not registered to network ");
-//         }
-
-//         retry_count++;
-//         delay(3000);
-//     }
-
-//     if (!registered_to_network)
-//     {
-//         error_msg = "Network not registered";
-//         GSM_INIT_ERROR = error_msg;
-//         Serial.println(error_msg);
-//         REGISTER_TO_NETWORK_FAIL += 1;
-
-//         // Attempt to enable network registration
-
-//         if (!sendAndCheck("AT+CREG=1\0", "OK"))
-//         {
-//             Serial.println("Manual network registration failed.");
-//         }
-
-//         if (REGISTER_TO_NETWORK_FAIL > 5)
-//         {
-//             GSM_soft_reset();
-//             //? Check if the SIM card is still there?
-//             REGISTER_TO_NETWORK_FAIL = 0;
-//         }
-//         return false;
-//     }
-
-//     sendAndCheck("AT+COPS?", "OK");
-
-//     return true;
-// }
-
 bool register_to_network()
 {
 
     String error_msg = "";
     bool registered_to_network = false;
     int retry_count = 0;
-    setNetworkMode(current_network);
     while (!registered_to_network && retry_count < 20)
     {
-        roam_status = getNumber("AT+CREG?", "+CREG: ", 2, 1);
+        int8_t status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
 
-        if (roam_status == 1 || roam_status == 5)
+        if (status == 1 || status == 5)
         {
             registered_to_network = true;
             break;
@@ -194,7 +133,7 @@ bool register_to_network()
 
         // Attempt to enable network registration
 
-        if (!sendAndCheck("AT+CREG=1", "OK"))
+        if (!sendAndCheck("AT+CREG=1\0", "OK"))
         {
             Serial.println("Manual network registration failed.");
         }
@@ -208,7 +147,8 @@ bool register_to_network()
         return false;
     }
 
-    sendAndCheck("AT+COPS?", "OK", 180000); //??
+    sendAndCheck("AT+COPS?", "OK");
+
     return true;
 }
 
@@ -784,46 +724,86 @@ bool getNetworkTime(char *time)
     }
 }
 
-void setNetworkMode(NetMode mode)
-
+String getNetworkName()
 {
-    // if (mode != NetMode::AUTO || mode != NetMode::_2G || mode != NetMode::_4G)
-    // {
-    //     Serial.println("Invalid network mode");
-    //     return;
-    // }
 
-    char setnetmode[24] = "AT+QCFG=\"nwscanmode\",";
-    char _mode[1];
-    itoa(mode, _mode, 10);
+    char AT_response[255];
+    size_t AT_res_size = sizeof(AT_response);
 
-    strcat(setnetmode, _mode);
+    const char AT_cmd[] = "AT+QSPN";
+    char NetworkName[64];
 
-    char mode_str[8];
-    switch (mode)
+    get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
+
+    if (extractText(AT_response, "+QSPN: \"", NetworkName, 64, '"'))
     {
-    case (NetMode::_2G):
-        strcpy(mode_str, "2G");
-        break;
-    case (NetMode::_4G):
-        strcpy(mode_str, "4G");
-        break;
-    case (NetMode::AUTO):
-        strcpy(mode_str, "AUTO");
-        break;
+        NETWORK_NAME = String(NetworkName);
+        return NETWORK_NAME;
+    };
+
+    NETWORK_NAME = "";
+    return NETWORK_NAME;
+}
+
+int8_t getSignalStrength()
+{
+    char AT_response[64];
+    size_t AT_res_size = sizeof(AT_response);
+
+    const char AT_cmd[] = "AT+CSQ";
+    char rssi[4];
+
+    get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
+    if (extractText(AT_response, "+CSQ: ", rssi, sizeof(rssi), ','))
+    {
+        return atoi(rssi);
+    };
+    return 99;
+}
+
+String getNetworkBand()
+{
+    char AT_response[64];
+    size_t AT_res_size = sizeof(AT_response);
+
+    const char AT_cmd[] = "AT+QNWINFO";
+    char band[64];
+
+    get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
+
+    // Extract text between second and third comma
+    // Expected response example: +QNWINFO: "FDD LTE","63902","LTE BAND 3",1650
+    if (extractText(AT_response, "+QNWINFO: \"", band, sizeof(band), '\n'))
+    {
+        // ToDo: Extract Access Technology: Particulary interested in "NO SERVICE" as part of response
+        // Find the second occurrence of comma and extract from there
+        const char *start = strchr(AT_response, ',');
+        if (start != nullptr)
+        {
+            start = strchr(start + 1, ',');
+            if (start != nullptr)
+            {
+                start++; // Move past the comma
+                // Skip leading quote if present
+                if (*start == '"')
+                    start++;
+
+                const char *end = strchr(start, '"');
+                if (end != nullptr)
+                {
+                    size_t length = end - start;
+                    if (length < sizeof(band))
+                    {
+                        strncpy(band, start, length);
+                        band[length] = '\0';
+                        return String(band);
+                    }
+                }
+            }
+        }
     }
 
-    Serial.print("Setting network mode to: ");
-    Serial.println(mode_str);
-
-    if (!sendAndCheck(setnetmode, "OK", 2000))
-    {
-        Serial.print("Failed to set network mode: ");
-        Serial.println(mode_str);
-        return;
-    }
-    delay(1000);
-    current_network = mode;
+    return "";
 }
 
 bool GSM_Serial_begin()
