@@ -48,7 +48,7 @@ int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS);
 bool sendAndCheck(const char *AT_cmd, const char *expected_reply = "OK", unsigned long timeout = 10000);
 bool sendAndCheck(const char *AT_cmd, const char *expected_reply, String &response,
-                  unsigned long timeout);
+                  unsigned long timeout = 10000);
 bool waitForReply(const char *expectedReply, unsigned long timeout);
 bool waitForReply(const char *expectedReply, String &buffer, unsigned long timeout);
 bool GSM_Serial_begin();
@@ -191,14 +191,13 @@ void SIM_PIN_Setup()
 bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR" in response
 {
     char qccid[21];
-
-    char AT_response[255] = {};
+    String AT_response = "";
 
     char expected_reply[] = "+QCCID: ";
+    if (!sendAndCheck("AT+QCCID\0", "OK", AT_response))
+        return false;
 
-    get_raw_response("AT+QCCID\0", AT_response, 255, true, 5000);
-
-    if (extractText(AT_response, expected_reply, qccid, 21, '\r') && strlen(qccid) == 20)
+    if (extractText((char *)AT_response.c_str(), expected_reply, qccid, 21, '\r') && strlen(qccid) == 20)
     {
         strcpy(SIM_CCID, qccid);
         SIM_AVAILABLE = true;
@@ -536,8 +535,8 @@ int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_
 
     int16_t num;
 
-    char AT_response[255];
-    size_t AT_res_size = sizeof(AT_response);
+    // char AT_response[255];
+    // size_t AT_res_size = sizeof(AT_response);
 
     char number[8];
 
@@ -547,9 +546,13 @@ int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_
         return -1;
     }
 
-    get_raw_response(AT_cmd, AT_response, AT_res_size);
+    // get_raw_response(AT_cmd, AT_response, AT_res_size);
+    String AT_response = "";
 
-    const char *found_target = strstr(AT_response, expected_reply);
+    if (!sendAndCheck(AT_cmd, expected_reply, AT_response))
+        return -1;
+
+    const char *found_target = strstr(AT_response.c_str(), expected_reply);
 
     if (found_target == nullptr)
         return -1;
@@ -649,17 +652,21 @@ bool waitForReply(const char *expectedReply, String &buffer, unsigned long timeo
 
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS)
 {
-    char HTTP_RESPONSE[255];
-    size_t BUFFER_SIZE = sizeof(HTTP_RESPONSE);
+    // char HTTP_RESPONSE[255];
+    // size_t BUFFER_SIZE = sizeof(HTTP_RESPONSE);
     const char *data_copy = data.c_str();
     char gprs_data[strlen(data_copy)];
     strcpy(gprs_data, data_copy);
-    get_raw_response(gprs_data, HTTP_RESPONSE, BUFFER_SIZE, true, 10000);
+
+    String HTTP_RESPONSE = "";
+
+    // get_raw_response(gprs_data, HTTP_RESPONSE, BUFFER_SIZE, true, 10000);
 
     // Check HTTP RESPONSE status
     const char *expected_reply = "+QHTTPPOST: 0,"; // Operartion successful
+    sendAndCheck(gprs_data, "OK", HTTP_RESPONSE);
 
-    if (extractText(HTTP_RESPONSE, expected_reply, HTTP_RESPONSE_STATUS, 4, ','))
+    if (extractText((char *)HTTP_RESPONSE.c_str(), expected_reply, HTTP_RESPONSE_STATUS, 4, ','))
     {
 
         Serial.print("Gotten http status code: ");
@@ -752,16 +759,18 @@ bool deactivateGPRS()
 bool getNetworkTime(char *time)
 {
 
-    char AT_response[64];
-    size_t AT_res_size = sizeof(AT_response);
+    // char AT_response[64];
+    // size_t AT_res_size = sizeof(AT_response);
+    String AT_response = "";
     char time_buff[23] = {};
     uint8_t retries = 0;
 
-    get_raw_response("AT+CCLK?\0", AT_response, AT_res_size, false, 5000);
+    // get_raw_response("AT+CCLK?\0", AT_response, AT_res_size, false, 5000);
+    sendAndCheck("AT+CCLK?", "OK", AT_response);
 
-    while (!extractText(AT_response, "+CCLK: \"", time_buff, 32, '\"') && retries < 10)
+    while (!extractText((char *)AT_response.c_str(), "+CCLK: \"", time_buff, 32, '\"') && retries < 10)
     {
-        get_raw_response("AT+CCLK?\0", AT_response, AT_res_size, false, 5000);
+        sendAndCheck("AT+CCLK?", "OK", AT_response);
         retries++;
         delay(1000);
     }
@@ -787,15 +796,18 @@ bool getNetworkTime(char *time)
 String getNetworkName()
 {
 
-    char AT_response[255];
-    size_t AT_res_size = sizeof(AT_response);
+    // char AT_response[255];
+    // size_t AT_res_size = sizeof(AT_response);
+    String AT_response = "";
 
     const char AT_cmd[] = "AT+QSPN";
     char NetworkName[64];
 
-    get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
+    // get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return "";
 
-    if (extractText(AT_response, "+QSPN: \"", NetworkName, 64, '"'))
+    if (extractText((char *)AT_response.c_str(), "+QSPN: \"", NetworkName, 64, '"'))
     {
         NETWORK_NAME = String(NetworkName);
         return NETWORK_NAME;
@@ -807,14 +819,16 @@ String getNetworkName()
 
 int8_t getSignalStrength()
 {
-    char AT_response[64];
-    size_t AT_res_size = sizeof(AT_response);
-
+    // char AT_response[64];
+    // size_t AT_res_size = sizeof(AT_response);
+    String AT_response = "";
     const char AT_cmd[] = "AT+CSQ";
     char rssi[4];
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return 99;
 
-    get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
-    if (extractText(AT_response, "+CSQ: ", rssi, sizeof(rssi), ','))
+    // get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
+    if (extractText((char *)AT_response.c_str(), "+CSQ: ", rssi, sizeof(rssi), ','))
     {
         return atoi(rssi);
     };
@@ -823,21 +837,24 @@ int8_t getSignalStrength()
 
 String getNetworkBand()
 {
-    char AT_response[64];
-    size_t AT_res_size = sizeof(AT_response);
+    // char AT_response[64];
+    // size_t AT_res_size = sizeof(AT_response);
 
     const char AT_cmd[] = "AT+QNWINFO";
     char band[64];
+    String AT_response = "";
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return "";
 
-    get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
+    // get_raw_response(AT_cmd, AT_response, AT_res_size, true, 300);
 
     // Extract text between second and third comma
     // Expected response example: +QNWINFO: "FDD LTE","63902","LTE BAND 3",1650
-    if (extractText(AT_response, "+QNWINFO: \"", band, sizeof(band), '\n'))
+    if (extractText((char *)AT_response.c_str(), "+QNWINFO: \"", band, sizeof(band), '\n'))
     {
         // ToDo: Extract Access Technology: Particulary interested in "NO SERVICE" as part of response
         // Find the second occurrence of comma and extract from there
-        const char *start = strchr(AT_response, ',');
+        const char *start = strchr((char *)AT_response.c_str(), ',');
         if (start != nullptr)
         {
             start = strchr(start + 1, ',');
