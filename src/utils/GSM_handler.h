@@ -474,7 +474,7 @@ void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool wa
         // }
 
         delay(2);
-    } while ((wait_timeout ? wait_timeout : strlen(res_buff) == 0) && (millis() - sendStartMillis < timeout));
+    } while ((wait_timeout || (buff_pos == 0)) && (millis() - sendStartMillis < timeout));
     Serial.println("\n-------\r\nGSM RAW RESPONSE:");
     Serial.println(res_buff);
     Serial.println("-------");
