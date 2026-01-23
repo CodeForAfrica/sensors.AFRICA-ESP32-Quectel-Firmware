@@ -51,6 +51,7 @@ bool sendAndCheck(const char *AT_cmd, const char *expected_reply, String &respon
                   unsigned long timeout = 10000);
 bool waitForReply(const char *expectedReply, unsigned long timeout);
 bool waitForReply(const char *expectedReply, String &buffer, unsigned long timeout);
+bool waitForURC(const char *urcPrefix, char *response, size_t responseLen, unsigned long timeout);
 bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
 void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
@@ -650,6 +651,39 @@ bool waitForReply(const char *expectedReply, String &buffer, unsigned long timeo
     return false;
 }
 
+bool waitForURC(const char *urcPrefix, char *response,
+                size_t responseLen, unsigned long timeout)
+{
+    unsigned long start = millis();
+    String buffer = "";
+
+    while (millis() - start < timeout)
+    {
+        while (GSMSerial.available())
+        {
+            char c = GSMSerial.read();
+            buffer += c;
+
+            if (c == '\n')
+            {
+                if (buffer.indexOf(urcPrefix) >= 0)
+                {
+                    strncpy(response, buffer.c_str(), responseLen - 1);
+                    response[responseLen - 1] = '\0';
+                    return true;
+                }
+                buffer = "";
+            }
+
+            if (buffer.length() > 256)
+            {
+                buffer = "";
+            }
+        }
+    }
+    return false;
+}
+
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS)
 {
     // char HTTP_RESPONSE[255];
@@ -658,15 +692,20 @@ void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS)
     char gprs_data[strlen(data_copy)];
     strcpy(gprs_data, data_copy);
 
-    String HTTP_RESPONSE = "";
-
     // get_raw_response(gprs_data, HTTP_RESPONSE, BUFFER_SIZE, true, 10000);
 
     // Check HTTP RESPONSE status
     const char *expected_reply = "+QHTTPPOST: 0,"; // Operartion successful
-    sendAndCheck(gprs_data, "OK", HTTP_RESPONSE);
+    sendAndCheck(gprs_data);
 
-    if (extractText((char *)HTTP_RESPONSE.c_str(), expected_reply, HTTP_RESPONSE_STATUS, 4, ','))
+    char qurc[32];
+    if (!waitForURC("+QHTTPPOST: ", qurc, sizeof(qurc), 10000)) //? notice space after colon
+    {
+        Serial.println("HTTP POST QURC not received!");
+        return;
+    }
+
+    if (extractText(qurc, expected_reply, HTTP_RESPONSE_STATUS, 4, ','))
     {
 
         Serial.print("Gotten http status code: ");
