@@ -27,6 +27,24 @@ int REGISTER_TO_NETWORK_FAIL = 0;
 
 uint16_t HTTPOST_RESPONSE_STATUS;
 
+enum NetMode // Quectel Modem
+{
+    AUTO = 0,
+    _2G = 1,
+    _4G = 3,
+};
+NetMode current_network = NetMode::AUTO;
+
+enum NetRegStatus // 0-5
+{
+    NOT_REGISTERED,
+    REGISTERED_TO_HOME_NETWORK,
+    SEARCHING,
+    REGISTRATION_DENIED,
+    UNKOWN,
+    REGISTERED_ROAMING
+};
+
 /**** Function Declacrations **/
 bool GSM_init();
 bool register_to_network();
@@ -51,6 +69,7 @@ bool sendAndCheck(const char *AT_cmd, const char *expected_reply, String &respon
                   unsigned long timeout = 10000);
 bool waitForReply(const char *expectedReply, unsigned long timeout);
 bool waitForReply(const char *expectedReply, String &buffer, unsigned long timeout);
+bool waitForURC(const char *urcPrefix, char *response, size_t responseLen, unsigned long timeout);
 bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
 void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
@@ -103,17 +122,54 @@ bool GSM_init()
     return true;
 }
 
+void setNetworkMode(NetMode mode)
+
+{
+    char setnetmode[24] = "AT+QCFG=\"nwscanmode\",";
+    char _mode[1];
+    itoa(mode, _mode, 10);
+
+    strcat(setnetmode, _mode);
+
+    char mode_str[8];
+    switch (mode)
+    {
+    case (NetMode::_2G):
+        strcpy(mode_str, "2G");
+        break;
+    case (NetMode::_4G):
+        strcpy(mode_str, "4G");
+        break;
+    case (NetMode::AUTO):
+        strcpy(mode_str, "AUTO");
+        break;
+    }
+
+    Serial.print("Setting network mode to: ");
+    Serial.println(mode_str);
+
+    if (!sendAndCheck(setnetmode, "OK", 2000))
+    {
+        Serial.print("Failed to set network mode: ");
+        Serial.println(mode_str);
+        return;
+    }
+    delay(1000);
+    current_network = mode;
+}
+
 bool register_to_network()
 {
 
     String error_msg = "";
     bool registered_to_network = false;
     int retry_count = 0;
+    setNetworkMode(current_network);
     while (!registered_to_network && retry_count < 20)
     {
         int8_t status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
 
-        if (status == 1 || status == 5)
+        if (status == NetRegStatus::REGISTERED_TO_HOME_NETWORK || status == NetRegStatus::REGISTERED_ROAMING)
         {
             registered_to_network = true;
             break;
@@ -650,6 +706,39 @@ bool waitForReply(const char *expectedReply, String &buffer, unsigned long timeo
     return false;
 }
 
+bool waitForURC(const char *urcPrefix, char *response,
+                size_t responseLen, unsigned long timeout)
+{
+    unsigned long start = millis();
+    String buffer = "";
+
+    while (millis() - start < timeout)
+    {
+        while (GSMSerial.available())
+        {
+            char c = GSMSerial.read();
+            buffer += c;
+
+            if (c == '\n')
+            {
+                if (buffer.indexOf(urcPrefix) >= 0)
+                {
+                    strncpy(response, buffer.c_str(), responseLen - 1);
+                    response[responseLen - 1] = '\0';
+                    return true;
+                }
+                buffer = "";
+            }
+
+            if (buffer.length() > 256)
+            {
+                buffer = "";
+            }
+        }
+    }
+    return false;
+}
+
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS)
 {
     // char HTTP_RESPONSE[255];
@@ -658,15 +747,20 @@ void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS)
     char gprs_data[strlen(data_copy)];
     strcpy(gprs_data, data_copy);
 
-    String HTTP_RESPONSE = "";
-
     // get_raw_response(gprs_data, HTTP_RESPONSE, BUFFER_SIZE, true, 10000);
 
     // Check HTTP RESPONSE status
     const char *expected_reply = "+QHTTPPOST: 0,"; // Operartion successful
-    sendAndCheck(gprs_data, "OK", HTTP_RESPONSE);
+    sendAndCheck(gprs_data);
 
-    if (extractText((char *)HTTP_RESPONSE.c_str(), expected_reply, HTTP_RESPONSE_STATUS, 4, ','))
+    char qurc[32];
+    if (!waitForURC("+QHTTPPOST: ", qurc, sizeof(qurc), 10000)) //? notice space after colon
+    {
+        Serial.println("HTTP POST QURC not received!");
+        return;
+    }
+
+    if (extractText(qurc, expected_reply, HTTP_RESPONSE_STATUS, 4, ','))
     {
 
         Serial.print("Gotten http status code: ");
