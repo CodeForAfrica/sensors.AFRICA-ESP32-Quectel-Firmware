@@ -89,6 +89,8 @@ void troubleshoot_GSM();
 String getNetworkName();
 int8_t getSignalStrength();
 String getNetworkBand();
+void setNetworkMode(NetMode mode);
+void cycleNetworkMode();
 
 bool GSM_init()
 {
@@ -168,16 +170,41 @@ void setNetworkMode(NetMode mode)
     current_network = mode;
 }
 
+void cycleNetworkMode()
+{
+    // Cycle to the next network mode (AUTO -> 2G -> 4G -> AUTO)
+    NetMode next_mode;
+
+    switch (current_network)
+    {
+    case (NetMode::AUTO):
+        next_mode = NetMode::_2G;
+        break;
+    case (NetMode::_2G):
+        next_mode = NetMode::_4G;
+        break;
+    case (NetMode::_4G):
+        next_mode = NetMode::AUTO;
+        break;
+    default:
+        next_mode = NetMode::AUTO;
+        break;
+    }
+
+    setNetworkMode(next_mode);
+}
+
 bool register_to_network()
 {
 
     String error_msg = "";
     bool registered_to_network = false;
     int retry_count = 0;
-    setNetworkMode(current_network);
+    int8_t status;
+    cycleNetworkMode();
     while (!registered_to_network && retry_count < 20)
     {
-        int8_t status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
+        status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
 
         if (status == NetRegStatus::REGISTERED_TO_HOME_NETWORK || status == NetRegStatus::REGISTERED_ROAMING)
         {
@@ -196,7 +223,7 @@ bool register_to_network()
 
     if (!registered_to_network)
     {
-        error_msg = "Network not registered";
+        error_msg = NET_STATUS_VERBOSE[status];
         GSM_INIT_ERROR = error_msg;
         Serial.println(error_msg);
         REGISTER_TO_NETWORK_FAIL += 1;
