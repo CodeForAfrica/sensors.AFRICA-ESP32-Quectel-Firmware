@@ -41,8 +41,18 @@ enum NetRegStatus // 0-5
     REGISTERED_TO_HOME_NETWORK,
     SEARCHING,
     REGISTRATION_DENIED,
-    UNKOWN,
+    UNKNOWN,
     REGISTERED_ROAMING
+};
+
+static const char *const NET_STATUS_VERBOSE[] = {
+    "Not registered to network",
+    "Registered to home network",
+    "Searching for network",
+    "Network registration denied",
+    "Network registration status unknown",
+    "Registered to roaming network"
+
 };
 
 /**** Function Declacrations **/
@@ -177,7 +187,7 @@ bool register_to_network()
 
         else
         {
-            Serial.println("Not registered to network ");
+            Serial.println(NET_STATUS_VERBOSE[status]);
         }
 
         retry_count++;
@@ -623,9 +633,9 @@ int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_
         strncpy(number, start, length);
         number[length] = '\0';
     }
-
-    Serial.print("Extracted number: ");
-    Serial.println(number);
+    // Debug
+    // Serial.print("Extracted number: ");
+    // Serial.println(number);
 
     num = atoi(number);
     return num;
