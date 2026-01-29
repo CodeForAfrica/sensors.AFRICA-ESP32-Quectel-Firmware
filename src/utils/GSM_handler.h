@@ -172,26 +172,23 @@ void setNetworkMode(NetMode mode)
 
 void cycleNetworkMode()
 {
+    setNetworkMode(current_network);
     // Cycle to the next network mode (AUTO -> 2G -> 4G -> AUTO)
-    NetMode next_mode;
-
     switch (current_network)
     {
     case (NetMode::AUTO):
-        next_mode = NetMode::_2G;
+        current_network = NetMode::_2G;
         break;
     case (NetMode::_2G):
-        next_mode = NetMode::_4G;
+        current_network = NetMode::_4G;
         break;
     case (NetMode::_4G):
-        next_mode = NetMode::AUTO;
+        current_network = NetMode::AUTO;
         break;
     default:
-        next_mode = NetMode::AUTO;
+        current_network = NetMode::AUTO;
         break;
     }
-
-    setNetworkMode(next_mode);
 }
 
 bool register_to_network()
