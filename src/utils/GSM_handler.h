@@ -89,7 +89,7 @@ void troubleshoot_GSM();
 String getNetworkName();
 int8_t getSignalStrength();
 String getNetworkBand();
-void setNetworkMode(NetMode mode);
+bool setNetworkMode(NetMode mode);
 void cycleNetworkMode();
 
 bool GSM_init()
@@ -134,7 +134,7 @@ bool GSM_init()
     return true;
 }
 
-void setNetworkMode(NetMode mode)
+bool setNetworkMode(NetMode mode)
 
 {
     char setnetmode[24] = "AT+QCFG=\"nwscanmode\",";
@@ -164,15 +164,16 @@ void setNetworkMode(NetMode mode)
     {
         Serial.print("Failed to set network mode: ");
         Serial.println(mode_str);
-        return;
+        return false;
     }
     delay(1000);
     current_network = mode;
+    return true;
 }
 
 void cycleNetworkMode()
 {
-    setNetworkMode(current_network);
+    bool set_mode = setNetworkMode(current_network);
     // Cycle to the next network mode (AUTO -> 2G -> 4G -> AUTO)
     switch (current_network)
     {
@@ -189,6 +190,9 @@ void cycleNetworkMode()
         current_network = NetMode::AUTO;
         break;
     }
+
+    if (!set_mode) // Attempt setting the net mode
+        cycleNetworkMode();
 }
 
 bool register_to_network()
@@ -199,6 +203,10 @@ bool register_to_network()
     int retry_count = 0;
     int8_t status;
     cycleNetworkMode();
+    if (!sendAndCheck("AT+CREG=1\0", "OK"))
+    {
+        Serial.println("Manual network registration failed.");
+    }
     while (!registered_to_network && retry_count < 20)
     {
         status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
@@ -211,7 +219,7 @@ bool register_to_network()
 
         else
         {
-            Serial.println(NET_STATUS_VERBOSE[status]);
+            Serial.print(NET_STATUS_VERBOSE[status]);
         }
 
         retry_count++;
@@ -222,7 +230,6 @@ bool register_to_network()
     {
         error_msg = NET_STATUS_VERBOSE[status];
         GSM_INIT_ERROR = error_msg;
-        Serial.println(error_msg);
         REGISTER_TO_NETWORK_FAIL += 1;
 
         // Attempt to enable network registration
