@@ -91,6 +91,9 @@ int8_t getSignalStrength();
 String getNetworkBand();
 bool setNetworkMode(NetMode mode);
 void cycleNetworkMode();
+String getFirwmareVersion();
+String getModelID();
+String getProductInfo();
 
 bool GSM_init()
 {
@@ -132,6 +135,36 @@ bool GSM_init()
     SIM_USABLE = true;
 
     return true;
+}
+
+String getFirwmareVersion()
+{
+    String res;
+    if (!sendAndCheck("AT+GMR", "OK", res))
+    {
+        return "";
+    }
+    return res.substring(res.indexOf("\n") + 1, res.indexOf("OK") - 3);
+}
+
+String getModelID()
+{
+    String res;
+    if (!sendAndCheck("AT+GMM", "OK", res))
+    {
+        return "";
+    }
+    return res.substring(res.indexOf("\n") + 1, res.indexOf("OK") - 3);
+}
+
+String getProductInfo() // Combination of AT+GMI, AT+GMM and AT+GMR,
+{
+    String res;
+    if (!sendAndCheck("ATI", "OK", res))
+    {
+        return "";
+    }
+    return res.substring(res.indexOf("\n") + 1, res.indexOf("OK") - 3);
 }
 
 bool setNetworkMode(NetMode mode)
