@@ -12,6 +12,7 @@ extern struct_wifiInfo *wifiInfo;
 extern uint8_t count_wifiInfo;
 extern JsonDocument getCurrentSensorData();
 extern String listFiles(fs::FS &fs, String path);
+extern char ROOT_DIR[24];
 String pendingFileList = "{}";
 bool fileListReady = false;
 AsyncWebServerRequest *pendingRequest = nullptr;
@@ -201,7 +202,7 @@ void setup_webserver()
                   [](void *param)
                   {
                     // Get the file list
-                    pendingFileList = listFiles(SD);
+                    pendingFileList = listFiles(SD, String(ROOT_DIR));
                     fileListReady = true;
 
                     // Send the response

@@ -182,6 +182,9 @@ void setup()
     delay(3000);
     Serial.print("ESP32 Chip ID: ");
     Serial.println(esp_chipid);
+    strcpy(ROOT_DIR, "/");
+    strcat(ROOT_DIR, SENSOR_PREFIX); //? Refactor to copy AP_SSID if it remains unchanged
+    strcat(ROOT_DIR, esp_chipid);
     // Set Dual Access Point and Station WiFi mode
     WiFi.mode(WIFI_AP_STA); // ToDo: Configure this when not on power saving mode.
     strcat(AP_SSID, SENSOR_PREFIX);
@@ -786,9 +789,6 @@ void init_memory_loggers()
 void init_SD_loggers()
 {
     // Root directory
-    strcpy(ROOT_DIR, "/");
-    strcat(ROOT_DIR, SENSOR_PREFIX);
-    strcat(ROOT_DIR, esp_chipid);
     createDir(SD, ROOT_DIR);
 
     if (current_year != 0 && current_month != 0)
