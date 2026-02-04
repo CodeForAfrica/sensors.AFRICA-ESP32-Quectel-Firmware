@@ -1,9 +1,10 @@
 HardwareSerial GSMSerial(2);
 
+/// @brief Reset sequence enumeration for GSM module reset control
 enum RST_SEQ
 {
-    HIGH_LOW_HIGH,
-    LOW_HIGH_LOW
+    HIGH_LOW_HIGH, ///< Reset sequence: HIGH -> LOW -> HIGH
+    LOW_HIGH_LOW   ///< Reset sequence: LOW -> HIGH -> LOW
 };
 
 char SIM_PIN[5] = GSM_PIN;
@@ -16,7 +17,6 @@ uint16_t CGATT_status;
 char SIM_CCID[21] = "";
 String GSM_INIT_ERROR = "";
 String NETWORK_NAME = "";
-int8_t roam_status;
 
 // FAIL FLAGS
 #ifdef QUECTEL
@@ -28,18 +28,37 @@ int REGISTER_TO_NETWORK_FAIL = 0;
 
 uint16_t HTTPOST_RESPONSE_STATUS;
 
-enum NetMode // Quectel
+/// @brief Network mode enumeration for Quectel modem
+enum NetMode
 {
-    AUTO = 0,
-    _2G = 1,
-    _4G = 3,
+    AUTO = 0, ///< Automatic network mode selection
+    _2G = 1,  ///< 2G network mode
+    _4G = 3   ///< 4G network mode
 };
 NetMode current_network = NetMode::AUTO;
 
-/**** Function Declacrations **/
+/// @brief Network registration status enumeration (values 0-5)
+enum NetRegStatus
+{
+    NOT_REGISTERED,             ///< Not registered to any network
+    REGISTERED_TO_HOME_NETWORK, ///< Registered to home network
+    SEARCHING,                  ///< Searching for network
+    REGISTRATION_DENIED,        ///< Network registration denied
+    UNKNOWN,                    ///< Unknown registration status
+    REGISTERED_ROAMING          ///< Registered to roaming network
+};
+
+/// @brief Human-readable network registration status descriptions
+static const char *const NET_STATUS_VERBOSE[] = {
+    "Not registered to network",
+    "Registered to home network",
+    "Searching for network",
+    "Network registration denied",
+    "Network registration status unknown",
+    "Registered to roaming network"};
+
 bool GSM_init();
 bool register_to_network();
-static void unlock_pin(char *PIN);
 void SIM_PIN_Setup();
 bool is_SIMCID_valid();
 bool GPRS_init();
@@ -51,22 +70,34 @@ int8_t GPRS_status();
 void flushSerial();
 void SerialFlush();
 void QUECTEL_POST(const char *url, char headers[][40], int header_size, const char *data, size_t data_length, uint8_t &response_status);
-bool extractText(char *input, const char *target, char *output, uint8_t output_size, char _until); // ? should go to utils
+bool extractText(char *input, const char *target, char *output, uint8_t output_size, char _until);
 void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool wait_timeout = false, unsigned long timeout = 3000);
 int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_from, uint8_t length);
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS);
-bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long timeout = 1000);
+bool sendAndCheck(const char *AT_cmd, const char *expected_reply = "OK", unsigned long timeout = 10000);
+bool sendAndCheck(const char *AT_cmd, const char *expected_reply, String &response, unsigned long timeout = 10000);
+bool waitForReply(const char *expectedReply, unsigned long timeout);
+bool waitForReply(const char *expectedReply, String &buffer, unsigned long timeout);
+bool waitForURC(const char *urcPrefix, char *response, size_t responseLen, unsigned long timeout);
 bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
 void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
 void http_preconfig();
 void GSM_sleep();
 void troubleshoot_GSM();
-void setNetworkMode(NetMode mode);
+String getNetworkName();
+int8_t getSignalStrength();
+String getNetworkBand();
+bool setNetworkMode(NetMode mode);
+void cycleNetworkMode();
+String getFirwmareVersion();
+String getModelID();
+String getProductInfo();
 
+/// @brief Initialize GSM module and SIM card
+/// @return true if GSM initialization successful
 bool GSM_init()
 {
-
     String error_msg = "";
 
     Serial.println("Restarting GSM...");
@@ -89,88 +120,141 @@ bool GSM_init()
     }
 
     // Serial.println("Setting up SIM..");
-
     // SIM_PIN_Setup();
-
     // if (!SIM_PIN_SET)
     // {
     //     error_msg = "Unable to set SIM PIN";
     //     GSM_INIT_ERROR = error_msg;
     //     Serial.println(error_msg);
-
     //     return false;
     // }
+
     // Set if SIM is usable flag
     SIM_USABLE = true;
 
     return true;
 }
 
-// bool register_to_network()
-// {
+/// @brief Query modem firmware version
+/// @return Firmware version string
+String getFirwmareVersion()
+{
+    String res;
+    if (!sendAndCheck("AT+GMR", "OK", res))
+    {
+        return "";
+    }
+    return res.substring(res.indexOf("\n") + 1, res.indexOf("OK") - 3);
+}
 
-//     String error_msg = "";
-//     bool registered_to_network = false;
-//     int retry_count = 0;
-//     while (!registered_to_network && retry_count < 20)
-//     {
-//         int8_t status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
+/// @brief Query modem model identifier
+/// @return Model ID string
+String getModelID()
+{
+    String res;
+    if (!sendAndCheck("AT+GMM", "OK", res))
+    {
+        return "";
+    }
+    return res.substring(res.indexOf("\n") + 1, res.indexOf("OK") - 3);
+}
 
-//         if (status == 1 || status == 5)
-//         {
-//             registered_to_network = true;
-//             break;
-//         }
+/// @brief Query complete product information
+/// @return Product info string
+String getProductInfo() // Combination of AT+GMI, AT+GMM and AT+GMR,
+{
+    String res;
+    if (!sendAndCheck("ATI", "OK", res))
+    {
+        return "";
+    }
+    return res.substring(res.indexOf("\n") + 1, res.indexOf("OK") - 3);
+}
 
-//         else
-//         {
-//             Serial.println("Not registered to network ");
-//         }
+/// @brief Set modem network mode preference
+/// @param mode Network mode (AUTO, 2G, or 4G)
+/// @return true if mode set successfully
+bool setNetworkMode(NetMode mode)
 
-//         retry_count++;
-//         delay(3000);
-//     }
+{
+    char setnetmode[24] = "AT+QCFG=\"nwscanmode\",";
+    char _mode[1];
+    itoa(mode, _mode, 10);
 
-//     if (!registered_to_network)
-//     {
-//         error_msg = "Network not registered";
-//         GSM_INIT_ERROR = error_msg;
-//         Serial.println(error_msg);
-//         REGISTER_TO_NETWORK_FAIL += 1;
+    strcat(setnetmode, _mode);
 
-//         // Attempt to enable network registration
+    char mode_str[8];
+    switch (mode)
+    {
+    case (NetMode::_2G):
+        strcpy(mode_str, "2G");
+        break;
+    case (NetMode::_4G):
+        strcpy(mode_str, "4G");
+        break;
+    case (NetMode::AUTO):
+        strcpy(mode_str, "AUTO");
+        break;
+    }
 
-//         if (!sendAndCheck("AT+CREG=1\0", "OK"))
-//         {
-//             Serial.println("Manual network registration failed.");
-//         }
+    Serial.print("Setting network mode to: ");
+    Serial.println(mode_str);
 
-//         if (REGISTER_TO_NETWORK_FAIL > 5)
-//         {
-//             GSM_soft_reset();
-//             //? Check if the SIM card is still there?
-//             REGISTER_TO_NETWORK_FAIL = 0;
-//         }
-//         return false;
-//     }
+    if (!sendAndCheck(setnetmode, "OK", 2000))
+    {
+        Serial.print("Failed to set network mode: ");
+        Serial.println(mode_str);
+        return false;
+    }
+    delay(1000);
+    current_network = mode;
+    return true;
+}
 
-//     sendAndCheck("AT+COPS?", "OK");
+/// @brief Cycle through available network modes
+void cycleNetworkMode()
+{
+    bool set_mode = setNetworkMode(current_network);
+    // Cycle to the next network mode (AUTO -> 2G -> 4G -> AUTO)
+    switch (current_network)
+    {
+    case (NetMode::AUTO):
+        current_network = NetMode::_2G;
+        break;
+    case (NetMode::_2G):
+        current_network = NetMode::_4G;
+        break;
+    case (NetMode::_4G):
+        current_network = NetMode::AUTO;
+        break;
+    default:
+        current_network = NetMode::AUTO;
+        break;
+    }
 
-//     return true;
-// }
+    if (!set_mode) // Attempt setting the net mode
+        cycleNetworkMode();
+}
 
+/// @brief Register device to mobile network
+/// @return true if successfully registered
 bool register_to_network()
 {
 
     String error_msg = "";
     bool registered_to_network = false;
     int retry_count = 0;
-    setNetworkMode(current_network);
+    int8_t status;
+    cycleNetworkMode();
+    if (!sendAndCheck("AT+CREG=1\0", "OK"))
+    {
+        Serial.println("Manual network registration failed.");
+    }
     while (!registered_to_network && retry_count < 20)
     {
-        roam_status = getNumber("AT+CREG?", "+CREG: ", 2, 1);
+        status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
 
-        if (roam_status == 1 || roam_status == 5)
+        if (status == NetRegStatus::REGISTERED_TO_HOME_NETWORK || status == NetRegStatus::REGISTERED_ROAMING)
         {
             registered_to_network = true;
             break;
@@ -178,7 +262,7 @@ bool register_to_network()
 
         else
         {
-            Serial.println("Not registered to network ");
+            Serial.print(NET_STATUS_VERBOSE[status]);
         }
 
         retry_count++;
@@ -187,14 +271,13 @@ bool register_to_network()
 
     if (!registered_to_network)
     {
-        error_msg = "Network not registered";
+        error_msg = NET_STATUS_VERBOSE[status];
         GSM_INIT_ERROR = error_msg;
-        Serial.println(error_msg);
         REGISTER_TO_NETWORK_FAIL += 1;
 
         // Attempt to enable network registration
 
-        if (!sendAndCheck("AT+CREG=1", "OK"))
+        if (!sendAndCheck("AT+CREG=1\0", "OK"))
         {
             Serial.println("Manual network registration failed.");
         }
@@ -208,7 +291,8 @@ bool register_to_network()
         return false;
     }
 
-    sendAndCheck("AT+COPS?", "OK", 180000); //??
+    sendAndCheck("AT+COPS?", "OK");
+
     return true;
 }
 
@@ -226,6 +310,7 @@ bool register_to_network()
 //     }
 // }
 
+/// @brief Configure SIM PIN settings
 void SIM_PIN_Setup()
 {
 
@@ -244,17 +329,19 @@ void SIM_PIN_Setup()
     }
 }
 
-bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR" in response
+/// @brief Validate SIM card CCID (Integrated Circuit Card ID)
+/// @return true if SIM is valid and present
+bool is_SIMCID_valid()
 {
+    // TODO: Verify function returns false correctly when there is "ERROR" in response
     char qccid[21];
-
-    char AT_response[255] = {};
+    String AT_response = "";
 
     char expected_reply[] = "+QCCID: ";
+    if (!sendAndCheck("AT+QCCID\0", "OK", AT_response))
+        return false;
 
-    get_raw_response("AT+QCCID\0", AT_response, 255, true, 5000);
-
-    if (extractText(AT_response, expected_reply, qccid, 21, '\r') && strlen(qccid) == 20)
+    if (extractText((char *)AT_response.c_str(), expected_reply, qccid, 21, '\r') && strlen(qccid) == 20)
     {
         strcpy(SIM_CCID, qccid);
         SIM_AVAILABLE = true;
@@ -262,14 +349,14 @@ bool is_SIMCID_valid() // ! Seems to be returning true even when there is "ERROR
     }
     else
     {
-
         return false;
     }
 }
 
+/// @brief Initialize GPRS data connection
+/// @return true if GPRS successfully initialized
 bool GPRS_init()
 {
-
     String err = "";
 
 #ifdef QUECTEL
@@ -304,7 +391,7 @@ bool GPRS_init()
     // Check CGATT status
     Serial.println("\nChecking CGATT Status..");
     CGATT_status = GPRS_status();
-    Serial.println("CGATT_status: " + (String)CGATT_status);
+    // Serial.println("CGATT_status: " + (String)CGATT_status);
 
     if (CGATT_status == 1)
     {
@@ -325,13 +412,15 @@ bool GPRS_init()
         }
         else
         {
-            Serial.println("CGATT status set to: " + (String)CGATT_status); // !! sometimes not reached when using if statement. delay needed
+            // TODO: CGATT status sometimes not reached when using if statement; delay needed
+            Serial.println("CGATT status set to: " + (String)CGATT_status);
         }
     }
 
-    //? QIACT
+    // TODO: Implement QIACT configuration
 
 #else
+    // Alternative GPRS commands for other modules:
     // "AT+SAPBR=1,1"
     // "AT+QCFG=\"gprsattach\",1"
 #endif
@@ -347,9 +436,9 @@ bool GPRS_init()
     return GPRS_CONNECTED;
 }
 
+/// @brief Perform soft reset of GSM module with AT commands
 void GSM_soft_reset()
 {
-
     deactivateGPRS();
 
     if (!sendAndCheck("AT+CFUN=1,1", "OK"))
@@ -361,16 +450,13 @@ void GSM_soft_reset()
     delay(30000); // wait for GSM to warm up
 }
 
-/***
- * ? Called 3 times. Review the impelementation of this
- * Todo: Change implementation to shut down GSM and then call GSM_init();
- *
- *
- ***/
+/// @brief Restart GSM module (full initialization)
+/// @note Called in multiple locations; implementation should be reviewed
+/// @todo Refactor to shut down GSM and then call GSM_init() for cleaner reset
 void restart_GSM()
 {
     Serial.println("Restarting GSM");
-    //! The AQ PCB board has the GSM reset physically connected to the ESP chip
+    // Note: The AQ PCB board has the GSM reset physically connected to the ESP chip
 
     if (!GSM_init())
     {
@@ -381,22 +467,16 @@ void restart_GSM()
     }
 }
 
-/*****************************************************************
-flushSerial
-*****************************************************************/
+/// @brief Flush GSM serial buffer
 void flushSerial()
 {
-    Serial.println("Flushing GSM serial..\n############");
     while (GSMSerial.available())
     {
-
-        Serial.print(GSMSerial.read());
+        GSMSerial.read();
     }
-    Serial.println("##################");
 }
 
 /// @brief Preconfigure HTTP settings
-/// @details This function sets the HTTP configuration for the Quectel module.
 void http_preconfig()
 {
     sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK");
@@ -405,25 +485,18 @@ void http_preconfig()
     sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK");
 }
 
-/// @brief Easy implementation of Quectel HTTP functionality
-/// @param url url for http request sans protocol
-/// @param headers array of request headers
-/// @param header_size size of the headers array
-/// @param data post body data
-/// @param data_length length of the data
-/// @param response_status integer address to store the response status
+/// @brief Send HTTP POST request via Quectel module
+/// @param url Target URL without protocol
+/// @param headers Array of HTTP headers
+/// @param header_size Number of headers
+/// @param data Request body data
+/// @param data_length Length of request body
+/// @param response_status HTTP response status code
 void QUECTEL_POST(const char *url, char headers[][40], int header_size, const char *data, size_t data_length, uint8_t &response_status)
 {
-    /* SETTING request headers
-    ! Headers are sent in two formats
-    1. Format 0: headers are sent before post body
-    2. Format 1: headers are sent as part of the body
-    */
-
-    // Using format 0
-
-    // Config URL
-    // String HTTP_SETUP = "AT+QHTTPURL=" + String(strlen(url), DEC) + ",10,60";
+    // Setting request headers
+    // Headers sent in format 0: headers are sent before post body
+    // (Format 1 would send headers as part of the body)
 
     char HTTP_CFG[128] = {};
     strcpy(HTTP_CFG, "AT+QHTTPCFG=\"url\",\"http://"); // protocol must be set before URL
@@ -453,8 +526,7 @@ void QUECTEL_POST(const char *url, char headers[][40], int header_size, const ch
 
     char HTTP_POST_RESPONSE_STATUS[4];
 
-    // POST data
-    // HTTP_CFG = "AT+QHTTPPOST=" + String(data_length) + ",30,60";
+    // Prepare POST request
     char http_post_prepare[32] = "AT+QHTTPPOST=";
     char data_len[4];
     itoa(data_length, data_len, 10);
@@ -462,7 +534,8 @@ void QUECTEL_POST(const char *url, char headers[][40], int header_size, const ch
     strcat(http_post_prepare, ",30,60");
 
     Serial.println(http_post_prepare);
-    if (sendAndCheck(http_post_prepare, "CONNECT", 10000)) // Allow enough time to connect to HTTP(S) server
+    // Allow sufficient time to connect to HTTP(S) server
+    if (sendAndCheck(http_post_prepare, "CONNECT", 10000))
     {
         Serial.println("Posting gprs data..");
         get_http_response_status(data, HTTP_POST_RESPONSE_STATUS);
@@ -486,26 +559,27 @@ void QUECTEL_POST(const char *url, char headers[][40], int header_size, const ch
     }
 }
 
+/// @brief Flush ESP serial buffer
 void SerialFlush()
 {
-    // Serial.flush();
-    Serial.println("Flushing ESP serial..\n************");
     while (Serial.available())
     {
-        Serial.print(Serial.read());
+        Serial.read();
     }
-    Serial.println("************");
 }
 
+/// @brief Send AT command and receive raw response
+/// @param cmd AT command to send
+/// @param res_buff Buffer to store response
+/// @param buff_size Size of response buffer
+/// @param wait_timeout If true, wait for timeout; if false, return when data received
+/// @param timeout Maximum time to wait in milliseconds
 void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool wait_timeout, unsigned long timeout)
 {
-
     flushSerial();
-    // SerialFlush();
     memset(res_buff, '\0', buff_size);
-    // Serial.println("Size of response buffer: " + (String)buff_size);
     size_t buff_pos = 0;
-    Serial.print("Received Command in get raw: ");
+    Serial.print("Received Command: ");
     Serial.println(cmd);
     GSMSerial.println(cmd);
     unsigned long sendStartMillis = millis();
@@ -516,37 +590,26 @@ void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool wa
 
         while (GSMSerial.available())
         {
-
             if (buff_pos >= buff_size)
                 break;
             res_buff[buff_pos] = GSMSerial.read();
             buff_pos++;
         }
 
-        // // eat unsolicited result code "RDY"
-        // if (strstr(res_buff, "RDY"))
-        // {
-        //     // reset buff
-        //     memset(res_buff, '\0', buff_size);
-        //     buff_pos = 0;
-        //     Serial.println("Eating URC 'RDY'");
-        // }
-
         delay(2);
-    } while ((wait_timeout ? wait_timeout : strlen(res_buff) == 0) && (millis() - sendStartMillis < timeout));
+    } while ((wait_timeout || (buff_pos == 0)) && (millis() - sendStartMillis < timeout));
     Serial.println("\n-------\r\nGSM RAW RESPONSE:");
     Serial.println(res_buff);
     Serial.println("-------");
 }
 
-/***
- @brief : Extract a piece of text matching the target from a char array
- @param input : The char array that contains the string to be parsed from
- @param target : Ocuurence of a particular string
- @param output : A char array to store extracted string
- @param _until : The first character matching to read from after finding occurence of the target
- @return
- ****/
+/// @brief Extract text between target string and delimiter in char array
+/// @param input Char array containing text to parse
+/// @param target Target string to search for
+/// @param output Char array to store extracted string
+/// @param output_size Size of output buffer
+/// @param _until Delimiter character marking extraction end
+/// @return true if extraction successful, false otherwise
 bool extractText(char *input, const char *target, char *output, uint8_t output_size, char _until)
 {
 
@@ -554,10 +617,6 @@ bool extractText(char *input, const char *target, char *output, uint8_t output_s
 
     if (found_target != nullptr)
     {
-
-        Serial.print("Substring found at position: ");
-        Serial.println(found_target - input);
-
         // Find the start of the extraction point
         const char *start = found_target + strlen(target);
 
@@ -570,9 +629,9 @@ bool extractText(char *input, const char *target, char *output, uint8_t output_s
             size_t length = end - start;
 
             if (length < output_size)
-            { // check for buffer overflow.
+            {
                 strncpy(output, start, length);
-                output[length] = '\0'; // Null-terminate the string
+                output[length] = '\0';
                 return true;
             }
             else
@@ -586,97 +645,204 @@ bool extractText(char *input, const char *target, char *output, uint8_t output_s
     return false;
 }
 
-// extract an integer
+/// @brief Extract numeric value from AT command response
+/// @param AT_cmd AT command to send
+/// @param expected_reply Expected response prefix
+/// @param index_from Index offset from expected_reply to start extraction
+/// @param length Length of number to extract
+/// @return Extracted number or -1 on error
 int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_from, uint8_t length)
 {
-
     int16_t num;
-
-    char AT_response[255];
-    size_t AT_res_size = sizeof(AT_response);
-
     char number[8];
 
     if (length > sizeof(number))
     {
-        Serial.println("max length allowed is 8");
+        Serial.println("Max length allowed is 8");
         return -1;
     }
 
-    get_raw_response(AT_cmd, AT_response, AT_res_size);
+    String AT_response = "";
 
-    const char *found_target = strstr(AT_response, expected_reply);
+    if (!sendAndCheck(AT_cmd, "OK", AT_response))
+        return -1;
+
+    const char *found_target = strstr(AT_response.c_str(), expected_reply);
 
     if (found_target == nullptr)
         return -1;
 
-    // Find the start of desired extraction point
+    // Find extraction start point
     const char *start = found_target + strlen(expected_reply);
-    start += index_from; // E.g to extract 5 from +CREG: 0,5,7 will start from '+CREG: ' + 2 indices
+    start += index_from; // Offset into response (e.g., to extract 5 from +CREG: 0,5,7)
 
     if (length < sizeof(number))
     {
-
         strncpy(number, start, length);
         number[length] = '\0';
     }
-
-    Serial.print("Extracted number: ");
-    Serial.println(number);
 
     num = atoi(number);
     return num;
 }
 
-/// @brief simple function to send AT command and check for expected reply
-/// @param AT_cmd : AT command to send
-/// @param expected_reply : expect reply from the AT command to contain this string
-/// @return true if expected reply is found
+/// @brief Send AT command and verify expected response
+/// @param AT_cmd AT command to send
+/// @param expected_reply Expected response string
+/// @param timeout Maximum time to wait in milliseconds
+/// @return true if expected reply received
 bool sendAndCheck(const char *AT_cmd, const char *expected_reply, unsigned long timeout)
 {
-    char AT_response[255];
-    size_t AT_res_size = sizeof(AT_response);
+    flushSerial();
+    GSMSerial.println(AT_cmd);
+    return waitForReply(expected_reply, timeout);
+}
 
-    get_raw_response(AT_cmd, AT_response, AT_res_size, true, timeout);
+/// @brief Send AT command and capture full response
+/// @param AT_cmd AT command to send
+/// @param expected_reply Expected response string
+/// @param response String buffer to store full response
+/// @param timeout Maximum time to wait in milliseconds
+/// @return true if expected reply received
+bool sendAndCheck(const char *AT_cmd, const char *expected_reply, String &response,
+                  unsigned long timeout)
+{
+    flushSerial();
+    GSMSerial.println(AT_cmd);
 
-    if (strstr(AT_response, expected_reply))
+    return waitForReply(expected_reply, response, timeout);
+}
+
+/// @brief Wait for specific reply string
+/// @param expectedReply String to wait for
+/// @param timeout Maximum time to wait in milliseconds
+/// @return true if reply received
+bool waitForReply(const char *expectedReply, unsigned long timeout)
+{
+    unsigned long start = millis();
+    String buffer = "";
+
+    while (millis() - start < timeout)
     {
-        return true;
-    }
+        while (GSMSerial.available())
+        {
+            char c = GSMSerial.read();
+            buffer += c;
 
+            if (buffer.indexOf(expectedReply) >= 0)
+                return true;
+
+            // Maintain manageable buffer size
+            if (buffer.length() > 256)
+                buffer = buffer.substring(buffer.length() - 128);
+        }
+    }
     return false;
 }
 
+/// @brief Wait for reply and capture response
+/// @param expectedReply String to wait for
+/// @param buffer String buffer to store response
+/// @param timeout Maximum time to wait in milliseconds
+/// @return true if reply received
+bool waitForReply(const char *expectedReply, String &buffer, unsigned long timeout)
+{
+    unsigned long start = millis();
+    buffer = "";
+
+    while (millis() - start < timeout)
+    {
+        while (GSMSerial.available())
+        {
+            char c = GSMSerial.read();
+            buffer += c;
+
+            if (buffer.indexOf(expectedReply) >= 0)
+                return true;
+
+            if (buffer.length() > 256)
+                buffer = buffer.substring(buffer.length() - 128);
+        }
+    }
+    return false;
+}
+
+/// @brief Wait for unsolicited result code (URC)
+/// @param urcPrefix URC prefix to search for
+/// @param response Buffer for URC response
+/// @param responseLen Size of response buffer
+/// @param timeout Maximum time to wait in milliseconds
+/// @return true if URC received
+bool waitForURC(const char *urcPrefix, char *response,
+                size_t responseLen, unsigned long timeout)
+{
+    unsigned long start = millis();
+    String buffer = "";
+
+    while (millis() - start < timeout)
+    {
+        while (GSMSerial.available())
+        {
+            char c = GSMSerial.read();
+            buffer += c;
+
+            if (c == '\n')
+            {
+                if (buffer.indexOf(urcPrefix) >= 0)
+                {
+                    strncpy(response, buffer.c_str(), responseLen - 1);
+                    response[responseLen - 1] = '\0';
+                    return true;
+                }
+                buffer = "";
+            }
+
+            if (buffer.length() > 256)
+            {
+                buffer = "";
+            }
+        }
+    }
+    return false;
+}
+
+/// @brief Parse HTTP response status from data
+/// @param data Response data to parse
+/// @param HTTP_RESPONSE_STATUS Buffer for status code
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS)
 {
-    char HTTP_RESPONSE[255];
-    size_t BUFFER_SIZE = sizeof(HTTP_RESPONSE);
     const char *data_copy = data.c_str();
     char gprs_data[strlen(data_copy)];
     strcpy(gprs_data, data_copy);
-    get_raw_response(gprs_data, HTTP_RESPONSE, BUFFER_SIZE, true, 10000);
 
-    // Check HTTP RESPONSE status
-    const char *expected_reply = "+QHTTPPOST: 0,"; // Operartion successful
+    // Check HTTP RESPONSE status (0 = Operation successful)
+    const char *expected_reply = "+QHTTPPOST: 0,";
+    sendAndCheck(gprs_data);
 
-    if (extractText(HTTP_RESPONSE, expected_reply, HTTP_RESPONSE_STATUS, 4, ','))
+    char qurc[32];
+    // Note: Space after colon is significant for URC matching
+    if (!waitForURC("+QHTTPPOST: ", qurc, sizeof(qurc), 10000))
     {
+        Serial.println("HTTP POST QURC not received!");
+        return;
+    }
 
-        Serial.print("Gotten http status code: ");
+    if (extractText(qurc, expected_reply, HTTP_RESPONSE_STATUS, 4, ','))
+    {
+        Serial.print("HTTP status code: ");
         Serial.println(HTTP_RESPONSE_STATUS);
     }
     else
     {
         Serial.println("Could not extract HTTP response status code");
-        //? Maybe troubleshoot
     }
 }
 
-// Simple function to troubleshoot GSM //? More to be done
+/// @brief Troubleshoot GSM connectivity issues
 void troubleshoot_GSM()
 {
-
-    GSM_init(); // ! Use GSM soft reset if GSM reset pin is not connected
+    // Note: Use GSM_soft_reset() if GSM reset pin is not connected
+    GSM_init();
 
     register_to_network();
 
@@ -688,15 +854,15 @@ void troubleshoot_GSM()
     GPRS_INIT_FAIL_COUNT = 0;
 }
 
+/// @brief Query current GPRS attachment status
+/// @return 1 if attached, 0 if detached, -1 on error
 int8_t GPRS_status()
 {
-
-    int8_t status = getNumber("AT+CGATT?\0", "+CGATT: ", 0, 1);
-    Serial.print("CGATT status: ");
-    Serial.println(status);
-    return status;
+    return getNumber("AT+CGATT?\0", "+CGATT: ", 0, 1);
 }
 
+/// @brief Activate GPRS connection
+/// @return true if activation successful
 bool activateGPRS()
 {
     if (GPRS_status() == 1)
@@ -716,116 +882,146 @@ bool activateGPRS()
     }
 }
 
+/// @brief Deactivate GPRS connection
+/// @return true if deactivation successful
 bool deactivateGPRS()
 {
-
     if (GPRS_status() == 0)
     {
         Serial.println("GPRS already inactive");
         return true;
     }
-    else
+
+    if (sendAndCheck("AT+CGATT=0", "OK"))
     {
-        if (sendAndCheck("AT+CGATT=0", "OK"))
-        {
-            // query GPRS status
-            GPRS_status();
-            return true;
-        }
-        else
-        {
-            Serial.println("Failed to disable GPRS");
-            return false;
-        }
+        GPRS_status();
         return true;
     }
+
+    Serial.println("Failed to disable GPRS");
+    return false;
 }
 
-/**
-  @brief: Query the real time clock (RTC) of the module.
-  @param time : The format is "yy/MM/dd,hh:mm:ss±zz",indicating year (two last digits),
-                month, day, hour, minutes, seconds and
-                time zone (indicates the difference, expressed in quarters of an hour, between the local time and GMT; range: -48 to +56).
-                E.g. May 6th, 1994, 22:10:00 GMT+2 hours equals to "94/05/06,22:10:00+08"
-  @return bool : true if time is successfully extracted or false if otherwise
-*/
+/// @brief Query module real-time clock (RTC)
+/// @param time Output buffer for time string in format "yy/MM/dd,hh:mm:ss±zz"
+///        - Year (2 digits), Month, Day, Hour, Minute, Second
+///        - Timezone as quarter-hour offset from GMT (range: -48 to +56)
+///        - Example: May 6, 1994 22:10:00 GMT+2 = "94/05/06,22:10:00+08"
+/// @return true if time is successfully extracted, false otherwise
 bool getNetworkTime(char *time)
 {
-
-    char AT_response[64];
-    size_t AT_res_size = sizeof(AT_response);
+    String AT_response = "";
     char time_buff[23] = {};
     uint8_t retries = 0;
 
-    get_raw_response("AT+CCLK?\0", AT_response, AT_res_size, false, 5000);
+    sendAndCheck("AT+CCLK?", "OK", AT_response);
 
-    while (!extractText(AT_response, "+CCLK: \"", time_buff, 32, '\"') && retries < 10)
+    while (!extractText((char *)AT_response.c_str(), "+CCLK: \"", time_buff, 32, '\"') && retries < 10)
     {
-        get_raw_response("AT+CCLK?\0", AT_response, AT_res_size, false, 5000);
+        sendAndCheck("AT+CCLK?", "OK", AT_response);
         retries++;
         delay(1000);
     }
 
     String time_str = String(time_buff);
 
-    if (time_str.charAt(2) == '/' && time_str.charAt(5) == '/' && time_str.charAt(8) == ',' && time_str.charAt(11) == ':' && time_str.charAt(14) == ':')
+    // Validate time format
+    if (time_str.charAt(2) == '/' && time_str.charAt(5) == '/' &&
+        time_str.charAt(8) == ',' && time_str.charAt(11) == ':' && time_str.charAt(14) == ':')
     {
-
-        // Serial.println("Time length: " + (String)strlen(time_buff));
-        // Serial.println("Time buffer: " + (String)time_buff);
-        // Serial.println("Time buffer size: " + (String)sizeof(time_buff));
-
         strcpy(time, time_buff);
         return true;
     }
-    else
-    {
-        return false;
-    }
+
+    return false;
 }
 
-void setNetworkMode(NetMode mode)
-
+/// @brief Query current network operator name
+/// @return Network name string
+String getNetworkName()
 {
-    // if (mode != NetMode::AUTO || mode != NetMode::_2G || mode != NetMode::_4G)
-    // {
-    //     Serial.println("Invalid network mode");
-    //     return;
-    // }
+    String AT_response = "";
+    const char AT_cmd[] = "AT+QSPN";
+    char NetworkName[64];
 
-    char setnetmode[24] = "AT+QCFG=\"nwscanmode\",";
-    char _mode[1];
-    itoa(mode, _mode, 10);
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return "";
 
-    strcat(setnetmode, _mode);
-
-    char mode_str[8];
-    switch (mode)
+    if (extractText((char *)AT_response.c_str(), "+QSPN: \"", NetworkName, 64, '"'))
     {
-    case (NetMode::_2G):
-        strcpy(mode_str, "2G");
-        break;
-    case (NetMode::_4G):
-        strcpy(mode_str, "4G");
-        break;
-    case (NetMode::AUTO):
-        strcpy(mode_str, "AUTO");
-        break;
-    }
+        NETWORK_NAME = String(NetworkName);
+        return NETWORK_NAME;
+    };
 
-    Serial.print("Setting network mode to: ");
-    Serial.println(mode_str);
+    NETWORK_NAME = "";
+    return NETWORK_NAME;
+}
+/// @brief Query signal strength from network
+/// @return RSSI value or 99 on error //! Integer indicator. Not actual RSSI signal strength in dBm
+int8_t getSignalStrength()
+{
+    String AT_response = "";
+    const char AT_cmd[] = "AT+CSQ";
+    char rssi[4];
 
-    if (!sendAndCheck(setnetmode, "OK", 2000))
-    {
-        Serial.print("Failed to set network mode: ");
-        Serial.println(mode_str);
-        return;
-    }
-    delay(1000);
-    current_network = mode;
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return 99;
+
+    if (extractText((char *)AT_response.c_str(), "+CSQ: ", rssi, sizeof(rssi), ','))
+        return atoi(rssi);
+
+    return 99;
 }
 
+/// @brief Query active network band information
+/// @return Band name string
+String getNetworkBand()
+{
+    const char AT_cmd[] = "AT+QNWINFO";
+    char band[64];
+    String AT_response = "";
+
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return "";
+
+    // Extract network band from response
+    // Expected format: +QNWINFO: "FDD LTE","63902","LTE BAND 3",1650
+    // Extract text between second and third comma
+    if (extractText((char *)AT_response.c_str(), "+QNWINFO: \"", band, sizeof(band), '\n'))
+    {
+        // ToDo: Extract Access Technology: Particulary interested in "NO SERVICE" as part of response
+        // Find the second occurrence of comma and extract from there
+        const char *start = strchr((char *)AT_response.c_str(), ',');
+        if (start != nullptr)
+        {
+            start = strchr(start + 1, ',');
+            if (start != nullptr)
+            {
+                start++; // Move past the comma
+                // Skip leading quote if present
+                if (*start == '"')
+                    start++;
+
+                const char *end = strchr(start, '"');
+                if (end != nullptr)
+                {
+                    size_t length = end - start;
+                    if (length < sizeof(band))
+                    {
+                        strncpy(band, start, length);
+                        band[length] = '\0';
+                        return String(band);
+                    }
+                }
+            }
+        }
+    }
+
+    return "";
+}
+
+/// @brief Initialize serial communication with GSM module
+/// @return true if communication established
 bool GSM_Serial_begin()
 {
     pinMode(QUECTEL_PWR_KEY, OUTPUT);
@@ -871,9 +1067,9 @@ bool GSM_Serial_begin()
     return comm_init;
 }
 
-/// @brief Reset GSM module
-/// @param seq: Sequence to to toggle reset pin to trigger a restart
-/// @param timing_delay : Timing function for the reset to happen
+/// @brief Reset GSM module via GPIO reset pin
+/// @param seq: Reset sequence pattern (HIGH_LOW_HIGH or LOW_HIGH_LOW)
+/// @param timing_delay :  Delay in milliseconds for each pin state change for the reset to happen
 void GSMreset(RST_SEQ seq, uint8_t timing_delay)
 {
 
@@ -899,6 +1095,7 @@ void GSMreset(RST_SEQ seq, uint8_t timing_delay)
     delay(30000); // Allow enough time for GSM to warm up
 }
 
+/// @brief Put GSM module into low-power sleep mode
 void GSM_sleep()
 {
 
@@ -911,6 +1108,7 @@ void GSM_sleep()
         Serial.println("Failed to put GSM module in sleep mode");
     }
 }
+
 // Testing POST data
 // http://staging.api.sensors.africa/v1/push-sensor-data/
 
