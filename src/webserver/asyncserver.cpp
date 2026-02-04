@@ -13,6 +13,7 @@ extern uint8_t count_wifiInfo;
 extern JsonDocument getCurrentSensorData();
 extern String listFiles(fs::FS &fs, String path);
 extern char ROOT_DIR[24];
+extern char AP_SSID[64];
 String pendingFileList = "{}";
 bool fileListReady = false;
 AsyncWebServerRequest *pendingRequest = nullptr;
@@ -44,6 +45,8 @@ void setup_webserver()
             { request->send(LittleFS, "/icons/lock.svg", "image/svg+xml"); });
   server.on("/icons/cell_tower.svg", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/icons/cell_tower.svg", "image/svg+xml"); });
+  server.on("/device-id", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(200, "text/plain", AP_SSID); });
   server.on("/device-info.json", [](AsyncWebServerRequest *request)
             {
         JsonDocument data=getDeviceConfig();

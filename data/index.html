@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -18,15 +18,17 @@
         font-size: 20px;
       }
       .navbar-brand {
-        font-weight: bold;
-        font-size: 1.2em;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        font-size: 1em;
         padding: 0.5em 1em;
-        height: 100px;
-        width: 100px;
+        gap: 0.2em;
+        min-height: 128px;
       }
       .navbar-brand img {
-        width: inherit;
-        height: inherit;
+        height: 100px;
+        width: 100px;
         object-fit: contain;
       }
       .navbar-toggle {
@@ -97,6 +99,7 @@
     <nav class="navbar">
       <span class="navbar-brand">
         <img src="sensors_logo.png" alt="sensors-logo" />
+        <span id="device-id"></span>
       </span>
       <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
       <div class="navbar-links" id="navbarLinks">
@@ -211,6 +214,22 @@
           });
       };
       setInterval(fetchData, 5 * 60 * 1000);
+    </script>
+    <script>
+      fetch("/device-id")
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error("Network response not ok " + response.status);
+          }
+          return response.text();
+        })
+        .then(
+          (deviceId) =>
+            (document.getElementById("device-id").innerText = deviceId),
+        )
+        .catch((error) => {
+          console.error("Error fetching device id:", error);
+        });
     </script>
   </body>
 </html>
