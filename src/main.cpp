@@ -127,6 +127,10 @@ struct LOGGER
 
 JsonDocument gsm_info;
 
+// WiFi credentials
+char AP_SSID[64];
+const char *AP_PWD = "admin@sensors.cfa";
+
 void readDHT();
 void getPMSREADINGS();
 void printPM_values();
@@ -175,14 +179,21 @@ void setup()
     uint64_t chipid_num;
     chipid_num = ESP.getEfuseMac();
     snprintf(esp_chipid, sizeof(esp_chipid), "%llX", chipid_num);
+    delay(3000);
     Serial.print("ESP32 Chip ID: ");
     Serial.println(esp_chipid);
-    Serial.println("Initializing PMS5003 sensor");
+    // Set Dual Access Point and Station WiFi mode
+    WiFi.mode(WIFI_AP_STA); // ToDo: Configure this when not on power saving mode.
+    strcat(AP_SSID, SENSOR_PREFIX);
+    strcat(AP_SSID, esp_chipid);
+
     init_memory_loggers();
+    Serial.println("Initializing PMS5003 sensor");
     pms.init();
     delay(2000);
     pms.sleep();
     dht.setType(DHTTYPE);
+
     if (!LittleFS.begin(true))
     {
         Serial.println("An error has occurred while mounting LittleFS");
@@ -190,13 +201,12 @@ void setup()
     else
     {
         Serial.println("LittleFS mounted successfully");
-        wifiAPbegin("ESP32-AFRICA", "admin@sensors.cfa");
+        WiFi.softAP(AP_SSID, AP_PWD);
         unsigned time_for_wifi_config = 600000;
         Serial.print("struct_wifiInfo* wifiInfo size: ");
         Serial.println(max_wifi_hotspots_size);
 
         wifi_networks_scan(wifiInfo, count_wifiInfo);
-
         setup_webserver();
 
         // 10 minutes timeout for wifi config
