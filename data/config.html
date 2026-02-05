@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -181,6 +181,17 @@
         display: flex;
         gap: 12px;
       }
+      .skip-btn {
+        display: block;
+        margin: 50px auto;
+        background: #e23602;
+        border: none;
+        border-radius: 6px;
+        color: #fff;
+        padding: 0.8rem 2rem;
+        font-size: 1.2em;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body onload="loadDeviceSettings()">
@@ -263,6 +274,7 @@
         </div>
       </form>
     </div>
+    <button class="skip-btn" onclick="skipConfig()">Skip device config</button>
     <script>
       let currentStep = 0;
       function showStep(idx) {
@@ -369,6 +381,16 @@
         let el = document.getElementById("hotspot-" + ssid);
         if (el) el.classList.add("selected");
         document.getElementById("ssid").value = ssid;
+      }
+
+      function skipConfig() {
+        fetch("/config?skip=true")
+          .then((response) => response.text())
+          .then((text) => {
+            console.log(text);
+            window.location.href = "/";
+          })
+          .catch((e) => console.error("Error skipping config: ", e));
       }
     </script>
   </body>

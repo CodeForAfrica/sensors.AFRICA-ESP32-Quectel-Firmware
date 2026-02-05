@@ -62,6 +62,7 @@
 size_t max_wifi_hotspots_size = sizeof(struct_wifiInfo) * 20;
 struct struct_wifiInfo *wifiInfo = (struct_wifiInfo *)malloc(max_wifi_hotspots_size);
 uint8_t count_wifiInfo;
+bool isCaptivePortalViewed = false;
 
 DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
@@ -204,13 +205,17 @@ void setup()
     else
     {
         Serial.println("LittleFS mounted successfully");
+        // ToDo: refactor webserver and dns setup after loading device configs
         WiFi.softAP(AP_SSID, AP_PWD);
         unsigned time_for_wifi_config = 600000;
         Serial.print("struct_wifiInfo* wifiInfo size: ");
         Serial.println(max_wifi_hotspots_size);
 
         wifi_networks_scan(wifiInfo, count_wifiInfo);
+        // DNS server for captive portal
+        dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
         setup_webserver();
+        startCaptivePortal(isCaptivePortalViewed);
 
         // 10 minutes timeout for wifi config
         // unsigned long last_page_load = millis();

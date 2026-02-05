@@ -18,6 +18,7 @@ extern uint8_t count_wifiInfo;
 
 static const IPAddress AP_IP(192, 168, 4, 1);
 static DNSServer dnsServer;
+#define DNS_PORT 53
 
 // extern bool wificonfig_loop;
 
@@ -214,6 +215,16 @@ static void connectWifi(const char *WLANSSID, const char *WLANPWD)
         // WiFi.softAP(cfg::fs_ssid, cfg::fs_pwd, selectChannelForAp());
         wifiAPbegin(WLANSSID, WLANPWD);
     }
+}
+
+static void startCaptivePortal(bool &isCaptivePortalViewed)
+{
+
+    while (!isCaptivePortalViewed)
+    {
+        dnsServer.processNextRequest();
+    }
+    dnsServer.stop();
 }
 
 #endif
