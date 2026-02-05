@@ -109,21 +109,15 @@
         <a href="device-details.html">Device Details</a>
         <a href="file-system.html">File Viewer</a>
         <a href="ota.html">OTA</a>
-        <a href="advanced-settings.html">Advanced Settings</a>
+        <!-- <a href="advanced-settings.html">Advanced Settings</a> -->
       </div>
     </nav>
     <main>
       <section class="device-info-wrapper">
         <h2 style="text-align: center; color: #2fb56b">Device Details</h2>
-        <div class="info-group" id="GSM"></div>
-        <div class="info-group">
-          <h3>WiFi Network</h3>
-          <ul>
-            <li><strong>Connected SSID:</strong> SensorsLabWiFi</li>
-            <li><strong>Signal Strength:</strong> -60 dBm</li>
-          </ul>
-        </div>
-        <div class="info-group">
+        <div class="info-group" id="gsm_info"></div>
+        <div class="info-group" id="wifi_info"></div>
+        <!-- <div class="info-group">
           <h3>Location Details</h3>
           <ul>
             <li><strong>Country Name:</strong> Kenya</li>
@@ -138,7 +132,7 @@
             <li><strong>Contact Phone:</strong> +254712345678</li>
             <li><strong>Contact Email:</strong> jane.doe@example.com</li>
           </ul>
-        </div>
+        </div> -->
       </section>
     </main>
     <script>
@@ -161,14 +155,28 @@
         .then((response) => response.json())
         .then((data) => {
           console.log("GSM info: ", data);
-          document.getElementById("GSM").innerHTML = renderInfo(
+          document.getElementById("gsm_info").innerHTML = renderInfo(
             data,
             "GSM &amp; Network",
           );
         })
         .catch((err) => {
-          document.getElementById("GSM").textContent =
-            "Failed to load GSM info.";
+          document.getElementById("gsm_info").textContent =
+            "Failed to load GSM info";
+          console.error(err);
+        });
+      fetch("/wifi-info")
+        .then((response) => response.json())
+        .then((data) => {
+          console.log("WiFi info: ", data);
+          document.getElementById("wifi_info").innerHTML = renderInfo(
+            data,
+            "WiFi",
+          );
+        })
+        .catch((err) => {
+          document.getElementById("wifi_info").textContent =
+            "Failed to load WiFi info";
           console.error(err);
         });
     </script>
