@@ -65,7 +65,7 @@ static String readFile(fs::FS &fs, const char *path)
     Serial.print("Read from file: ");
     while (file.available())
     {
-        file_contents += file.read();
+        file_contents += (char)file.read();
     }
     file.close();
     return file_contents;

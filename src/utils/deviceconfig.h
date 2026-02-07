@@ -38,10 +38,78 @@ static void updateDeviceConfig()
 
 static void saveConfig(JsonDocument &doc)
 {
+    // Helper: recursively merge src into dst ( adds new keys, updates differing values )
+    static std::function<void(const JsonObjectConst &, JsonObject)> mergeJsonObjects =
+        [&](const JsonObjectConst &src, JsonObject dst)
+    {
+        for (JsonPairConst kv : src)
+        {
+            const char *key = kv.key().c_str();
+            JsonVariantConst v = kv.value();
+
+            if (v.is<JsonObject>())
+            {
+                if (!dst[key].is<JsonObject>())
+                {
+                    dst[key] = src[key];
+                }
+                else
+                {
+                    JsonObject child = dst[key].as<JsonObject>();
+                    mergeJsonObjects(v.as<JsonObjectConst>(), child);
+                }
+            }
+            else
+            {
+                dst[key] = v;
+            }
+        }
+    };
+
     const char *new_config_file = "/config.json.new";
-    String json_stringified = "";
-    serializeJson(doc, json_stringified);
-    writeFile(LittleFS, new_config_file, json_stringified.c_str());
+    listFiles(LittleFS);
+    String existing = readFile(LittleFS, "/config.json");
+    String incoming;
+
+    Serial.println("\nExisting config: ");
+    Serial.println(existing);
+    Serial.println("\nIncoming doc");
+    serializeJsonPretty(doc, incoming);
+    Serial.println(incoming);
+
+    // If there is no existing config or it's invalid, just write the passed doc
+    if (existing == "" || !validateJson(existing.c_str())) // ToDo: reduce this with either validateJson or DeserializationError
+    {
+        Serial.println("Invalid or empty json");
+        const char *c_string = incoming.c_str();
+        writeFile(LittleFS, "/config.json", c_string);
+        return;
+    }
+
+    JsonDocument existingDoc;
+    DeserializationError err = deserializeJson(existingDoc, existing);
+    if (err)
+    {
+        Serial.println("\nDeserialization Error on existing doc");
+        // Fallback: write the passed doc if existing couldn't be parsed //! Use this validaters with caution, they have failed in some tests.
+        const char *c_string = incoming.c_str();
+        writeFile(LittleFS, "/config.json", c_string);
+        return;
+    }
+
+    JsonObject existingObj = existingDoc.as<JsonObject>();
+    JsonObject newObj = doc.as<JsonObject>();
+
+    if (!newObj.isNull())
+    {
+        mergeJsonObjects(newObj, existingObj);
+    }
+
+    String mergedString = "";
+    serializeJson(existingDoc, mergedString);
+    Serial.println("\nNew merged doc");
+    Serial.println(mergedString);
+    writeFile(LittleFS, new_config_file, mergedString.c_str());
     updateFileContents(LittleFS, "/config.json", new_config_file);
 }
 
