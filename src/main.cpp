@@ -19,8 +19,8 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gideon Maina
- * @date 2025-06-13
- * @version 1.2.0
+ * @date 2026-02-09
+ * @version 1.3.0
  *
  * @dependencies
  * - ArduinoJson
@@ -57,12 +57,12 @@
 #include <LittleFS.h>
 #include "dhtnew.h"
 #include "utils/wifi.h"
+#include "utils/deviceconfig.h"
 #include "webserver/asyncserver.h"
 
 size_t max_wifi_hotspots_size = sizeof(struct_wifiInfo) * 20;
 struct struct_wifiInfo *wifiInfo = (struct_wifiInfo *)malloc(max_wifi_hotspots_size);
 uint8_t count_wifiInfo;
-bool isCaptivePortalViewed = false;
 
 DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
@@ -126,7 +126,17 @@ struct LOGGER
     int log_count = 0;
 } JSON_PAYLOAD_LOGGER, CSV_PAYLOAD_LOGGER;
 
+struct GSMRuntimeInfo GSMRuntimeInfo;
 JsonDocument gsm_info;
+struct DeviceConfigState DeviceConfigState;
+struct InitialConfigs
+{
+    char wifi_ssid[64];
+    char wifi_password[64];
+    char gsm_apn[64];
+    char sim_pin[8];
+    bool power_saving_mode;
+};
 
 // WiFi credentials
 char AP_SSID[64];
@@ -151,6 +161,7 @@ void memoryDataLog(LOGGER &logger, const char *data);
 void fileDataLog(LOGGER &logger);
 void resetLogger(LOGGER &logger);
 void sendFromMemoryLog(LOGGER &logger);
+void captureGSMInfo();
 
 enum Month
 {
@@ -177,6 +188,8 @@ void setup()
 {
     Serial.begin(115200);
     boottime = millis();
+    DeviceConfigState.state = CONFIG_BOOT_INIT;
+
     uint64_t chipid_num;
     chipid_num = ESP.getEfuseMac();
     snprintf(esp_chipid, sizeof(esp_chipid), "%llX", chipid_num);
@@ -205,26 +218,39 @@ void setup()
     else
     {
         Serial.println("LittleFS mounted successfully");
-        // ToDo: refactor webserver and dns setup after loading device configs
+
+        // Step 1: Load existing config from LittleFS
+        String existingConfig = readFile(LittleFS, "/config.json");
+        if (existingConfig != "" && validateJson(existingConfig.c_str()))
+        {
+            Serial.println(existingConfig);
+            DeviceConfigState.configurationRequired = false;
+            // ToDo: go ahead and apply device configs. Check the default power saving mode and set default configs.
+            // loadDeviceConfig();
+        }
+        else
+        {
+            DeviceConfigState.configurationRequired = true;
+        }
+
+        // Step 2: Start WiFi AP
         WiFi.softAP(AP_SSID, AP_PWD);
-        unsigned time_for_wifi_config = 600000;
         Serial.print("struct_wifiInfo* wifiInfo size: ");
         Serial.println(max_wifi_hotspots_size);
 
         wifi_networks_scan(wifiInfo, count_wifiInfo);
+
+        // Step 3: Start Captive Portal & Web Server
+        DeviceConfigState.state = CONFIG_CAPTIVE_PORTAL_ACTIVE;
+        DeviceConfigState.captivePortalStartTime = millis();
+        DeviceConfigState.captivePortalTimeoutMs = 5 * 60 * 1000; // 5 minutes
         // DNS server for captive portal
         dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
         setup_webserver();
-        startCaptivePortal(isCaptivePortalViewed);
 
-        // 10 minutes timeout for wifi config
-        // unsigned long last_page_load = millis();
-        // while ((millis() - last_page_load) < time_for_wifi_config + 500)
-        // {
-        //     dnsServer.processNextRequest();
-        //     // server.handleClient();
-        //     yield();
-        // }
+        // ToDO: Do not start captival portal if configs are valid
+        // ToDo: This should probably be spinned in another core
+        startCaptivePortal(DeviceConfigState.captivePortalAccessed, DeviceConfigState.captivePortalStartTime, DeviceConfigState.captivePortalTimeoutMs);
     }
 
     if (gsm_capable)
@@ -278,6 +304,8 @@ void setup()
                     Serial.println("Failed to fetch time from network");
                 }
             }
+
+            captureGSMInfo();
 
             GSM_sleep();
         }
@@ -1116,4 +1144,17 @@ void sendFromMemoryLog(LOGGER &logger)
 JsonDocument getCurrentSensorData()
 {
     return current_sensor_data;
+}
+
+void captureGSMInfo()
+{
+    // ToDo: Reduce memory footprint by moving global gsm_info doc to  scoped local variable asyncwebserver
+    gsm_info["Network Name"] = GSMRuntimeInfo.operator_name = getNetworkName();
+    // gsm_info["Network Band"] = GSMRuntimeInfo.network_band = getNetworkBand();
+    gsm_info["Signal Strength"] = GSMRuntimeInfo.signal_strength = getSignalStrength();
+    strcpy(GSMRuntimeInfo.sim_ccid, SIM_CCID);
+    gsm_info["SIM ICCID"] = GSMRuntimeInfo.sim_ccid;
+    gsm_info["Model ID"] = GSMRuntimeInfo.model_id = getModelID();
+    gsm_info["Firmware Version"] = GSMRuntimeInfo.firmware_version = getFirwmareVersion();
+    gsm_info["IMEI"] = GSMRuntimeInfo.imei = getIMEI();
 }

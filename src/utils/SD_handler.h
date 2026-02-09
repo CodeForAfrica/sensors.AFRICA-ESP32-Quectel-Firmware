@@ -1,3 +1,6 @@
+#ifndef SD_HANDLER_H
+#define SD_HANDLER_H
+
 #include "FS.h"
 #include "SD.h"
 #include "SPI.h"
@@ -243,3 +246,5 @@ static String listFiles(fs::FS &fs, String path = "/")
     Serial.println(file_list);
     return file_list;
 }
+
+#endif

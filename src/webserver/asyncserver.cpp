@@ -18,7 +18,6 @@ String pendingFileList = "{}";
 bool fileListReady = false;
 AsyncWebServerRequest *pendingRequest = nullptr;
 extern JsonDocument gsm_info;
-extern bool isCaptivePortalViewed;
 
 void setup_webserver()
 {
@@ -27,7 +26,7 @@ void setup_webserver()
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/index.html"); });
   server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
-            { if(request->hasParam("skip")){isCaptivePortalViewed=true;} //? we don't care about the value of skip, so no need to parse it
+            { if(request->hasParam("skip")){DeviceConfigState.captivePortalAccessed=true;} //? we don't care about the value of skip, so no need to parse it
                else{request->send(LittleFS, "/config.html"); } });
   server.on("/device-details.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/device-details.html"); });
@@ -69,7 +68,7 @@ void setup_webserver()
                   }
 
                   String hotspots;
-                  serializeJsonPretty(doc,Serial);
+                  // serializeJsonPretty(doc,Serial); // Debugging
                   serializeJson(doc, hotspots);
                   request->send(200,"application/json",hotspots); });
 
@@ -218,7 +217,7 @@ void setup_webserver()
 
   // Captive portal redirect
   server.onNotFound([](AsyncWebServerRequest *request)
-                    { if(!isCaptivePortalViewed) request->redirect("/config"); else request->send(404, "text/plain", "Not found"); });
+                    { if(!DeviceConfigState.captivePortalAccessed) request->redirect("/config"); else request->send(404, "text/plain", "Not found"); });
 
   //! For comparison
   // void uploadFiles()

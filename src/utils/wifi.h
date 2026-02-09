@@ -217,12 +217,13 @@ static void connectWifi(const char *WLANSSID, const char *WLANPWD)
     }
 }
 
-static void startCaptivePortal(bool &isCaptivePortalViewed)
+static void startCaptivePortal(bool &isCaptivePortalViewed, unsigned long startTime, unsigned long timeout)
 {
 
-    while (!isCaptivePortalViewed)
+    while (!isCaptivePortalViewed && (millis() - startTime < timeout))
     {
         dnsServer.processNextRequest();
+        yield();
     }
     dnsServer.stop();
 }

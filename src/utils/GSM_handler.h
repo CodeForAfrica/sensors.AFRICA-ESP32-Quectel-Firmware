@@ -57,6 +57,18 @@ static const char *const NET_STATUS_VERBOSE[] = {
     "Network registration status unknown",
     "Registered to roaming network"};
 
+struct GSMRuntimeInfo
+{
+    String operator_name;       // Network operator name
+    int8_t signal_strength;     // RSSI //!not in dBm: need mapping
+    String network_band[16];    // e.g., "LTE Band 7"
+    char network_technology[8]; // "2G", "3G", "4G"
+    char sim_ccid[21];
+    String imei;
+    String firmware_version;
+    String model_id; // EC200XXXXXXX
+};
+
 bool GSM_init();
 bool register_to_network();
 void SIM_PIN_Setup();
@@ -169,6 +181,18 @@ String getProductInfo() // Combination of AT+GMI, AT+GMM and AT+GMR,
         return "";
     }
     return res.substring(res.indexOf("\n") + 1, res.indexOf("OK") - 3);
+}
+
+/// @brief Query IMEI : AT+GSN=1
+/// @return IMEI string
+String getIMEI()
+{
+    String res;
+    if (!sendAndCheck("AT+GSN=1", "OK", res))
+    {
+        return "";
+    }
+    return res.substring(res.indexOf("\"") + 1, res.indexOf("OK") - 5);
 }
 
 /// @brief Set modem network mode preference
@@ -1025,13 +1049,21 @@ String getNetworkBand()
 bool GSM_Serial_begin()
 {
     pinMode(QUECTEL_PWR_KEY, OUTPUT);
+    pinMode(GSM_RST_PIN, OUTPUT);
+    digitalWrite(GSM_RST_PIN, LOW);
+    delay(1000);
+    digitalWrite(QUECTEL_PWR_KEY, LOW);
+    delay(500);
     digitalWrite(QUECTEL_PWR_KEY, HIGH);
+    delay(2500);
+    digitalWrite(QUECTEL_PWR_KEY, HIGH);
+    delay(4000);
 
     GSMSerial.begin(115200, SERIAL_8N1, MCU_RXD, MCU_TXD);
 
     bool comm_init = false;
 
-    int16_t timeout = 30000;
+    int16_t timeout = 60000;
 
     Serial.println("Attempting to initate comms with GSM module");
 

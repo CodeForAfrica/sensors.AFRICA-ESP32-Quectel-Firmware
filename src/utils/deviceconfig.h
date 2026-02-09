@@ -12,6 +12,37 @@ static JsonDocument getDeviceConfig();
 static void updateDeviceConfig();
 static void saveConfig(JsonDocument &doc);
 
+enum ConfigurationState
+{
+    CONFIG_BOOT_INIT,              // Reading existing config
+    CONFIG_CAPTIVE_PORTAL_ACTIVE,  // Waiting for user input
+    CONFIG_CAPTIVE_PORTAL_TIMEOUT, // Auto-continue
+    CONFIG_APPLIED,                // Configs loaded & applied
+    CONFIG_COMPLETE                // Ready for runtime
+};
+
+struct DeviceConfigState
+{
+    ConfigurationState state;
+    unsigned long captivePortalStartTime;
+    unsigned long captivePortalTimeoutMs; // 5-10 mins
+    bool configurationRequired;           // False if valid config exists
+    bool captivePortalAccessed;           // Tracks if user accessed it
+};
+
+extern struct DeviceConfigState DeviceConfigState;
+
+struct DeviceConfig
+{
+    char wifi_sta_ssid[64];
+    char wifi_sta_pwd[64];
+    char gsm_apn[32];
+    char gsm_apn_pwd[32];
+    char sim_pin[5];
+};
+
+extern struct DeviceConfig DeviceConfig;
+
 static JsonDocument getDeviceConfig()
 {
     JsonDocument doc;
@@ -111,6 +142,23 @@ static void saveConfig(JsonDocument &doc)
     Serial.println(mergedString);
     writeFile(LittleFS, new_config_file, mergedString.c_str());
     updateFileContents(LittleFS, "/config.json", new_config_file);
+}
+
+static void loadDeviceConfig()
+{
+
+    JsonDocument config = getDeviceConfig();
+
+    if (config["ssid"] = !"")
+    {
+        strcpy(DeviceConfig.wifi_sta_ssid, config["ssid"]);
+        strcpy(DeviceConfig.wifi_sta_pwd, config["wifiPwd"]);
+    }
+    if (config["apn"] = !"")
+    {
+        strcpy(DeviceConfig.wifi_sta_ssid, config["apn"]);
+        strcpy(DeviceConfig.wifi_sta_pwd, config["apnPwd"]);
+    }
 }
 
 #endif
