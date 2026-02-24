@@ -129,6 +129,7 @@ struct LOGGER
 struct GSMRuntimeInfo GSMRuntimeInfo;
 JsonDocument gsm_info;
 struct DeviceConfigState DeviceConfigState;
+struct DeviceConfig DeviceConfig;
 struct InitialConfigs
 {
     char wifi_ssid[64];
@@ -225,14 +226,17 @@ void setup()
         {
             Serial.println(existingConfig);
             DeviceConfigState.configurationRequired = false;
-            // ToDo: go ahead and apply device configs. Check the default power saving mode and set default configs.
-            // loadDeviceConfig();
         }
         else
         {
             DeviceConfigState.configurationRequired = true;
         }
+    }
 
+    // Device configuration
+
+    if (DeviceConfigState.configurationRequired)
+    {
         // Step 2: Start WiFi AP
         WiFi.softAP(AP_SSID, AP_PWD);
         Serial.print("struct_wifiInfo* wifiInfo size: ");
@@ -251,6 +255,42 @@ void setup()
         // ToDO: Do not start captival portal if configs are valid
         // ToDo: This should probably be spinned in another core
         startCaptivePortal(DeviceConfigState.captivePortalAccessed, DeviceConfigState.captivePortalStartTime, DeviceConfigState.captivePortalTimeoutMs);
+    }
+
+    else
+    {
+
+        // ToDo: go ahead and apply device configs. Check the default power saving mode and set default configs.
+        loadSavedDeviceConfigs();
+    }
+
+    // ToDo: Check if WiFi is needed by user
+    // ToDO: Connect to WiFi.
+    WiFi.softAP(AP_SSID, AP_PWD); // start AP anyway
+
+    char debug_wifi_conn[128];
+
+    snprintf(debug_wifi_conn, 128, "Attempting WiFi connection to SSID: %s and PWD: %s", DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
+    Serial.println(debug_wifi_conn);
+
+    WiFi.begin(DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
+    unsigned long wifi_conn_start = millis();
+    unsigned long wifi_conn_timeout = 60000;
+
+    while (WiFi.status() != WL_CONNECTED && (millis() - wifi_conn_start < wifi_conn_timeout))
+    {
+        Serial.print('.');
+        delay(1000);
+    }
+
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("\nFailed to connect to WiFi hotspot");
+    }
+    else
+    {
+        snprintf(debug_wifi_conn, 128, "\nWiFi hotspot connected! Local IP: %s", WiFi.localIP());
+        Serial.println(debug_wifi_conn);
     }
 
     if (gsm_capable)
@@ -315,11 +355,11 @@ void setup()
         }
     }
 
-    else
-    {
-        // connectWifi();
-        Serial.println("Support for other network connections not yet implemented");
-    }
+    // else
+    // {
+    //     // connectWifi();
+    //     Serial.println("Support for other network connections not yet implemented");
+    // }
 
 // SD INIT
 #ifdef REASSIGN_PINS

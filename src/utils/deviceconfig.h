@@ -11,6 +11,7 @@
 static JsonDocument getDeviceConfig();
 static void updateDeviceConfig();
 static void saveConfig(JsonDocument &doc);
+static void loadSavedDeviceConfigs();
 
 enum ConfigurationState
 {
@@ -144,7 +145,7 @@ static void saveConfig(JsonDocument &doc)
     updateFileContents(LittleFS, "/config.json", new_config_file);
 }
 
-static void loadDeviceConfig()
+static void loadSavedDeviceConfigs()
 {
 
     JsonDocument config = getDeviceConfig();
