@@ -1199,7 +1199,7 @@ bool wifiConnect()
         delay(1000);
     }
 
-    wifi_connected = (WiFi.status() != WL_CONNECTED);
+    wifi_connected = (WiFi.status() == WL_CONNECTED);
     if (!wifi_connected)
     {
         Serial.println("\nFailed to connect to WiFi hotspot");

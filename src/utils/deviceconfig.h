@@ -153,12 +153,12 @@ static void loadSavedDeviceConfigs()
 
     JsonDocument config = getDeviceConfig();
 
-    if (config["ssid"] = !"")
+    if (config["ssid"] != "")
     {
         strcpy(DeviceConfig.wifi_sta_ssid, config["ssid"]);
         strcpy(DeviceConfig.wifi_sta_pwd, config["wifiPwd"]);
     }
-    if (config["apn"] = !"")
+    if (config["apn"] != "")
     {
         strcpy(DeviceConfig.wifi_sta_ssid, config["apn"]);
         strcpy(DeviceConfig.wifi_sta_pwd, config["apnPwd"]);
