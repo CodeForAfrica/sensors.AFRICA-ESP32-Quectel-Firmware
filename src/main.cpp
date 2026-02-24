@@ -1206,7 +1206,7 @@ bool wifiConnect()
     }
     else
     {
-        snprintf(debug_wifi_conn, 128, "\nWiFi hotspot connected! Local IP: %s", WiFi.localIP());
+        snprintf(debug_wifi_conn, 128, "\nWiFi hotspot connected! Local IP: %s", WiFi.localIP().toString().c_str());
         Serial.println(debug_wifi_conn);
     }
 
