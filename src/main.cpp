@@ -163,6 +163,7 @@ void fileDataLog(LOGGER &logger);
 void resetLogger(LOGGER &logger);
 void sendFromMemoryLog(LOGGER &logger);
 void captureGSMInfo();
+bool wifiConnect(); // ToDo: Refactor similar function existing in /utils/wifi.h
 
 enum Month
 {
@@ -265,30 +266,8 @@ void setup()
     WiFi.softAP(AP_SSID, AP_PWD); // start AP & webserver anyway
     setup_webserver();
 
-    char debug_wifi_conn[128];
-
-    snprintf(debug_wifi_conn, 128, "Attempting WiFi connection to SSID: %s and PWD: %s", DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
-    Serial.println(debug_wifi_conn);
-
-    WiFi.begin(DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
-    unsigned long wifi_conn_start = millis();
-    unsigned long wifi_conn_timeout = 60000;
-
-    while (WiFi.status() != WL_CONNECTED && (millis() - wifi_conn_start < wifi_conn_timeout))
-    {
-        Serial.print('.');
-        delay(1000);
-    }
-
-    if (WiFi.status() != WL_CONNECTED)
-    {
-        Serial.println("\nFailed to connect to WiFi hotspot");
-    }
-    else
-    {
-        snprintf(debug_wifi_conn, 128, "\nWiFi hotspot connected! Local IP: %s", WiFi.localIP());
-        Serial.println(debug_wifi_conn);
-    }
+    DeviceConfigState.state = ConfigurationState::CONFIG_WIFI;
+    DeviceConfigState.wifiConnected = wifiConnect();
 
     if (gsm_capable)
     {
@@ -1194,4 +1173,42 @@ void captureGSMInfo()
     gsm_info["Model ID"] = GSMRuntimeInfo.model_id = getModelID();
     gsm_info["Firmware Version"] = GSMRuntimeInfo.firmware_version = getFirwmareVersion();
     gsm_info["IMEI"] = GSMRuntimeInfo.imei = getIMEI();
+}
+
+bool wifiConnect()
+{
+    if (DeviceConfig.wifi_sta_ssid == "")
+    {
+        Serial.println("DeviceConfig wifi ssid empty!");
+        return false;
+    }
+
+    bool wifi_connected;
+    char debug_wifi_conn[128];
+
+    snprintf(debug_wifi_conn, 128, "Attempting WiFi connection to SSID: %s and PWD: %s", DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
+    Serial.println(debug_wifi_conn);
+
+    WiFi.begin(DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
+    unsigned long wifi_conn_start = millis();
+    unsigned long wifi_conn_timeout = 60000;
+
+    while (WiFi.status() != WL_CONNECTED && (millis() - wifi_conn_start < wifi_conn_timeout))
+    {
+        Serial.print('.');
+        delay(1000);
+    }
+
+    wifi_connected = (WiFi.status() != WL_CONNECTED);
+    if (!wifi_connected)
+    {
+        Serial.println("\nFailed to connect to WiFi hotspot");
+    }
+    else
+    {
+        snprintf(debug_wifi_conn, 128, "\nWiFi hotspot connected! Local IP: %s", WiFi.localIP());
+        Serial.println(debug_wifi_conn);
+    }
+
+    return wifi_connected;
 }

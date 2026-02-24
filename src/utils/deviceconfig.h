@@ -18,8 +18,10 @@ enum ConfigurationState
     CONFIG_BOOT_INIT,              // Reading existing config
     CONFIG_CAPTIVE_PORTAL_ACTIVE,  // Waiting for user input
     CONFIG_CAPTIVE_PORTAL_TIMEOUT, // Auto-continue
-    CONFIG_APPLIED,                // Configs loaded & applied
-    CONFIG_COMPLETE                // Ready for runtime
+    CONFIG_WIFI,
+    CONFIG_GSM,
+    CONFIG_APPLIED, // Configs loaded & applied
+    CONFIG_COMPLETE // Ready for runtime
 };
 
 struct DeviceConfigState
@@ -29,6 +31,7 @@ struct DeviceConfigState
     unsigned long captivePortalTimeoutMs; // 5-10 mins
     bool configurationRequired;           // False if valid config exists
     bool captivePortalAccessed;           // Tracks if user accessed it
+    bool wifiConnected = false;
 };
 
 extern struct DeviceConfigState DeviceConfigState;
