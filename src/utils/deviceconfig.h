@@ -38,11 +38,12 @@ extern struct DeviceConfigState DeviceConfigState;
 
 struct DeviceConfig
 {
-    char wifi_sta_ssid[64];
-    char wifi_sta_pwd[64];
-    char gsm_apn[32];
-    char gsm_apn_pwd[32];
-    char sim_pin[5];
+    char wifi_sta_ssid[64] = {};
+    char wifi_sta_pwd[64] = {};
+    char gsm_apn[32] = {};
+    char gsm_apn_pwd[32] = {};
+    char sim_pin[5] = {};
+    bool power_saving_mode = false;
 };
 
 extern struct DeviceConfig DeviceConfig;
@@ -168,6 +169,20 @@ static void loadSavedDeviceConfigs()
             strcpy(DeviceConfig.wifi_sta_ssid, config["apn"]);
             strcpy(DeviceConfig.wifi_sta_pwd, config["apnPwd"]);
         }
+    }
+    if (config["simPin"] != nullptr)
+    {
+        if (config["simPin"] != "")
+        {
+            strcpy(DeviceConfig.sim_pin, config["simPin"]);
+        }
+    }
+    if (config["powerSaver"] != nullptr)
+    {
+        if (config["powerSaver"] == "on")
+            DeviceConfig.power_saving_mode = true;
+        else
+            DeviceConfig.power_saving_mode = false;
     }
 }
 

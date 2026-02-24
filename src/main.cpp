@@ -19,7 +19,7 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gideon Maina
- * @date 2026-02-09
+ * @date 2026-02-24
  * @version 1.3.0
  *
  * @dependencies
@@ -130,14 +130,6 @@ struct GSMRuntimeInfo GSMRuntimeInfo;
 JsonDocument gsm_info;
 struct DeviceConfigState DeviceConfigState;
 struct DeviceConfig DeviceConfig;
-struct InitialConfigs
-{
-    char wifi_ssid[64];
-    char wifi_password[64];
-    char gsm_apn[64];
-    char sim_pin[8];
-    bool power_saving_mode;
-};
 
 // WiFi credentials
 char AP_SSID[64];
@@ -164,6 +156,7 @@ void resetLogger(LOGGER &logger);
 void sendFromMemoryLog(LOGGER &logger);
 void captureGSMInfo();
 bool wifiConnect(); // ToDo: Refactor similar function existing in /utils/wifi.h
+void loadInitialConfigs();
 
 enum Month
 {
@@ -213,6 +206,8 @@ void setup()
     pms.sleep();
     dht.setType(DHTTYPE);
 
+    loadInitialConfigs(); // from global config file after compilation
+
     if (!LittleFS.begin(true))
     {
         Serial.println("An error has occurred while mounting LittleFS");
@@ -259,7 +254,7 @@ void setup()
     }
 
     // ToDo: go ahead and apply device configs. Check the default power saving mode and set default configs.
-    loadSavedDeviceConfigs();
+    loadSavedDeviceConfigs(); // Override initial configs
 
     // ToDo: Check if WiFi is needed by user
     // ToDO: Connect to WiFi.
@@ -364,25 +359,26 @@ void loop()
     unsigned sum_send_time = 0;
     act_milli = millis();
 
-#if defined(POWER_SAVING_MODE)
-
-    if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
+    if (DeviceConfig.power_saving_mode)
     {
-        getPMSREADINGS();
-        readDHT();
-        last_read_sensors_data = millis();
+        if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
+        {
+            getPMSREADINGS();
+            readDHT();
+            last_read_sensors_data = millis();
+        }
     }
-
-#else
-    send_now = act_milli - starttime > sending_intervall_ms;
-
-    if (act_milli - last_read_sensors_data > sampling_interval)
+    else
     {
-        getPMSREADINGS();
-        readDHT();
-        last_read_sensors_data = millis();
+        send_now = act_milli - starttime > sending_intervall_ms;
+
+        if (act_milli - last_read_sensors_data > sampling_interval)
+        {
+            getPMSREADINGS();
+            readDHT();
+            last_read_sensors_data = millis();
+        }
     }
-#endif
 
     if (send_now)
     {
@@ -1211,4 +1207,27 @@ bool wifiConnect()
     }
 
     return wifi_connected;
+}
+
+void loadInitialConfigs()
+{
+
+#if defined(POWER_SAVING_MODE)
+    DeviceConfig.power_saving_mode = POWER_SAVING_MODE;
+#endif
+#if defined(GSM_APN)
+    DeviceConfig.gsm_apn = GSM_APN;
+#endif
+#if defined(GSM_APN_PWD)
+    DeviceConfig.gsm_apn_pwd = GSM_APN_PWD;
+#endif
+#if defined(WIFI_STA_SSID)
+    DeviceConfig.wifi_sta_ssid = WIFI_STA_SSID;
+#endif
+#if defined(WIFI_STA_PWD)
+    DeviceConfig.wifi_sta_pwd = WIFI_STA_PWD;
+#endif
+#if defined(SIM_PIN)
+    DeviceConfig.sim_pin = SIM_PIN;
+#endif
 }
