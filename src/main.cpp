@@ -257,16 +257,13 @@ void setup()
         startCaptivePortal(DeviceConfigState.captivePortalAccessed, DeviceConfigState.captivePortalStartTime, DeviceConfigState.captivePortalTimeoutMs);
     }
 
-    else
-    {
-
-        // ToDo: go ahead and apply device configs. Check the default power saving mode and set default configs.
-        loadSavedDeviceConfigs();
-    }
+    // ToDo: go ahead and apply device configs. Check the default power saving mode and set default configs.
+    loadSavedDeviceConfigs();
 
     // ToDo: Check if WiFi is needed by user
     // ToDO: Connect to WiFi.
-    WiFi.softAP(AP_SSID, AP_PWD); // start AP anyway
+    WiFi.softAP(AP_SSID, AP_PWD); // start AP & webserver anyway
+    setup_webserver();
 
     char debug_wifi_conn[128];
 
