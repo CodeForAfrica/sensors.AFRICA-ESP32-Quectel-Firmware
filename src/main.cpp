@@ -1173,7 +1173,7 @@ void captureGSMInfo()
 
 bool wifiConnect()
 {
-    if (DeviceConfig.wifi_sta_ssid == "")
+    if (DeviceConfig.wifi_sta_ssid[0] == '\0')
     {
         Serial.println("DeviceConfig wifi ssid empty!");
         return false;
