@@ -134,6 +134,7 @@ struct DeviceConfig DeviceConfig;
 // WiFi credentials
 char AP_SSID[64];
 const char *AP_PWD = "admin@sensors.cfa";
+JsonDocument wifi_info;
 
 void readDHT();
 void getPMSREADINGS();
@@ -155,8 +156,9 @@ void fileDataLog(LOGGER &logger);
 void resetLogger(LOGGER &logger);
 void sendFromMemoryLog(LOGGER &logger);
 void captureGSMInfo();
-bool wifiConnect(); // ToDo: Refactor similar function existing in /utils/wifi.h
+void captureWiFiInfo();
 void loadInitialConfigs();
+void configDeviceFromWiFiConn(); //? get a better name
 
 enum Month
 {
@@ -261,17 +263,29 @@ void setup()
 
     // ToDo: Refactor the following logic to a function that checks the communication options in order of priority and connects to the available one. For example, if WiFi is available and has higher priority, connect to it. If not, check for GSM and connect to it if available. This will make the code cleaner and more maintainable, especially as we add support for more communication options in the future.
 
-    //  ToDo: Check if WiFi is needed by user
-
-    if (DeviceConfigState.useWiFi && CommunicationPriority::WIFI == 0)
+    if (DeviceConfig.useWiFi && CommunicationPriority::WIFI == 0)
     {
-        DeviceConfigState.state = ConfigurationState::CONFIG_WIFI;
-        DeviceConfigState.wifiConnected = wifiConnect();
+        if (DeviceConfig.wifi_sta_ssid[0] == '\0')
+        {
+            Serial.println("DeviceConfig wifi ssid empty!");
+        }
+        else
+        {
+            DeviceConfigState.state = ConfigurationState::CONFIG_WIFI;
+            DeviceConfigState.wifiConnected = wifiConnect(DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
 
-        // ToDO: Capture WiFi info such as signal strength, network name, etc. This can be useful for debugging and monitoring the device's connectivity status. We can create a function similar to captureGSMInfo() that captures relevant WiFi information and stores it in a global variable or struct for later use.
+            // wifiConnect already checks for internet; record it for diagnostics
+            DeviceConfigState.wifiInternetAvailable = DeviceConfigState.wifiConnected;
+            DeviceConfigState.internetAvailable = DeviceConfigState.wifiInternetAvailable || DeviceConfigState.gsmInternetAvailable;
+
+            if (DeviceConfigState.wifiConnected)
+            {
+                configDeviceFromWiFiConn();
+            }
+        }
     }
 
-    if ((DeviceConfigState.useGSM && CommunicationPriority::GSM == 0) || (!DeviceConfig.useWiFi || !DeviceConfigState.wifiConnected)) // ToDo: Only connect to GSM if WiFi is not connected or not prioritized or no WiFi internet during initialization.
+    if ((DeviceConfig.useGSM && CommunicationPriority::GSM == 0) || (!DeviceConfig.useWiFi || !DeviceConfigState.wifiConnected)) // ToDo: Only connect to GSM if WiFi is not connected or not prioritized or no WiFi internet during initialization.
     {
         if (GSM_Serial_begin())
         {
@@ -1178,42 +1192,24 @@ void captureGSMInfo()
     gsm_info["IMEI"] = GSMRuntimeInfo.imei = getIMEI();
 }
 
-bool wifiConnect()
+void configDeviceFromWiFiConn()
 {
-    if (DeviceConfig.wifi_sta_ssid[0] == '\0')
-    {
-        Serial.println("DeviceConfig wifi ssid empty!");
-        return false;
-    }
 
-    bool wifi_connected;
-    char debug_wifi_conn[128];
+    captureWiFiInfo();
 
-    snprintf(debug_wifi_conn, 128, "Attempting WiFi connection to SSID: %s and PWD: %s", DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
-    Serial.println(debug_wifi_conn);
+    // synchronise system clock over NTP
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    time_t now = time(nullptr);
+    RTC.setTime(now);
+    initCalender(RTC.getYear(), RTC.getMonth() + 1);
+}
 
-    WiFi.begin(DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
-    unsigned long wifi_conn_start = millis();
-    unsigned long wifi_conn_timeout = 60000;
-
-    while (WiFi.status() != WL_CONNECTED && (millis() - wifi_conn_start < wifi_conn_timeout))
-    {
-        Serial.print('.');
-        delay(1000);
-    }
-
-    wifi_connected = (WiFi.status() == WL_CONNECTED);
-    if (!wifi_connected)
-    {
-        Serial.println("\nFailed to connect to WiFi hotspot");
-    }
-    else
-    {
-        snprintf(debug_wifi_conn, 128, "\nWiFi hotspot connected! Local IP: %s", WiFi.localIP().toString().c_str());
-        Serial.println(debug_wifi_conn);
-    }
-
-    return wifi_connected;
+void captureWiFiInfo()
+{
+    wifi_info["SSID"] = WiFi.SSID();
+    wifi_info["BSSID"] = WiFi.BSSIDstr();
+    wifi_info["Signal Strength"] = WiFi.RSSI();
+    wifi_info["IP Address"] = WiFi.localIP().toString();
 }
 
 void loadInitialConfigs()
@@ -1244,7 +1240,7 @@ void loadInitialConfigs()
     DeviceConfig.useWiFi = use_wifi;
 
     if (!DeviceConfig.useWiFi && !DeviceConfig.useGSM)
-        DeviceConfig.configurationRequied = true;
+        DeviceConfigState.configurationRequired = true;
 
     // if (DeviceConfig.power_saving_mode)
     //     {
