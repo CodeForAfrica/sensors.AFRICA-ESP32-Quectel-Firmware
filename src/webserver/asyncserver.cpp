@@ -82,7 +82,7 @@ void setup_webserver()
                 return;
               }
               request->send(200, "application/json", "{\"status\":\"Config received\"}");
-              
+              DeviceConfigState.captivePortalAccessed = true; // Mark captive portal as accessed when config is saved
               saveConfig(new_config); });
 
   server.on("/sensor-data", HTTP_GET, [](AsyncWebServerRequest *request)
