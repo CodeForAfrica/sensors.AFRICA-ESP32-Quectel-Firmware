@@ -20,7 +20,7 @@
  *
  * @author Gideon Maina
  * @date 2026-02-24
- * @version 1.3.0
+ * @version 1.3.1
  *
  * @dependencies
  * - ArduinoJson
@@ -216,7 +216,7 @@ void setup()
     {
         Serial.println("LittleFS mounted successfully");
 
-        // Step 1: Load existing config from LittleFS
+        // Step 1: Load existing config from LittleFS // ToDo: Refactor this to a function and call it in the captive portal flow as well after user submits config form. This is to ensure that we always have the latest config in memory, especially after user updates it via captive portal.
         String existingConfig = readFile(LittleFS, "/config.json");
         if (existingConfig != "" && validateJson(existingConfig.c_str()))
         {
@@ -256,15 +256,22 @@ void setup()
     // ToDo: go ahead and apply device configs. Check the default power saving mode and set default configs.
     loadSavedDeviceConfigs(); // Override initial configs
 
-    // ToDo: Check if WiFi is needed by user
-    // ToDO: Connect to WiFi.
     WiFi.softAP(AP_SSID, AP_PWD); // start AP & webserver anyway
     setup_webserver();
 
-    DeviceConfigState.state = ConfigurationState::CONFIG_WIFI;
-    DeviceConfigState.wifiConnected = wifiConnect();
+    // ToDo: Refactor the following logic to a function that checks the communication options in order of priority and connects to the available one. For example, if WiFi is available and has higher priority, connect to it. If not, check for GSM and connect to it if available. This will make the code cleaner and more maintainable, especially as we add support for more communication options in the future.
 
-    if (gsm_capable)
+    //  ToDo: Check if WiFi is needed by user
+
+    if (DeviceConfigState.useWiFi && CommunicationPriority::WIFI == 0)
+    {
+        DeviceConfigState.state = ConfigurationState::CONFIG_WIFI;
+        DeviceConfigState.wifiConnected = wifiConnect();
+
+        // ToDO: Capture WiFi info such as signal strength, network name, etc. This can be useful for debugging and monitoring the device's connectivity status. We can create a function similar to captureGSMInfo() that captures relevant WiFi information and stores it in a global variable or struct for later use.
+    }
+
+    if ((DeviceConfigState.useGSM && CommunicationPriority::GSM == 0) || (!DeviceConfig.useWiFi || !DeviceConfigState.wifiConnected)) // ToDo: Only connect to GSM if WiFi is not connected or not prioritized or no WiFi internet during initialization.
     {
         if (GSM_Serial_begin())
         {
@@ -1230,4 +1237,23 @@ void loadInitialConfigs()
 #if defined(SIM_PIN)
     DeviceConfig.sim_pin = SIM_PIN;
 #endif
+
+    if (gsm_capable)
+        DeviceConfig.useGSM = use_gsm;
+
+    DeviceConfig.useWiFi = use_wifi;
+
+    if (!DeviceConfig.useWiFi && !DeviceConfig.useGSM)
+        DeviceConfig.configurationRequied = true;
+
+    // if (DeviceConfig.power_saving_mode)
+    //     {
+    //         sampling_interval = 15 * 60 * 1000; // 15 minutes
+    //         sending_intervall_ms = 60 * 60 * 1000; // 1 hour
+    //     }
+    // else
+    //     {
+    //         sampling_interval = 1 * 60 * 1000; // 1 minute
+    //         sending_intervall_ms = 5 * 60 * 1000; // 5 minutes
+    //     }
 }

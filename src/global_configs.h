@@ -12,10 +12,19 @@ constexpr unsigned MED_STR = 256 - 1;
 constexpr unsigned LARGE_STR = 512 - 1;
 constexpr unsigned XLARGE_STR = 1024 - 1;
 
+// user predefined device configurations
 #define POWER_SAVING_MODE 1
 
 static bool gsm_capable = true;
 static bool use_wifi = false;
+static bool use_gsm = true;
+
+enum CommunicationPriority
+{
+    WIFI,
+    GSM,
+};
+
 #define GSM_DEBUG
 
 #define QUECTEL EC200CN

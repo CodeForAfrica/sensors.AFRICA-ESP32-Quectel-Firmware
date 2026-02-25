@@ -32,6 +32,10 @@ struct DeviceConfigState
     bool configurationRequired;           // False if valid config exists
     bool captivePortalAccessed;           // Tracks if user accessed it
     bool wifiConnected = false;
+    bool gsmConnected = false;
+    bool wifiInternetAvailable = false;
+    bool gsmInternetAvailable = false;
+    bool internetAvailable = false;
 };
 
 extern struct DeviceConfigState DeviceConfigState;
@@ -44,6 +48,8 @@ struct DeviceConfig
     char gsm_apn_pwd[32] = {};
     char sim_pin[5] = {};
     bool power_saving_mode = false;
+    bool useWiFi;
+    bool useGSM;
 };
 
 extern struct DeviceConfig DeviceConfig;
