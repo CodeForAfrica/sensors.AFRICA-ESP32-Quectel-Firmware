@@ -152,7 +152,7 @@ static void saveConfig(JsonDocument &doc)
 static void loadSavedDeviceConfigs()
 {
 
-    JsonDocument config = getDeviceConfig(); // {"ssid":"myssid ","wifiPwd":"mypwd","apn":"myapn","apn_pwd":"myapnpwd","powerSaver":"off"}
+    JsonDocument config = getDeviceConfig(); // {"ssid":"myssid ","wifiPwd":"mypwd","apn":"myapn","apnPwd":"myapnpwd","powerSaver":"off"}
 
     auto hasString = [&](JsonVariant v)
     {
@@ -169,8 +169,8 @@ static void loadSavedDeviceConfigs()
     if (hasString(config["apn"]))
     {
         strcpy(DeviceConfig.gsm_apn, config["apn"]);
-        if (hasString(config["apn_pwd"]))
-            strcpy(DeviceConfig.gsm_apn_pwd, config["apn_pwd"]);
+        if (hasString(config["apnPwd"]))
+            strcpy(DeviceConfig.gsm_apn_pwd, config["apnPwd"]);
     }
 
     if (hasString(config["simPin"]))
@@ -188,64 +188,3 @@ static void loadSavedDeviceConfigs()
 }
 
 #endif
-
-// static void loadSavedDeviceConfigs()
-// {
-
-//     JsonDocument config = getDeviceConfig();
-
-//     // helper lambda that returns true if a variant contains a non‑empty string
-//     auto hasString = [&](JsonVariant v)
-//     {
-//         return !v.isNull() && v.is<const char *>() && v.as<const char *>()[0] != '\0';
-//     };
-
-//     // ---------- wifi credentials ----------
-//     if (hasString(config["ssid"]))
-//     {
-//         Serial.println("SSID found");
-//         Serial.println("configuring wifi");
-//         strcpy(DeviceConfig.wifi_sta_ssid, config["ssid"].as<const char *>());
-//         if (hasString(config["wifiPwd"]))
-//             strcpy(DeviceConfig.wifi_sta_pwd, config["wifiPwd"].as<const char *>());
-//     }
-
-//     // ---------- gsm/apn ---------
-//     if (hasString(config["apn"]))
-//     {
-//         Serial.println("apn found");
-//         Serial.println("configuring gsm");
-//         strcpy(DeviceConfig.gsm_apn, config["apn"].as<const char *>());
-//         if (hasString(config["apn_pwd"]))
-//             strcpy(DeviceConfig.gsm_apn_pwd, config["apn_pwd"].as<const char *>());
-//     }
-
-//     // ---------- sim pin ----------
-//     if (hasString(config["simPin"]))
-//     {
-//         Serial.println("SIM pin found");
-//         Serial.println("configuring sim");
-//         strcpy(DeviceConfig.sim_pin, config["simPin"].as<const char *>());
-//     }
-//     else
-//     {
-//         Serial.println("SIM pin not found or invalid");
-//     }
-
-//     // ---------- power saver ----------
-//     if (!config["powerSaver"].isNull())
-//     {
-//         Serial.println("Power saver found");
-//         if (config["powerSaver"] == "on")
-//         {
-//             Serial.println("configuring powersaver");
-//             DeviceConfig.power_saving_mode = true;
-//         }
-//         else
-//             DeviceConfig.power_saving_mode = false;
-//     }
-//     else
-//     {
-//         Serial.println("Power saver not found");
-//     }
-// }
