@@ -160,6 +160,7 @@ void captureWiFiInfo();
 void loadInitialConfigs();
 void configDeviceFromWiFiConn(); //? get a better name
 
+void listenSerial();
 enum Month
 {
     _JAN = 1,
@@ -377,6 +378,9 @@ void setup()
 // ToDo: introduce ESP light sleep mode
 void loop()
 {
+#if defined(SERIAL_DEBUG) && SERIAL_DEBUG
+    listenSerial();
+#endif
     unsigned sum_send_time = 0;
     act_milli = millis();
 
@@ -1252,4 +1256,33 @@ void loadInitialConfigs()
     //         sampling_interval = 1 * 60 * 1000; // 1 minute
     //         sending_intervall_ms = 5 * 60 * 1000; // 5 minutes
     //     }
+}
+
+void listenSerial()
+{
+    if (Serial.available() > 0)
+    {
+        String command = Serial.readStringUntil('\n');
+        command.trim();
+
+        if (command == "restart")
+        {
+            Serial.println("Restarting device...");
+            ESP.restart();
+        }
+        else if (command == "sendNow")
+        {
+            Serial.println("Triggering data send...");
+            send_now = true;
+        }
+        else if (command == "clearConfig")
+        {
+            Serial.println("Clearing device config...");
+            deleteFile(LittleFS, "/config.json");
+        }
+        else
+        {
+            Serial.println("Unknown command: " + command);
+        }
+    }
 }

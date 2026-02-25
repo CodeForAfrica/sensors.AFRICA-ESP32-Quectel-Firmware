@@ -16,7 +16,7 @@ constexpr unsigned XLARGE_STR = 1024 - 1;
 #define POWER_SAVING_MODE 1
 
 static bool gsm_capable = true;
-static bool use_wifi = false;
+static bool use_wifi = true;
 static bool use_gsm = true;
 
 enum CommunicationPriority
