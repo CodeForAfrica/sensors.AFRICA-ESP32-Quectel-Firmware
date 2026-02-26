@@ -19,8 +19,8 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gideon Maina
- * @date 2026-02-24
- * @version 1.3.1
+ * @date 2026-02-26
+ * @version 1.3.2
  *
  * @dependencies
  * - ArduinoJson
@@ -72,7 +72,7 @@ const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS * 28; // f
 
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
-int sampling_interval = 2 * 60 * 1000; // 5 minutes
+int sampling_interval = 5 * 60 * 1000; // 5 minutes
 unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
@@ -408,21 +408,13 @@ void loop()
     if (send_now)
     {
 
-        if (!GPRS_CONNECTED)
+        // Send data from memory loggers
+        sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
+        // send payloads from the files that stores data that failed posting previously
+        readSendDelete(SENSORS_FAILED_DATA_SEND_STORE_PATH);
+
+        if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
         {
-            GPRS_init();
-        }
-        else
-        {
-
-            // Send data from memory loggers
-            sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
-            // send payloads from the files that stores data that failed posting previously
-            readSendDelete(SENSORS_FAILED_DATA_SEND_STORE_PATH);
-
-            // Serial.println("Time for Sending (ms): " + String(sum_send_time));
-
-            // Serial.println("Sent data counts: " + count_sends);
             GSM_sleep();
         }
 
