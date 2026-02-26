@@ -269,7 +269,8 @@ bool register_to_network()
     bool registered_to_network = false;
     int retry_count = 0;
     int8_t status;
-    cycleNetworkMode(); //! Only useful when register_to_network is called [1] in while loop either infinetely or timeout longer than time take for the function to excute; or [2] called multiple times in the code; otherwise, can be removed to save time during initialization. To be reviewed and refactored in future iterations.
+    // cycleNetworkMode(); //! Only useful when register_to_network is called [1] in while loop either infinetely or timeout longer than time take for the function to excute; or [2] called multiple times in the code; otherwise, can be removed to save time during initialization. To be reviewed and refactored in future iterations.
+
     if (!sendAndCheck("AT+CREG=1\0", "OK"))
     {
         Serial.println("Manual network registration failed.");

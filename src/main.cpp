@@ -1311,11 +1311,15 @@ void configDeviceFromWiFiConn()
 
     captureWiFiInfo();
 
-    // synchronise system clock over NTP
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-    time_t now = time(nullptr);
-    RTC.setTime(now);
-    initCalender(RTC.getYear(), RTC.getMonth() + 1);
+    if (!DeviceConfigState.timeSet)
+    {
+        // synchronise system clock over NTP
+        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        time_t now = time(nullptr);
+        RTC.setTime(now);
+        initCalender(RTC.getYear(), RTC.getMonth() + 1);
+        DeviceConfigState.timeSet = true;
+    }
 }
 
 void captureWiFiInfo()
@@ -1346,12 +1350,27 @@ void initializeAndConfigGSM()
     // GSM initialization successful
     GSM_CONNECTED = true; // TODO: Refactor to remove global variable and use state struct instead
 
-    bool network_registered = register_to_network();
+    bool network_registered = false;
 
-    if (!network_registered)
+    if (setNetworkMode(NetMode::AUTO))
     {
-        Serial.println("Failed to register to GSM network");
-        return;
+        network_registered = register_to_network();
+    }
+    else if (setNetworkMode(NetMode::_2G))
+    {
+        network_registered = register_to_network();
+    }
+    else if (setNetworkMode(NetMode::_4G))
+    {
+        network_registered = register_to_network();
+    }
+    else
+    {
+        if (!network_registered)
+        {
+            Serial.println("Failed to register to GSM network");
+            return;
+        }
     }
 
     // GPRS initialization
@@ -1367,6 +1386,7 @@ void initializeAndConfigGSM()
             esp_datetime_tz = extractDateTime(String(time_buff));
             RTC.setTime(esp_datetime_tz.timestamp);
             initCalender(RTC.getYear(), RTC.getMonth() + 1);
+            DeviceConfigState.timeSet = true;
         }
         else
         {
