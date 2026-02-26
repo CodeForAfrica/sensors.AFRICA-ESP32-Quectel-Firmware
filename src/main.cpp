@@ -19,8 +19,8 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gideon Maina
- * @date 2026-02-24
- * @version 1.3.1
+ * @date 2026-02-26
+ * @version 1.3.2
  *
  * @dependencies
  * - ArduinoJson
@@ -72,7 +72,7 @@ const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS * 28; // f
 
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
-int sampling_interval = 2 * 60 * 1000; // 5 minutes
+int sampling_interval = 5 * 60 * 1000; // 5 minutes
 unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
@@ -160,6 +160,7 @@ void captureWiFiInfo();
 void loadInitialConfigs();
 void configDeviceFromWiFiConn(); //? get a better name
 
+void listenSerial();
 enum Month
 {
     _JAN = 1,
@@ -377,6 +378,9 @@ void setup()
 // ToDo: introduce ESP light sleep mode
 void loop()
 {
+#if defined(SERIAL_DEBUG) && SERIAL_DEBUG
+    listenSerial();
+#endif
     unsigned sum_send_time = 0;
     act_milli = millis();
 
@@ -404,21 +408,13 @@ void loop()
     if (send_now)
     {
 
-        if (!GPRS_CONNECTED)
+        // Send data from memory loggers
+        sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
+        // send payloads from the files that stores data that failed posting previously
+        readSendDelete(SENSORS_FAILED_DATA_SEND_STORE_PATH);
+
+        if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
         {
-            GPRS_init();
-        }
-        else
-        {
-
-            // Send data from memory loggers
-            sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
-            // send payloads from the files that stores data that failed posting previously
-            readSendDelete(SENSORS_FAILED_DATA_SEND_STORE_PATH);
-
-            // Serial.println("Time for Sending (ms): " + String(sum_send_time));
-
-            // Serial.println("Sent data counts: " + count_sends);
             GSM_sleep();
         }
 
@@ -779,19 +775,126 @@ String getRTCdatetimetz(const char *format, char *timezone)
 }
 
 /*****************************************************************
- * send data to rest api                                         *
+ * send data via WiFi                                            *
  *****************************************************************/
 /**
-    @brief: Send data to the server
+    @brief: Send data to the server via WiFi
     @param data : JSON payload to send
     @param _pin : pin number of the sensor as configured in the API
     @param host : host name of the server
     @param url : url path to send the data
     @return: true if data is sent successfully, false otherwise
 **/
-bool sendData(const char *data, const int _pin, const char *host, const char *url)
+bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const char *url)
 {
-    // unsigned long start_send = millis();
+    if (!DeviceConfigState.wifiConnected || !DeviceConfigState.wifiInternetAvailable)
+    {
+        Serial.println("WiFi not connected or no internet available");
+        return false;
+    }
+
+    WiFiClient client;
+    char pin[4];
+    itoa(_pin, pin, 10);
+
+    // Build HTTP request
+    char http_headers[3][40] = {};
+    strcat(http_headers[0], "X-PIN: ");
+    strcat(http_headers[0], pin);
+
+    strcat(http_headers[1], "X-Sensor: ");
+    strcat(http_headers[1], SENSOR_PREFIX);
+    strcat(http_headers[1], esp_chipid);
+    strcat(http_headers[2], "Content-Type: application/json");
+
+    // Connect to server
+    if (!client.connect(host, PORT_CFA))
+    {
+        Serial.println("WiFi: Failed to connect to server");
+        return false;
+    }
+
+    // Build HTTP POST request
+    String http_request = "POST ";
+    http_request += url;
+    http_request += " HTTP/1.1\r\n";
+    http_request += "Host: ";
+    http_request += host;
+    http_request += "\r\n";
+    http_request += "Content-Length: ";
+    http_request += strlen(data);
+    http_request += "\r\n";
+    http_request += http_headers[0]; // X-PIN
+    http_request += "\r\n";
+    http_request += http_headers[1]; // X-Sensor
+    http_request += "\r\n";
+    http_request += http_headers[2]; // Content-Type
+    http_request += "\r\n";
+    http_request += "Connection: close\r\n";
+    http_request += "\r\n";
+    http_request += data;
+
+    // Send the request
+    client.print(http_request);
+
+    // Wait for response and check status code
+    unsigned long timeout = millis() + 10000; // 10 second timeout
+    uint8_t statuscode = 0;
+    bool parsing_status = false;
+
+    while (client.connected() && millis() < timeout)
+    {
+        String line = client.readStringUntil('\n');
+        if (line.length() == 0)
+            break;
+
+        // Parse HTTP status code (first line: HTTP/1.1 200 OK)
+        if (!parsing_status && line.startsWith("HTTP/1."))
+        {
+            int space_pos = line.indexOf(' ');
+            if (space_pos > 0)
+            {
+                String status_str = line.substring(space_pos + 1, space_pos + 4);
+                statuscode = status_str.toInt();
+                parsing_status = true;
+                Serial.print("WiFi: HTTP Status Code: ");
+                Serial.println(statuscode);
+            }
+        }
+    }
+
+    client.stop();
+
+    if (statuscode == 200 || statuscode == 201)
+    {
+        Serial.println("WiFi: Data sent successfully");
+        return true;
+    }
+    else
+    {
+        Serial.println("WiFi: Data send failed with HTTP status: " + String(statuscode));
+        return false;
+    }
+}
+
+/*****************************************************************
+ * send data via GSM                                             *
+ *****************************************************************/
+/**
+    @brief: Send data to the server via GSM/GPRS
+    @param data : JSON payload to send
+    @param _pin : pin number of the sensor as configured in the API
+    @param host : host name of the server
+    @param url : url path to send the data
+    @return: true if data is sent successfully, false otherwise
+**/
+bool sendDataViaGSM(const char *data, const int _pin, const char *host, const char *url)
+{
+    if (!gsm_capable || !GPRS_CONNECTED)
+    {
+        Serial.println("GSM not capable or GPRS not connected");
+        return false;
+    }
 
     char gprs_url[64] = {};
     strcat(gprs_url, host);
@@ -800,43 +903,111 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
     char pin[4];
     itoa(_pin, pin, 10);
 
-    if (gsm_capable && GPRS_CONNECTED)
-    {
-
-        int retry_count = 0;
-        uint8_t statuscode = 0;
-        int16_t length;
-
 #ifdef QUECTEL
-        char Quectel_headers[3][40] = {};
-        strcat(Quectel_headers[0], "X-PIN: ");
-        strcat(Quectel_headers[0], pin);
+    uint8_t statuscode = 0;
 
-        strcat(Quectel_headers[1], "X-Sensor: ");
-        strcat(Quectel_headers[1], SENSOR_PREFIX);
-        strcat(Quectel_headers[1], esp_chipid);
-        strcat(Quectel_headers[2], "Content-Type: application/json");
+    char http_headers[3][40] = {};
+    strcat(http_headers[0], "X-PIN: ");
+    strcat(http_headers[0], pin);
 
-        // int header_size = sizeof(Quectel_headers) / sizeof(Quectel_headers[0]);
+    strcat(http_headers[1], "X-Sensor: ");
+    strcat(http_headers[1], SENSOR_PREFIX);
+    strcat(http_headers[1], esp_chipid);
+    strcat(http_headers[2], "Content-Type: application/json");
 
-        QUECTEL_POST(gprs_url, Quectel_headers, 3, data, strlen(data), statuscode);
+    QUECTEL_POST(gprs_url, http_headers, 3, data, strlen(data), statuscode);
 
-        if (!(statuscode == 200 || statuscode == 201))
-        {
-            return false;
-        }
-
-        // ToDo: close HTTP session/ PDP context
-#endif
+    if (statuscode == 200 || statuscode == 201)
+    {
+        Serial.println("GSM: Data sent successfully");
+        return true;
+    }
+    else
+    {
+        Serial.println("GSM: Data send failed with HTTP status: " + String(statuscode));
+        return false;
     }
 
-    // #if defined(ESP8266)
-    //     wdt_reset();
-    // #endif
-    //     yield();
-    //     return millis() - start_send;
+    // ToDo: close HTTP session/ PDP context
+#else
+    return false;
+#endif
+}
 
-    return true;
+/*****************************************************************
+ * send data to rest api with fallback                           *
+ *****************************************************************/
+/**
+    @brief: Send data to the server with communication priority and fallback
+    @param data : JSON payload to send
+    @param _pin : pin number of the sensor as configured in the API
+    @param host : host name of the server
+    @param url : url path to send the data
+    @return: true if data is sent successfully via any method, false otherwise
+    @note: Respects CommunicationPriority order and attempts fallback method if primary fails
+**/
+bool sendData(const char *data, const int _pin, const char *host, const char *url)
+{
+    bool send_result = false;
+
+    // Determine primary and secondary communication methods based on priority
+    if (CommunicationPriority::WIFI == 0) // WiFi has higher priority
+    {
+        Serial.println("\n=== Communication Priority: WiFi > GSM ===");
+
+        // Attempt WiFi first
+        if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected)
+        {
+            Serial.println("Attempting to send data via WiFi...");
+            send_result = sendDataViaWiFi(data, _pin, host, url);
+
+            if (send_result)
+            {
+                return true;
+            }
+            Serial.println("WiFi send failed, attempting GSM fallback...");
+        }
+
+        // Fallback to GSM if WiFi failed or unavailable
+        if (DeviceConfig.useGSM && GPRS_CONNECTED)
+        {
+            Serial.println("Attempting to send data via GSM (fallback)...");
+            send_result = sendDataViaGSM(data, _pin, host, url);
+            return send_result;
+        }
+    }
+    else if (CommunicationPriority::GSM == 0) // GSM has higher priority
+    {
+        Serial.println("\n=== Communication Priority: GSM > WiFi ===");
+
+        // Attempt GSM first
+        if (DeviceConfig.useGSM && GPRS_CONNECTED)
+        {
+            Serial.println("Attempting to send data via GSM...");
+            send_result = sendDataViaGSM(data, _pin, host, url);
+
+            if (send_result)
+            {
+                return true;
+            }
+            Serial.println("GSM send failed, attempting WiFi fallback...");
+        }
+
+        // Fallback to WiFi if GSM failed or unavailable
+        if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected)
+        {
+            Serial.println("Attempting to send data via WiFi (fallback)...");
+            send_result = sendDataViaWiFi(data, _pin, host, url);
+            return send_result;
+        }
+    }
+
+    if (!send_result)
+    {
+        Serial.println("Data transmission failed via all available methods");
+    }
+
+    return send_result;
 }
 
 void init_memory_loggers()
@@ -1252,4 +1423,33 @@ void loadInitialConfigs()
     //         sampling_interval = 1 * 60 * 1000; // 1 minute
     //         sending_intervall_ms = 5 * 60 * 1000; // 5 minutes
     //     }
+}
+
+void listenSerial()
+{
+    if (Serial.available() > 0)
+    {
+        String command = Serial.readStringUntil('\n');
+        command.trim();
+
+        if (command == "restart")
+        {
+            Serial.println("Restarting device...");
+            ESP.restart();
+        }
+        else if (command == "sendNow")
+        {
+            Serial.println("Triggering data send...");
+            send_now = true;
+        }
+        else if (command == "clearConfig")
+        {
+            Serial.println("Clearing device config...");
+            deleteFile(LittleFS, "/config.json");
+        }
+        else
+        {
+            Serial.println("Unknown command: " + command);
+        }
+    }
 }

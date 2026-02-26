@@ -109,12 +109,13 @@ static void saveConfig(JsonDocument &doc)
     };
 
     const char *new_config_file = "/config.json.new";
-    listFiles(LittleFS);
-    String existing = readFile(LittleFS, "/config.json");
     String incoming;
-
-    Serial.println("\nExisting config: ");
-    Serial.println(existing);
+    String existing = readFile(LittleFS, "/config.json");
+    if (existing != "")
+    {
+        Serial.println("\nExisting config: ");
+        Serial.println(existing);
+    };
     Serial.println("\nIncoming doc");
     serializeJsonPretty(doc, incoming);
     Serial.println(incoming);
@@ -122,7 +123,7 @@ static void saveConfig(JsonDocument &doc)
     // If there is no existing config or it's invalid, just write the passed doc
     if (existing == "" || !validateJson(existing.c_str())) // ToDo: reduce this with either validateJson or DeserializationError
     {
-        Serial.println("Invalid or empty json");
+        Serial.println("Invalid or empty json. Writing incoming config as new config");
         const char *c_string = incoming.c_str();
         writeFile(LittleFS, "/config.json", c_string);
         return;
@@ -130,9 +131,9 @@ static void saveConfig(JsonDocument &doc)
 
     JsonDocument existingDoc;
     DeserializationError err = deserializeJson(existingDoc, existing);
-    if (err)
+    if (err) //! Same thing as above ideally. Just an extra validation step. ToDo: reduce this with either validateJson or DeserializationError
     {
-        Serial.println("\nDeserialization Error on existing doc");
+        Serial.println("\nDeserialization Error on existing doc. Writing incoming config as new config");
         // Fallback: write the passed doc if existing couldn't be parsed //! Use this validaters with caution, they have failed in some tests.
         const char *c_string = incoming.c_str();
         writeFile(LittleFS, "/config.json", c_string);
