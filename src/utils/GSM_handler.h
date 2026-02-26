@@ -269,55 +269,43 @@ bool register_to_network()
     bool registered_to_network = false;
     int retry_count = 0;
     int8_t status;
-    cycleNetworkMode();
+    cycleNetworkMode(); //! Only useful when register_to_network is called [1] in while loop either infinetely or timeout longer than time take for the function to excute; or [2] called multiple times in the code; otherwise, can be removed to save time during initialization. To be reviewed and refactored in future iterations.
     if (!sendAndCheck("AT+CREG=1\0", "OK"))
     {
         Serial.println("Manual network registration failed.");
     }
-    while (!registered_to_network && retry_count < 20)
+
+    do
+    {
+        status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
+        if (status == NetRegStatus::REGISTERED_TO_HOME_NETWORK || status == NetRegStatus::REGISTERED_ROAMING)
+        {
+            registered_to_network = true;
+            return registered_to_network;
+        }
+        else
+        {
+            Serial.println(NET_STATUS_VERBOSE[status]);
+        }
+    } while (!registered_to_network && retry_count < 20);
     {
         status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
 
         if (status == NetRegStatus::REGISTERED_TO_HOME_NETWORK || status == NetRegStatus::REGISTERED_ROAMING)
         {
             registered_to_network = true;
-            break;
         }
 
         else
         {
-            Serial.print(NET_STATUS_VERBOSE[status]);
+            Serial.print(".");
         }
 
         retry_count++;
         delay(3000);
     }
 
-    if (!registered_to_network)
-    {
-        error_msg = NET_STATUS_VERBOSE[status];
-        GSM_INIT_ERROR = error_msg;
-        REGISTER_TO_NETWORK_FAIL += 1;
-
-        // Attempt to enable network registration
-
-        if (!sendAndCheck("AT+CREG=1\0", "OK"))
-        {
-            Serial.println("Manual network registration failed.");
-        }
-
-        if (REGISTER_TO_NETWORK_FAIL > 5)
-        {
-            GSM_soft_reset();
-            //? Check if the SIM card is still there?
-            REGISTER_TO_NETWORK_FAIL = 0;
-        }
-        return false;
-    }
-
-    sendAndCheck("AT+COPS?", "OK");
-
-    return true;
+    return registered_to_network;
 }
 
 // static void unlock_pin(char *PIN)
@@ -448,13 +436,14 @@ bool GPRS_init()
     // "AT+SAPBR=1,1"
     // "AT+QCFG=\"gprsattach\",1"
 #endif
-
     if (!GPRS_CONNECTED)
     {
+        Serial.println("Failed to init GPRS");
         GPRS_INIT_FAIL_COUNT += 1;
     }
     else
     {
+        Serial.println("GPRS initialized!");
         http_preconfig();
     }
     return GPRS_CONNECTED;
@@ -1080,6 +1069,7 @@ bool GSM_Serial_begin()
     }
     if (!comm_init)
     {
+        Serial.println("Failed to establish communication with GSM module");
         return false;
     }
 

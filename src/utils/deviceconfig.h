@@ -36,6 +36,7 @@ struct DeviceConfigState
     bool wifiInternetAvailable = false;
     bool gsmInternetAvailable = false;
     bool internetAvailable = false;
+    bool timeSet = false;
 };
 
 extern struct DeviceConfigState DeviceConfigState;

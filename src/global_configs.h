@@ -7,11 +7,6 @@ static const char URL_CFA[] = "/v1/push-sensor-data/";
 
 static const char SENSOR_PREFIX[] = "ESP32-";
 
-constexpr unsigned SMALL_STR = 64 - 1;
-constexpr unsigned MED_STR = 256 - 1;
-constexpr unsigned LARGE_STR = 512 - 1;
-constexpr unsigned XLARGE_STR = 1024 - 1;
-
 // user predefined device configurations
 #define POWER_SAVING_MODE 1
 
@@ -25,7 +20,7 @@ enum CommunicationPriority
     GSM,
 };
 
-#define GSM_DEBUG
+#define GSM_DEBUG true
 
 #define QUECTEL EC200CN
 

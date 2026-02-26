@@ -159,8 +159,9 @@ void captureGSMInfo();
 void captureWiFiInfo();
 void loadInitialConfigs();
 void configDeviceFromWiFiConn(); //? get a better name
-
+void initializeAndConfigGSM();
 void listenSerial();
+
 enum Month
 {
     _JAN = 1,
@@ -288,64 +289,7 @@ void setup()
 
     if ((DeviceConfig.useGSM && CommunicationPriority::GSM == 0) || (!DeviceConfig.useWiFi || !DeviceConfigState.wifiConnected)) // ToDo: Only connect to GSM if WiFi is not connected or not prioritized or no WiFi internet during initialization.
     {
-        if (GSM_Serial_begin())
-        {
-
-            if (!GSM_init())
-            {
-                Serial.println("GSM not fully configured");
-                Serial.print("Failure point: ");
-                Serial.println(GSM_INIT_ERROR);
-                Serial.println();
-                return;
-            }
-            else
-            {
-                GSM_CONNECTED = true;
-
-                while (!register_to_network()) // ! INFINITE LOOP!
-                {
-                    Serial.println("Retrying network registration...");
-                }
-
-                gsm_info["Network Name"] = getNetworkName();
-                gsm_info["Signal Strength"] = getSignalStrength();
-                gsm_info["Network Band"] = getNetworkBand();
-                gsm_info["SIM ICCID"] = SIM_CCID;
-
-                // GPRS init
-                if (!GPRS_init())
-                {
-                    Serial.println("Failed to init GPRS");
-                }
-                else
-                {
-                    Serial.println("GPRS initialized!");
-                }
-
-                if (getNetworkTime(time_buff))
-                {
-
-                    // update RTC time and calendar;
-                    Serial.println("GSM Network Time: " + String(time_buff));
-                    esp_datetime_tz = extractDateTime(String(time_buff));
-                    RTC.setTime(esp_datetime_tz.timestamp);
-                    initCalender(RTC.getYear(), RTC.getMonth() + 1);
-                }
-                else
-                {
-                    Serial.println("Failed to fetch time from network");
-                }
-            }
-
-            captureGSMInfo();
-
-            GSM_sleep();
-        }
-        else
-        {
-            Serial.println("Could not communicate to GSM module.");
-        }
+        initializeAndConfigGSM();
     }
 
     // else
@@ -381,7 +325,7 @@ void loop()
 #if defined(SERIAL_DEBUG) && SERIAL_DEBUG
     listenSerial();
 #endif
-    unsigned sum_send_time = 0;
+
     act_milli = millis();
 
     if (DeviceConfig.power_saving_mode)
@@ -521,7 +465,6 @@ void getPMSREADINGS()
     if (pms) // Successfull read
     {
         pms.sleep();
-        char read_time[32];
         String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
 
         // print the results
@@ -1381,6 +1324,57 @@ void captureWiFiInfo()
     wifi_info["BSSID"] = WiFi.BSSIDstr();
     wifi_info["Signal Strength"] = WiFi.RSSI();
     wifi_info["IP Address"] = WiFi.localIP().toString();
+}
+
+/**
+    @brief Initialize and configure GSM module
+    @details This function handles GSM serial initialization, GSM module initialization,
+             network registration with timeout, GPRS initialization, time fetching, and puts GSM to sleep.
+    @return : void
+**/
+void initializeAndConfigGSM()
+{
+    DeviceConfigState.state = ConfigurationState::CONFIG_GSM;
+    DeviceConfigState.gsmConnected = GSM_Serial_begin();
+
+    if (!DeviceConfigState.gsmConnected)
+        return;
+    DeviceConfigState.gsmConnected = !GSM_init();
+    if (!DeviceConfigState.gsmConnected)
+        return;
+
+    // GSM initialization successful
+    GSM_CONNECTED = true; // TODO: Refactor to remove global variable and use state struct instead
+
+    bool network_registered = register_to_network();
+
+    if (!network_registered)
+    {
+        Serial.println("Failed to register to GSM network");
+        return;
+    }
+
+    // GPRS initialization
+    DeviceConfigState.gsmInternetAvailable = GPRS_init();
+
+    // Fetch network time and update RTC
+    if (!DeviceConfigState.timeSet)
+    {
+        if (getNetworkTime(time_buff))
+        {
+            // Update RTC time and calendar
+            Serial.println("GSM Network Time: " + String(time_buff));
+            esp_datetime_tz = extractDateTime(String(time_buff));
+            RTC.setTime(esp_datetime_tz.timestamp);
+            initCalender(RTC.getYear(), RTC.getMonth() + 1);
+        }
+        else
+        {
+            Serial.println("Failed to fetch time from network");
+        }
+    }
+    captureGSMInfo();
+    GSM_sleep();
 }
 
 void loadInitialConfigs()

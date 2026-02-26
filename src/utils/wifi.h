@@ -78,30 +78,6 @@ static void wifiAPbegin(const char *WIFI_AP_ID, const char *WIFI_AP_PWD)
     dnsServer.start(53, "*", AP_IP); // 53 is port for DNS server
 }
 
-static void wifi_Config()
-{
-
-    // setup_webserver(); //? Call in different section like void setup()
-    unsigned time_for_wifi_config = 60000;
-
-    // 10 minutes timeout for wifi config
-    unsigned long last_page_load = millis();
-    while ((millis() - last_page_load) < time_for_wifi_config + 500)
-    {
-        dnsServer.processNextRequest();
-        // server.handleClient();
-        yield();
-    }
-
-    WiFi.softAPdisconnect(true);
-    WiFi.mode(WIFI_STA);
-
-    dnsServer.stop();
-    delay(100);
-
-    // WiFi.begin(cfg::wlanssid, cfg::wlanpwd);
-    // wificonfig_loop = false;
-}
 
 static void wifiAPstop()
 {
