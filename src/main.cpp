@@ -136,6 +136,48 @@ char AP_SSID[64];
 const char *AP_PWD = "admin@sensors.cfa";
 JsonDocument wifi_info;
 
+/**
+ * @brief Communication Manager State
+ * Tracks communication status, connectivity, and failover logic
+ */
+struct CommsManagerState
+{
+    enum PreferredComm
+    {
+        NONE = 0,
+        WIFI = 1,
+        GSM = 2
+    } preferredComm;
+
+    uint8_t wifiFailCount;
+    uint8_t gsmFailCount;
+    uint8_t MAX_RETRY_ATTEMPTS = 10;
+    unsigned long lastWiFiAttempt;
+    unsigned long lastGSMAttempt;
+    unsigned long lastConnectivityCheck; // Last ping check time
+    unsigned long reconnectInterval;     // Dynamic interval based on failures
+    bool allCommsUnavailable;
+    bool wifiOnline;
+    bool gsmOnline;
+    bool maxReconnectAttemptsReached;
+
+    // Initialize state
+    void init()
+    {
+        preferredComm = NONE;
+        wifiFailCount = 0;
+        gsmFailCount = 0;
+        lastWiFiAttempt = 0;
+        lastGSMAttempt = 0;
+        lastConnectivityCheck = 0;
+        reconnectInterval = 60000 * 5; // Start with 5min interval
+        allCommsUnavailable = false;
+        wifiOnline = false;
+        gsmOnline = false;
+        maxReconnectAttemptsReached = false;
+    }
+} CommsManagerState;
+
 void readDHT();
 void getPMSREADINGS();
 void printPM_values();
@@ -160,6 +202,11 @@ void captureWiFiInfo();
 void loadInitialConfigs();
 void configDeviceFromWiFiConn(); //? get a better name
 void initializeAndConfigGSM();
+void commsManager();
+bool isConnectivityAvailable();
+bool pingServer(const char *server, uint16_t port, uint16_t timeout_ms);
+void updateCommsPreference();
+void initComms();
 void listenSerial();
 
 enum Month
@@ -263,40 +310,7 @@ void setup()
     WiFi.softAP(AP_SSID, AP_PWD); // start AP & webserver anyway
     setup_webserver();
 
-    // ToDo: Refactor the following logic to a function that checks the communication options in order of priority and connects to the available one. For example, if WiFi is available and has higher priority, connect to it. If not, check for GSM and connect to it if available. This will make the code cleaner and more maintainable, especially as we add support for more communication options in the future.
-
-    if (DeviceConfig.useWiFi && CommunicationPriority::WIFI == 0)
-    {
-        if (DeviceConfig.wifi_sta_ssid[0] == '\0')
-        {
-            Serial.println("DeviceConfig wifi ssid empty!");
-        }
-        else
-        {
-            DeviceConfigState.state = ConfigurationState::CONFIG_WIFI;
-            DeviceConfigState.wifiConnected = wifiConnect(DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
-
-            // wifiConnect already checks for internet; record it for diagnostics
-            DeviceConfigState.wifiInternetAvailable = DeviceConfigState.wifiConnected;
-            DeviceConfigState.internetAvailable = DeviceConfigState.wifiInternetAvailable || DeviceConfigState.gsmInternetAvailable;
-
-            if (DeviceConfigState.wifiConnected)
-            {
-                configDeviceFromWiFiConn();
-            }
-        }
-    }
-
-    if ((DeviceConfig.useGSM && CommunicationPriority::GSM == 0) || (!DeviceConfig.useWiFi || !DeviceConfigState.wifiConnected)) // ToDo: Only connect to GSM if WiFi is not connected or not prioritized or no WiFi internet during initialization.
-    {
-        initializeAndConfigGSM();
-    }
-
-    // else
-    // {
-    //     // connectWifi();
-    //     Serial.println("Support for other network connections not yet implemented");
-    // }
+    initComms();
 
 // SD INIT
 #ifdef REASSIGN_PINS
@@ -326,6 +340,9 @@ void loop()
     listenSerial();
 #endif
 
+    // Manage communication device and connectivity state
+    commsManager();
+
     act_milli = millis();
 
     if (DeviceConfig.power_saving_mode)
@@ -349,7 +366,7 @@ void loop()
         }
     }
 
-    if (send_now)
+    if (send_now && CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE)
     {
 
         // Send data from memory loggers
@@ -893,61 +910,97 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
 {
     bool send_result = false;
 
-    // Determine primary and secondary communication methods based on priority
-    if (CommunicationPriority::WIFI == 0) // WiFi has higher priority
+    // Check if any communication method is available
+    if (CommsManagerState.allCommsUnavailable)
     {
-        Serial.println("\n=== Communication Priority: WiFi > GSM ===");
-
-        // Attempt WiFi first
-        if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected)
-        {
-            Serial.println("Attempting to send data via WiFi...");
-            send_result = sendDataViaWiFi(data, _pin, host, url);
-
-            if (send_result)
-            {
-                return true;
-            }
-            Serial.println("WiFi send failed, attempting GSM fallback...");
-        }
-
-        // Fallback to GSM if WiFi failed or unavailable
-        if (DeviceConfig.useGSM && GPRS_CONNECTED)
-        {
-            Serial.println("Attempting to send data via GSM (fallback)...");
-            send_result = sendDataViaGSM(data, _pin, host, url);
-            return send_result;
-        }
+        Serial.println("SendData: All communication methods are unavailable - data will be stored for later transmission");
+        return false;
     }
-    else if (CommunicationPriority::GSM == 0) // GSM has higher priority
-    {
-        Serial.println("\n=== Communication Priority: GSM > WiFi ===");
 
-        // Attempt GSM first
-        if (DeviceConfig.useGSM && GPRS_CONNECTED)
+    // Use preferred communication method determined by CommsManager
+    switch (CommsManagerState.preferredComm)
+    {
+    case CommsManagerState.PreferredComm::WIFI:
+        if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
         {
-            Serial.println("Attempting to send data via GSM...");
+            Serial.println("SendData: Attempting WiFi (preferred)...");
+            send_result = sendDataViaWiFi(data, _pin, host, url);
+
+            if (send_result)
+            {
+                return true;
+            }
+
+            // WiFi failed, try GSM fallback
+            CommsManagerState.wifiFailCount++;
+            Serial.println("SendData: WiFi failed, attempting GSM fallback...");
+
+            if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
+            {
+                send_result = sendDataViaGSM(data, _pin, host, url);
+                if (send_result)
+                {
+                    CommsManagerState.wifiFailCount = 0; // Reset on success
+                    return true;
+                }
+                CommsManagerState.gsmFailCount++;
+            }
+        }
+        break;
+
+    case CommsManagerState.PreferredComm::GSM:
+        if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
+        {
+            Serial.println("SendData: Attempting GSM (preferred)...");
             send_result = sendDataViaGSM(data, _pin, host, url);
 
             if (send_result)
             {
                 return true;
             }
-            Serial.println("GSM send failed, attempting WiFi fallback...");
+
+            // GSM failed, try WiFi fallback
+            CommsManagerState.gsmFailCount++;
+            Serial.println("SendData: GSM failed, attempting WiFi fallback...");
+
+            if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
+            {
+                send_result = sendDataViaWiFi(data, _pin, host, url);
+                if (send_result)
+                {
+                    CommsManagerState.gsmFailCount = 0; // Reset on success
+                    return true;
+                }
+                CommsManagerState.wifiFailCount++;
+            }
+        }
+        break;
+
+    case CommsManagerState.PreferredComm::NONE:
+        // No preferred comms available, attempt either if configured
+        if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
+        {
+            Serial.println("SendData: Attempting WiFi (no preferred)...");
+            send_result = sendDataViaWiFi(data, _pin, host, url);
+            if (send_result)
+                return true;
+            CommsManagerState.wifiFailCount++;
         }
 
-        // Fallback to WiFi if GSM failed or unavailable
-        if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected)
+        if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
         {
-            Serial.println("Attempting to send data via WiFi (fallback)...");
-            send_result = sendDataViaWiFi(data, _pin, host, url);
-            return send_result;
+            Serial.println("SendData: Attempting GSM (no preferred)...");
+            send_result = sendDataViaGSM(data, _pin, host, url);
+            if (send_result)
+                return true;
+            CommsManagerState.gsmFailCount++;
         }
+        break;
     }
 
     if (!send_result)
     {
-        Serial.println("Data transmission failed via all available methods");
+        Serial.println("SendData: Data transmission failed via all available methods - will retry later");
     }
 
     return send_result;
@@ -1343,7 +1396,7 @@ void initializeAndConfigGSM()
 
     if (!DeviceConfigState.gsmConnected)
         return;
-    DeviceConfigState.gsmConnected = !GSM_init();
+    DeviceConfigState.gsmConnected = GSM_init();
     if (!DeviceConfigState.gsmConnected)
         return;
 
@@ -1375,6 +1428,8 @@ void initializeAndConfigGSM()
 
     // GPRS initialization
     DeviceConfigState.gsmInternetAvailable = GPRS_init();
+    CommsManagerState.gsmOnline = DeviceConfigState.gsmInternetAvailable;
+    CommsManagerState.allCommsUnavailable = !DeviceConfigState.gsmInternetAvailable;
 
     // Fetch network time and update RTC
     if (!DeviceConfigState.timeSet)
@@ -1437,6 +1492,345 @@ void loadInitialConfigs()
     //         sampling_interval = 1 * 60 * 1000; // 1 minute
     //         sending_intervall_ms = 5 * 60 * 1000; // 5 minutes
     //     }
+}
+
+/**
+ * @brief Ping a server to verify internet connectivity
+ * @param server : Server address/hostname to ping
+ * @param port : Port number (typically 80 for HTTP, 443 for HTTPS)
+ * @param timeout_ms : Timeout in milliseconds
+ * @return : true if ping successful, false otherwise
+ * @note : This function simplistically checks connectivity by attempting a TCP connection
+ */
+bool pingServer(const char *server, uint16_t port, uint16_t timeout_ms)
+{
+    if (server == nullptr)
+        return false;
+
+    // Try WiFi if available
+    if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected)
+    {
+        bool wifi_internet_access = wifiHasInternet(server, port, timeout_ms);
+        if (wifi_internet_access)
+        {
+            return true;
+        }
+    }
+
+    // Try GSM if WiFi failed and GSM is available
+    if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected && GPRS_CONNECTED)
+    {
+        bool ping_success = pingIP(server);
+
+        if (ping_success)
+            return true;
+    }
+
+    return false;
+}
+
+/**
+ * @brief Check if any communication method has internet connectivity
+ * @details Attempts to ping a known server to verify actual internet availability
+ *          Updates DeviceConfigState.wifiOnline and gsmOnline flags
+ * @return : true if any communication is available, false if all failed
+ */
+bool isConnectivityAvailable()
+{
+    const char *PING_SERVER = "8.8.8.8";
+    const uint16_t PING_PORT = 53;
+    const uint16_t PING_TIMEOUT = 5000;
+
+    unsigned long now = millis();
+
+    // Perform connectivity check at regular intervals (every 15 minutes) to avoid excessive pinging
+    if (now - CommsManagerState.lastConnectivityCheck < 60000)
+    {
+        return !CommsManagerState.allCommsUnavailable;
+    }
+
+    CommsManagerState.lastConnectivityCheck = now;
+
+    // Check WiFi connectivity
+    if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected)
+    {
+        CommsManagerState.wifiOnline = pingServer(PING_SERVER, PING_PORT, PING_TIMEOUT);
+        if (CommsManagerState.wifiOnline)
+        {
+            return true;
+        }
+    }
+    else
+    {
+        CommsManagerState.wifiOnline = false;
+    }
+
+    // Check GSM connectivity
+    if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
+    {
+        CommsManagerState.gsmOnline = pingServer(PING_SERVER, PING_PORT, PING_TIMEOUT);
+        if (CommsManagerState.gsmOnline)
+        {
+            return true;
+        }
+    }
+    else
+    {
+        CommsManagerState.gsmOnline = false;
+    }
+
+    // Both comms unavailable
+    CommsManagerState.allCommsUnavailable = !(CommsManagerState.wifiOnline || CommsManagerState.gsmOnline);
+    return !CommsManagerState.allCommsUnavailable;
+}
+
+/**
+ * @brief Update communication preference based on current state
+ * @details Determines the best communication method to use based on:
+ *          - Device configuration preferences (useWiFi, useGSM)
+ *          - Communication priority settings
+ *          - Current connectivity status
+ *          - Failure counts and retry logic
+ */
+void updateCommsPreference()
+{
+    unsigned long now = millis();
+
+    // Determine if we should attempt to reconnect to failed comms
+    bool attemptWiFi = DeviceConfig.useWiFi &&
+                       (CommsManagerState.wifiFailCount < CommsManagerState.MAX_RETRY_ATTEMPTS) &&
+                       (now - CommsManagerState.lastWiFiAttempt > CommsManagerState.reconnectInterval);
+
+    bool attemptGSM = DeviceConfig.useGSM &&
+                      (CommsManagerState.gsmFailCount < CommsManagerState.MAX_RETRY_ATTEMPTS) &&
+                      (now - CommsManagerState.lastGSMAttempt > CommsManagerState.reconnectInterval);
+
+    // Determine preferred communication based on priority and online status
+    if (CommunicationPriority::WIFI == 0) // WiFi has priority
+    {
+        if (CommsManagerState.wifiOnline)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+            CommsManagerState.wifiFailCount = 0; // Reset fail count on successful connection
+            return;
+        }
+        else if (CommsManagerState.gsmOnline)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+            CommsManagerState.gsmFailCount = 0;
+            return;
+        }
+    }
+    else if (CommunicationPriority::GSM == 0) // GSM has priority
+    {
+        if (CommsManagerState.gsmOnline)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+            CommsManagerState.gsmFailCount = 0;
+            return;
+        }
+        else if (CommsManagerState.wifiOnline)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+            CommsManagerState.wifiFailCount = 0;
+            return;
+        }
+    }
+
+    // If here, preferred comms is not available, attempt reconnection if allowed
+    if (attemptWiFi && DeviceConfig.useWiFi && !CommsManagerState.wifiOnline)
+    {
+        Serial.println("CommsManager: Attempting WiFi reconnection...");
+        CommsManagerState.lastWiFiAttempt = now;
+        CommsManagerState.wifiFailCount++;
+
+        // For WiFi, attempt to reconnect
+        if (!DeviceConfigState.wifiConnected)
+        {
+            DeviceConfigState.state = ConfigurationState::CONFIG_WIFI;
+            DeviceConfigState.wifiConnected = wifiConnect(DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
+            if (DeviceConfigState.wifiConnected)
+            {
+                configDeviceFromWiFiConn();
+                Serial.println("CommsManager: WiFi reconnected successfully");
+                CommsManagerState.wifiFailCount = 0;
+                CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+                return;
+            }
+        }
+    }
+
+    if (attemptGSM && DeviceConfig.useGSM && !CommsManagerState.gsmOnline)
+    {
+        Serial.println("CommsManager: Attempting GSM reconnection...");
+        CommsManagerState.lastGSMAttempt = now;
+        CommsManagerState.gsmFailCount++;
+
+        // For GSM, attempt to wake and reconnect
+        if (!DeviceConfigState.gsmConnected || !DeviceConfigState.gsmInternetAvailable)
+        {
+            DeviceConfigState.state = ConfigurationState::CONFIG_GSM;
+            initializeAndConfigGSM();
+            if (DeviceConfigState.gsmInternetAvailable)
+            {
+                Serial.println("CommsManager: GSM reconnected successfully");
+                CommsManagerState.gsmFailCount = 0;
+                CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+                return;
+            }
+        }
+    }
+
+    // Increase reconnect interval with each failure (exponential backoff: 30s, 60s, 120s, etc.)
+    if (CommsManagerState.wifiFailCount > 0 || CommsManagerState.gsmFailCount > 0)
+    {
+        uint8_t maxFailCount = max(CommsManagerState.wifiFailCount, CommsManagerState.gsmFailCount);
+        CommsManagerState.reconnectInterval = 30000 * (1 << min(maxFailCount, (uint8_t)4)); // Cap at 8 minutes
+    }
+
+    // If both have exceeded max retries, mark all comms as unavailable
+    if (CommsManagerState.wifiFailCount >= CommsManagerState.MAX_RETRY_ATTEMPTS &&
+        CommsManagerState.gsmFailCount >= CommsManagerState.MAX_RETRY_ATTEMPTS)
+    {
+        CommsManagerState.allCommsUnavailable = true;
+        CommsManagerState.preferredComm = CommsManagerState.PreferredComm::NONE;
+        CommsManagerState.maxReconnectAttemptsReached = true;
+        Serial.println("CommsManager: All communication methods have failed. Giving up on reconnection attempts.");
+    }
+}
+
+/**
+ * @brief Communication Manager - runs in main loop
+ * @details Manages communication device selection, monitors connectivity, and handles failover
+ *          Should be called frequently from loop() to maintain up-to-date communication state
+ */
+void commsManager()
+{
+
+    if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::NONE)
+    {
+        // If all comms are unavailable, attempt to update connectivity status and preference
+        Serial.print("[CommsManager]: No communication methods available: [Reason]: ");
+        if (CommsManagerState.maxReconnectAttemptsReached)
+        {
+            Serial.println("Max reconnect attempts reached for all communication methods. No further attempts will be made until next device restart.");
+        }
+        else if (!DeviceConfig.useWiFi && !DeviceConfig.useGSM)
+        {
+            Serial.println("All communication methods are disabled in configuration. Please enable at least one communication method to allow data transmission.");
+        }
+
+        return;
+    }
+    // Set initial preferred comms based on configuration
+    if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected || CommunicationPriority::WIFI == 0)
+    {
+        CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+    }
+    else if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected || CommunicationPriority::GSM == 0)
+    {
+        CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+    }
+
+    // Check network connectivity status
+    isConnectivityAvailable();
+
+    // Update communication preference based on current state
+    updateCommsPreference();
+
+    // Log current state periodically for debugging (every 10 minutes)
+    static unsigned long lastDebugLog = 0;
+    if (millis() - lastDebugLog > 60000 * 10)
+    {
+        lastDebugLog = millis();
+        Serial.println("----- Communication Manager State Unsolicited Report -----");
+        Serial.print("CommsManager State - WiFi: ");
+        Serial.print(CommsManagerState.wifiOnline ? "Online" : "Offline");
+        Serial.print(" (fails: ");
+        Serial.print(CommsManagerState.wifiFailCount);
+        Serial.print(") | GSM: ");
+        Serial.print(CommsManagerState.gsmOnline ? "Online" : "Offline");
+        Serial.print(" (fails: ");
+        Serial.print(CommsManagerState.gsmFailCount);
+        Serial.print(") | Preferred: ");
+        switch (CommsManagerState.preferredComm)
+        {
+        case CommsManagerState.PreferredComm::WIFI:
+            Serial.println("WiFi");
+            break;
+        case CommsManagerState.PreferredComm::GSM:
+            Serial.println("GSM");
+            break;
+        case CommsManagerState.PreferredComm::NONE:
+            Serial.println("None (All Failed)");
+            break;
+        }
+    }
+}
+
+/// @brief Initialize communication modules based on configuration and priority
+void initComms()
+{
+    // ToDo: Shift DeviceConfigState comms tracking to CommManagerState struct to simplify comms state management
+    CommsManagerState.init();
+    if (DeviceConfig.useGSM || DeviceConfig.useWiFi)
+    {
+        // Set preferredComm based on CommunicationPriority and DeviceConfig states
+        if (DeviceConfig.useWiFi && CommunicationPriority::WIFI == 0)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+        }
+        else if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+        }
+        else if (DeviceConfig.useWiFi)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+        }
+        else if (DeviceConfig.useGSM)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+        }
+        else
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::NONE;
+        }
+    }
+    else
+    {
+        CommsManagerState.preferredComm = CommsManagerState.PreferredComm::NONE;
+        return;
+    }
+
+    if (DeviceConfig.useWiFi && CommunicationPriority::WIFI == 0 || (DeviceConfig.useWiFi && !DeviceConfig.useGSM))
+    {
+        if (DeviceConfig.wifi_sta_ssid[0] == '\0')
+        {
+            Serial.println("DeviceConfig wifi ssid empty!");
+        }
+        else
+        {
+            DeviceConfigState.state = ConfigurationState::CONFIG_WIFI;
+            DeviceConfigState.wifiConnected = wifiConnect(DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
+
+            // wifiConnect already checks for internet; record it for diagnostics
+            DeviceConfigState.wifiInternetAvailable = DeviceConfigState.wifiConnected;
+            DeviceConfigState.internetAvailable = DeviceConfigState.wifiInternetAvailable;
+
+            if (DeviceConfigState.wifiConnected)
+            {
+                CommsManagerState.allCommsUnavailable = false;
+                CommsManagerState.wifiOnline = true;
+                configDeviceFromWiFiConn();
+            }
+        }
+    }
+
+    if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0 || (DeviceConfig.useGSM && !DeviceConfig.useWiFi))
+    {
+        initializeAndConfigGSM();
+    }
 }
 
 void listenSerial()
