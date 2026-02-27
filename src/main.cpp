@@ -1803,7 +1803,7 @@ void initComms()
         return;
     }
 
-    if (DeviceConfig.useWiFi && CommunicationPriority::WIFI == 0)
+    if (DeviceConfig.useWiFi && CommunicationPriority::WIFI == 0 || (DeviceConfig.useWiFi && !DeviceConfig.useGSM))
     {
         if (DeviceConfig.wifi_sta_ssid[0] == '\0')
         {
@@ -1827,7 +1827,7 @@ void initComms()
         }
     }
 
-    if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0)
+    if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0 || (DeviceConfig.useGSM && !DeviceConfig.useWiFi))
     {
         initializeAndConfigGSM();
     }
