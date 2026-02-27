@@ -105,6 +105,7 @@ void cycleNetworkMode();
 String getFirwmareVersion();
 String getModelID();
 String getProductInfo();
+bool pingIP(const char *host, uint8_t contextID = 1);
 
 /// @brief Initialize GSM module and SIM card
 /// @return true if GSM initialization successful
@@ -1032,6 +1033,42 @@ String getNetworkBand()
     }
 
     return "";
+}
+
+/// @brief Ping an IP address or hostname to check connectivity
+/// @param host IP address or hostname to ping
+/// @param contextID PDP context ID to use for ping (usually 1)
+/// @return true if ping successful, false otherwise
+bool pingIP(const char *host, uint8_t contextID)
+{
+    char cmd[256];
+
+    // AT+QPING=<contextID>,<host>[,<timeout>[,<pingnum>]]
+
+    snprintf(cmd, sizeof(cmd), "AT+QPING=%d,\"%s\",32,4",
+             contextID, host);
+
+    Serial.println(cmd);
+
+    flushSerial();
+
+    // Wait for OK
+    if (!sendAndCheck(cmd, "OK", 2000))
+    {
+        return false;
+    }
+
+    char urc[64];
+    if (!waitForURC("+QPING:", urc, sizeof(urc), 5000))
+    {
+        return false;
+    }
+
+    char expected[32];
+    snprintf(expected, sizeof(expected), "+QPING:");
+    Serial.println(urc);
+
+    return strstr(urc, expected) != NULL;
 }
 
 /// @brief Initialize serial communication with GSM module

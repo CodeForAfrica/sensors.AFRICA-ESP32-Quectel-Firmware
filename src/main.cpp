@@ -1520,9 +1520,10 @@ bool pingServer(const char *server, uint16_t port, uint16_t timeout_ms)
     // Try GSM if WiFi failed and GSM is available
     if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected && GPRS_CONNECTED)
     {
-        // For GSM, simply check if GPRS is active (assumes connectivity if GPRS is initialized)
-        // ToDo: use AT+CPING for actual ping capability
-        return true;
+        bool ping_success = pingIP(server);
+
+        if (ping_success)
+            return true;
     }
 
     return false;
