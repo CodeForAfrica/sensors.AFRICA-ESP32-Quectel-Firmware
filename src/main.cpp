@@ -366,7 +366,7 @@ void loop()
         }
     }
 
-    if (send_now)
+    if (send_now && CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE)
     {
 
         // Send data from memory loggers
