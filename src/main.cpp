@@ -1538,20 +1538,18 @@ bool pingServer(const char *server, uint16_t port, uint16_t timeout_ms)
     // Try WiFi if available
     if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected)
     {
-        WiFiClient client;
-        client.setTimeout(timeout_ms);
-        if (client.connect(server, port))
+        bool wifi_internet_access = wifiHasInternet(server, port, timeout_ms);
+        if (wifi_internet_access)
         {
-            client.stop();
             return true;
         }
     }
 
     // Try GSM if WiFi failed and GSM is available
-    if (DeviceConfig.useGSM && GSM_CONNECTED && GPRS_CONNECTED)
+    if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected && GPRS_CONNECTED)
     {
         // For GSM, simply check if GPRS is active (assumes connectivity if GPRS is initialized)
-        // In production, consider using AT+CPING for actual ping capability
+        // ToDo: use AT+CPING for actual ping capability
         return true;
     }
 
@@ -1595,7 +1593,7 @@ bool isConnectivityAvailable()
     }
 
     // Check GSM connectivity
-    if (DeviceConfig.useGSM && GSM_CONNECTED && GPRS_CONNECTED)
+    if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
     {
         CommsManagerState.gsmOnline = pingServer(PING_SERVER, PING_PORT, PING_TIMEOUT);
         if (CommsManagerState.gsmOnline)
@@ -1626,7 +1624,7 @@ void updateCommsPreference()
     unsigned long now = millis();
 
     // Determine if we should attempt to reconnect to failed comms
-    bool attemptWiFi = DeviceConfig.useWiFi && 
+    bool attemptWiFi = DeviceConfig.useWiFi &&
                        (CommsManagerState.wifiFailCount < CommsManagerState.MAX_RETRY_ATTEMPTS) &&
                        (now - CommsManagerState.lastWiFiAttempt > CommsManagerState.reconnectInterval);
 
@@ -1696,7 +1694,7 @@ void updateCommsPreference()
         CommsManagerState.gsmFailCount++;
 
         // For GSM, attempt to wake and reconnect
-        if (!GSM_CONNECTED || !GPRS_CONNECTED)
+        if (!DeviceConfigState.gsmConnected || !GPRS_CONNECTED)
         {
             DeviceConfigState.state = ConfigurationState::CONFIG_GSM;
             initializeAndConfigGSM();
@@ -1741,12 +1739,14 @@ void commsManager()
         CommsManagerState.init();
         initialized = true;
 
+        // Check user preferred commmunication method
+
         // Set initial preferred comms based on configuration
-        if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected)
+        if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected || CommunicationPriority::WIFI == 0)
         {
             CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
         }
-        else if (DeviceConfig.useGSM && GSM_CONNECTED)
+        else if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected || CommunicationPriority::GSM == 0)
         {
             CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
         }
