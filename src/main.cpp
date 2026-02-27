@@ -1775,7 +1775,27 @@ void initComms()
     CommsManagerState.init();
     if (DeviceConfig.useGSM || DeviceConfig.useWiFi)
     {
-        CommsManagerState.preferredComm = CommunicationPriority::WIFI == 0 ? CommsManagerState.PreferredComm::WIFI : CommsManagerState.PreferredComm::GSM; //? Right now we only have 2 options but can be refactored to be more dynamic if more comms options are added in the future
+        // Set preferredComm based on CommunicationPriority and DeviceConfig states
+        if (DeviceConfig.useWiFi && CommunicationPriority::WIFI == 0)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+        }
+        else if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+        }
+        else if (DeviceConfig.useWiFi)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+        }
+        else if (DeviceConfig.useGSM)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+        }
+        else
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::NONE;
+        }
     }
     else
     {
@@ -1796,18 +1816,18 @@ void initComms()
 
             // wifiConnect already checks for internet; record it for diagnostics
             DeviceConfigState.wifiInternetAvailable = DeviceConfigState.wifiConnected;
-            DeviceConfigState.internetAvailable = DeviceConfigState.wifiInternetAvailable || DeviceConfigState.gsmInternetAvailable;
+            DeviceConfigState.internetAvailable = DeviceConfigState.wifiInternetAvailable;
 
             if (DeviceConfigState.wifiConnected)
             {
-                CommsManagerState.allCommsUnavailable = !DeviceConfigState.internetAvailable;
+                CommsManagerState.allCommsUnavailable = false;
                 CommsManagerState.wifiOnline = true;
                 configDeviceFromWiFiConn();
             }
         }
     }
 
-    if ((DeviceConfig.useGSM && CommunicationPriority::GSM == 0) || (!DeviceConfig.useWiFi || !DeviceConfigState.wifiConnected)) // ToDo: Only connect to GSM if WiFi is not connected or not prioritized or no WiFi internet during initialization.
+    if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0)
     {
         initializeAndConfigGSM();
     }
