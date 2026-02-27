@@ -159,6 +159,7 @@ struct CommsManagerState
     bool allCommsUnavailable;
     bool wifiOnline;
     bool gsmOnline;
+    bool maxReconnectAttemptsReached;
 
     // Initialize state
     void init()
@@ -173,6 +174,7 @@ struct CommsManagerState
         allCommsUnavailable = false;
         wifiOnline = false;
         gsmOnline = false;
+        maxReconnectAttemptsReached = false;
     }
 } CommsManagerState;
 
@@ -1394,7 +1396,7 @@ void initializeAndConfigGSM()
 
     if (!DeviceConfigState.gsmConnected)
         return;
-    DeviceConfigState.gsmConnected = !GSM_init();
+    DeviceConfigState.gsmConnected = GSM_init();
     if (!DeviceConfigState.gsmConnected)
         return;
 
@@ -1691,6 +1693,7 @@ void updateCommsPreference()
     {
         CommsManagerState.allCommsUnavailable = true;
         CommsManagerState.preferredComm = CommsManagerState.PreferredComm::NONE;
+        CommsManagerState.maxReconnectAttemptsReached = true;
         Serial.println("CommsManager: All communication methods have failed. Giving up on reconnection attempts.");
     }
 }
@@ -1702,6 +1705,22 @@ void updateCommsPreference()
  */
 void commsManager()
 {
+
+    if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::NONE)
+    {
+        // If all comms are unavailable, attempt to update connectivity status and preference
+        Serial.print("[CommsManager]: No communication methods available: [Reason]: ");
+        if (CommsManagerState.maxReconnectAttemptsReached)
+        {
+            Serial.println("Max reconnect attempts reached for all communication methods. No further attempts will be made until next device restart.");
+        }
+        else if (!DeviceConfig.useWiFi && !DeviceConfig.useGSM)
+        {
+            Serial.println("All communication methods are disabled in configuration. Please enable at least one communication method to allow data transmission.");
+        }
+
+        return;
+    }
     // Set initial preferred comms based on configuration
     if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected || CommunicationPriority::WIFI == 0)
     {
@@ -1753,6 +1772,15 @@ void initComms()
 {
     // ToDo: Shift DeviceConfigState comms tracking to CommManagerState struct to simplify comms state management
     CommsManagerState.init();
+    if (DeviceConfig.useGSM || DeviceConfig.useWiFi)
+    {
+        CommsManagerState.preferredComm = CommunicationPriority::WIFI == 0 ? CommsManagerState.PreferredComm::WIFI : CommsManagerState.PreferredComm::GSM; //? Right now we only have 2 options but can be refactored to be more dynamic if more comms options are added in the future
+    }
+    else
+    {
+        CommsManagerState.preferredComm = CommsManagerState.PreferredComm::NONE;
+        return;
+    }
 
     if (DeviceConfig.useWiFi && CommunicationPriority::WIFI == 0)
     {
