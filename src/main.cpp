@@ -323,11 +323,16 @@ void setup()
 #endif
 
         SD_Attached = SDattached();
+        DeviceConfigState.sdCardInitialized = SD_Attached;
 
         if (SD_Attached)
         {
             init_SD_loggers();
         }
+    }
+    else
+    {
+        DeviceConfigState.sdCardInitialized = false;
     }
 
     starttime = millis();
@@ -1324,10 +1329,11 @@ void sendFromMemoryLog(LOGGER &logger)
             if (api_pin != -1)
             {
                 if (!sendData(logger.DATA_STORE[i], api_pin, HOST_CFA, URL_CFA))
-                {
-                    // Append to file for sending later
-                    appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
-                }
+                    /
+                    {
+                        // Append to file for sending later // ToDo: Check the state of DeviceConfigState.sdCardInitialized before attempting to write to SD card
+                        appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
+                    }
             }
 
             memset(logger.DATA_STORE[i], '\0', 255);

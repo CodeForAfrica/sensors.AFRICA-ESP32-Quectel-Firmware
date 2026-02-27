@@ -37,6 +37,7 @@ struct DeviceConfigState
     bool gsmInternetAvailable = false;
     bool internetAvailable = false;
     bool timeSet = false;
+    bool sdCardInitialized = false;
 };
 
 extern struct DeviceConfigState DeviceConfigState;
