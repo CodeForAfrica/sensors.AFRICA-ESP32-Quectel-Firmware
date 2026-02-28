@@ -70,7 +70,7 @@ SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 
 const unsigned long ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
 const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS * 28; // force a reboot every month /
-const unsigned long SEND_TELEMETRY_INTERVAL_MS = 30 * 60 * 1000;            // 30 minutes
+const unsigned long SEND_TELEMETRY_INTERVAL_MS = 2 * 60 * 1000;             // 30 minutes
 
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
@@ -134,6 +134,7 @@ struct LOGGER
 
 struct GSMRuntimeInfo GSMRuntimeInfo;
 JsonDocument gsm_info;
+JsonDocument device_info;
 struct DeviceConfigState DeviceConfigState;
 struct DeviceConfig DeviceConfig;
 
@@ -221,6 +222,7 @@ bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *top
 bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client_id, const char *topic,
                            const char *username, const char *password);
 void listenSerial();
+void buildDeviceInfoJSON();
 
 enum Month
 {
@@ -242,7 +244,8 @@ enum Month
 int current_year, current_month = 0;
 
 JsonDocument current_sensor_data;
-
+bool time_to_send_telemetry = false;
+bool is_boot_telemetry = false;
 void setup()
 {
     Serial.begin(115200);
@@ -353,6 +356,7 @@ void setup()
         DeviceConfigState.sdCardInitialized = false;
     }
 
+    buildDeviceInfoJSON();
     starttime = millis();
 }
 
@@ -405,11 +409,6 @@ void loop()
         starttime = millis();
     }
 
-    // Send telemetry data over MQTT
-    // Determine if it's time to send telemetry (boot telemetry or interval-based)
-    bool time_to_send_telemetry = false;
-    bool is_boot_telemetry = false;
-
     // Check if setup is complete and we haven't sent boot telemetry yet
     if (!boot_telemetry_sent && !DeviceConfigState.configurationRequired && millis() - boottime > BOOT_TELEMETRY_DELAY_MS)
     {
@@ -430,6 +429,8 @@ void loop()
         if (MY_MQTT_BROKER[0] == '\0' || MY_MQTT_USERNAME[0] == '\0' || MY_MQTT_PASSWORD[0] == '\0')
         {
             Serial.println("MQTT credentials not set. Skipping telemetry send.");
+            boot_telemetry_sent = true;
+            time_to_send_telemetry = false;
         }
         else
         {
@@ -457,8 +458,10 @@ void loop()
                 boot_telemetry_sent = true;
                 Serial.println("Boot telemetry sent successfully");
             }
-            last_send_telemetry = millis();
         }
+        // Always update the timestamp when time to send telemetry, regardless of credentials status
+        time_to_send_telemetry = false;
+        last_send_telemetry = millis();
     }
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
@@ -2199,4 +2202,58 @@ bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client
     }
 
     return result;
+}
+
+void buildDeviceInfoJSON()
+{
+    try
+    {
+        // Clear previous data
+        device_info.clear();
+
+        // Add GSM configuration if GSM is capable and has valid data
+        if (gsm_capable && (GSMRuntimeInfo.operator_name.length() > 0 ||
+                            GSMRuntimeInfo.imei.length() > 0 ||
+                            GSMRuntimeInfo.sim_ccid[0] != '\0'))
+        {
+            JsonObject gsm = device_info["GSM"].to<JsonObject>();
+
+            if (GSMRuntimeInfo.operator_name.length() > 0)
+                gsm["Operator Name"] = GSMRuntimeInfo.operator_name;
+            if (GSMRuntimeInfo.signal_strength > 0)
+                gsm["Signal Strength"] = GSMRuntimeInfo.signal_strength;
+            if (GSMRuntimeInfo.network_technology[0] != '\0')
+                gsm["Network Technology"] = GSMRuntimeInfo.network_technology;
+            if (GSMRuntimeInfo.imei.length() > 0)
+                gsm["IMEI"] = GSMRuntimeInfo.imei;
+            if (GSMRuntimeInfo.model_id.length() > 0)
+                gsm["Model"] = GSMRuntimeInfo.model_id;
+            if (GSMRuntimeInfo.firmware_version.length() > 0)
+                gsm["Firmware"] = GSMRuntimeInfo.firmware_version;
+            if (GSMRuntimeInfo.sim_ccid[0] != '\0')
+                gsm["SIM CCID"] = GSMRuntimeInfo.sim_ccid;
+        }
+
+        // Add WiFi configuration if WiFi is connected and has valid data
+        if (wifi_info["SSID"].as<String>().length() > 0 ||
+            wifi_info["IP Address"].as<String>().length() > 0)
+        {
+            JsonObject wifi = device_info["WIFI"].to<JsonObject>();
+
+            if (wifi_info["SSID"].as<String>().length() > 0)
+                wifi["SSID"] = wifi_info["SSID"];
+            if (wifi_info["BSSID"].as<String>().length() > 0)
+                wifi["BSSID"] = wifi_info["BSSID"];
+            if (wifi_info["Signal Strength"].as<int>() != 0)
+                wifi["Signal Strength"] = wifi_info["Signal Strength"];
+            if (wifi_info["IP Address"].as<String>().length() > 0)
+                wifi["IP Address"] = wifi_info["IP Address"];
+        }
+
+        Serial.println("buildDeviceInfoJSON: Device info JSON built successfully");
+    }
+    catch (...)
+    {
+        Serial.println("buildDeviceInfoJSON: Exception occurred while building device info JSON");
+    }
 }

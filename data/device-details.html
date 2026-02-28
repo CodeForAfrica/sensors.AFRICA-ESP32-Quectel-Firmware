@@ -115,24 +115,7 @@
     <main>
       <section class="device-info-wrapper">
         <h2 style="text-align: center; color: #2fb56b">Device Details</h2>
-        <div class="info-group" id="gsm_info"></div>
-        <div class="info-group" id="wifi_info"></div>
-        <!-- <div class="info-group">
-          <h3>Location Details</h3>
-          <ul>
-            <li><strong>Country Name:</strong> Kenya</li>
-            <li><strong>Location Name:</strong> Nairobi</li>
-            <li><strong>Altitude:</strong> 1795 m</li>
-          </ul>
-        </div>
-        <div class="info-group">
-          <h3>Device Custodian</h3>
-          <ul>
-            <li><strong>Name:</strong> Jane Doe</li>
-            <li><strong>Contact Phone:</strong> +254712345678</li>
-            <li><strong>Contact Email:</strong> jane.doe@example.com</li>
-          </ul>
-        </div> -->
+        <section class="info-group" id="device_details"></section>
       </section>
     </main>
     <script>
@@ -141,43 +124,36 @@
         links.classList.toggle("active");
       }
 
-      function renderInfo(data, header) {
-        let html = `<h3>${header}</h3><ul>`;
+      function renderSection(header, data) {
+        let html = `<h2>${header}</h2><ul>`;
         for (const [k, v] of Object.entries(data)) {
-          let li = `<li><strong>${k}:</strong> ${v}</li>`;
-          html += li;
+          html += `<li><strong>${k}:</strong> ${v}</li>`;
         }
         html += "</ul>";
         return html;
       }
 
-      fetch("/gsm_info")
-        .then((response) => response.json())
+      fetch("/device-details")
+        .then((r) => r.json())
         .then((data) => {
-          console.log("GSM info: ", data);
-          document.getElementById("gsm_info").innerHTML = renderInfo(
-            data,
-            "GSM &amp; Network",
-          );
+          let html = "";
+          for (const [section, sectionData] of Object.entries(data)) {
+            if (
+              sectionData &&
+              Object.keys(sectionData).length === 0 &&
+              sectionData.constructor === Object
+            ) {
+              continue; // Skip if object is empty
+            }
+            const header = section.toUpperCase();
+            html += renderSection(header, sectionData);
+          }
+          document.getElementById("device_details").innerHTML = html;
         })
-        .catch((err) => {
-          document.getElementById("gsm_info").textContent =
-            "Failed to load GSM info";
-          console.error(err);
-        });
-      fetch("/wifi-info")
-        .then((response) => response.json())
-        .then((data) => {
-          console.log("WiFi info: ", data);
-          document.getElementById("wifi_info").innerHTML = renderInfo(
-            data,
-            "WiFi",
-          );
-        })
-        .catch((err) => {
-          document.getElementById("wifi_info").textContent =
-            "Failed to load WiFi info";
-          console.error(err);
+        .catch((e) => {
+          document.getElementById("device_details").textContent =
+            "Failed to load device details";
+          console.error(e);
         });
     </script>
     <script>

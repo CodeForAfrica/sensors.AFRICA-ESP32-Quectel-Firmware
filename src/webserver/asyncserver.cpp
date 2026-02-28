@@ -17,7 +17,7 @@ extern char AP_SSID[64];
 String pendingFileList = "{}";
 bool fileListReady = false;
 AsyncWebServerRequest *pendingRequest = nullptr;
-extern JsonDocument gsm_info;
+extern JsonDocument device_info;
 
 void setup_webserver()
 {
@@ -213,10 +213,10 @@ void setup_webserver()
 
     request->send(response); });
 
-  server.on("/gsm_info", HTTP_GET, [](AsyncWebServerRequest *request)
+  server.on("/device-details", HTTP_GET, [](AsyncWebServerRequest *request)
             {
               String res;
-              serializeJson(gsm_info,res);
+              serializeJson(device_info,res);
               request->send(200,"application/json", res); });
 
   // Captive portal redirect
