@@ -22,7 +22,11 @@ extern JsonDocument gsm_info;
 void setup_webserver()
 {
   server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(LittleFS, "/config.html"); });
+            { request->send(LittleFS, "/style.css"); });
+  server.on("/style.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/style.min.css"); });
+  server.on("/scripts.min.js", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/scripts.min.js"); });
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/index.html"); });
   server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
