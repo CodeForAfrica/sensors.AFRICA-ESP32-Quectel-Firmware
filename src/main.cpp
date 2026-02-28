@@ -69,6 +69,7 @@ SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 
 const unsigned long ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
 const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS * 28; // force a reboot every month /
+const unsigned long SEND_TELEMETRY_INTERVAL_MS = 30 * 60 * 1000;            // 30 minutes
 
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
@@ -76,6 +77,7 @@ int sampling_interval = 5 * 60 * 1000; // 5 minutes
 unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
+unsigned long last_send_telemetry = 0;
 
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
 
@@ -88,6 +90,7 @@ char SENSORS_JSON_DATA_PATH[128] = {};
 char SENSORS_CSV_DATA_PATH[128] = {};
 char SENSORS_FAILED_DATA_SEND_STORE_FILE[40] = "failed_send_payloads.txt";
 char SENSORS_FAILED_DATA_SEND_STORE_PATH[128] = {};
+char MQTT_TELEMETRY_TOPIC[128] = {};
 
 char esp_chipid[18] = {};
 
@@ -210,6 +213,8 @@ void initComms();
 bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size);
 bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, const char *topic,
                           const char *username, const char *password);
+bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *topic, uint8_t client_id,
+                              const char *username, const char *password, bool disconnect_after);
 void listenSerial();
 
 enum Month
@@ -248,6 +253,10 @@ void setup()
     strcpy(ROOT_DIR, "/");
     strcat(ROOT_DIR, SENSOR_PREFIX); //? Refactor to copy AP_SSID if it remains unchanged
     strcat(ROOT_DIR, esp_chipid);
+
+    strcat(MQTT_TELEMETRY_TOPIC, MQTT_BASE_TOPIC);
+    strcat(MQTT_TELEMETRY_TOPIC, "/");
+    strcat(MQTT_TELEMETRY_TOPIC, esp_chipid);
     // Set Dual Access Point and Station WiFi mode
     WiFi.mode(WIFI_AP_STA); // ToDo: Configure this when not on power saving mode.
     strcat(AP_SSID, SENSOR_PREFIX);
@@ -388,6 +397,25 @@ void loop()
         }
 
         starttime = millis();
+    }
+
+    // Send telemetry data over MQTT
+    if (millis() - last_send_telemetry > SEND_TELEMETRY_INTERVAL_MS)
+    {
+
+        if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable) // Write now we only send telemetry over GSM, but we can extend this to WiFi in the future when we add support for WiFi telemetry. We can check the preferred comms and send telemetry over that.
+        {
+
+            if (MY_MQTT_BROKER[0] == '\0' || MY_MQTT_USERNAME[0] == '\0' || MY_MQTT_PASSWORD[0] == '\0')
+            {
+                Serial.println("MQTT credentials not set. Skipping telemetry send.");
+            }
+            else
+            {
+                initAndSendMQTTTelemetry(MY_MQTT_BROKER, MY_MQTT_PORT, MQTT_TELEMETRY_TOPIC, 0, MY_MQTT_USERNAME, MY_MQTT_PASSWORD, true);
+                last_send_telemetry = millis();
+            }
+        }
     }
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
@@ -2055,4 +2083,29 @@ bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, 
     Serial.println("sendMQTTTelemetry: Telemetry published successfully");
     count_sends++;
     return true;
+}
+
+/// @brief Initialize MQTT and send telemetry, with automatic cleanup
+/// @param broker MQTT broker hostname/IP
+/// @param port MQTT broker port
+/// @param topic MQTT topic for telemetry
+/// @param client_id MQTT client ID
+/// @param username MQTT username (optional)
+/// @param password MQTT password (optional)
+/// @param disconnect_after If true, disconnect and close broker after sending
+/// @return true if successful, false otherwise
+bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *topic, uint8_t client_id = 0,
+                              const char *username = nullptr, const char *password = nullptr,
+                              bool disconnect_after = true)
+{
+    bool result = sendGsmMQTTTelemetry(broker, port, client_id, topic, username, password);
+
+    if (disconnect_after && mqttConnected)
+    {
+        delay(500);
+        Serial.println("initAndSendMQTTTelemetry: Disconnecting MQTT...");
+        MQTT_disconnect(client_id);
+    }
+
+    return result;
 }
