@@ -59,6 +59,7 @@
 #include "utils/wifi.h"
 #include "utils/deviceconfig.h"
 #include "webserver/asyncserver.h"
+#include "utils/mqtt_wifi.h"
 
 size_t max_wifi_hotspots_size = sizeof(struct_wifiInfo) * 20;
 struct struct_wifiInfo *wifiInfo = (struct_wifiInfo *)malloc(max_wifi_hotspots_size);
@@ -215,6 +216,8 @@ bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, 
                           const char *username, const char *password);
 bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *topic, uint8_t client_id,
                               const char *username, const char *password, bool disconnect_after);
+bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client_id, const char *topic,
+                           const char *username, const char *password);
 void listenSerial();
 
 enum Month
@@ -256,6 +259,7 @@ void setup()
 
     strcat(MQTT_TELEMETRY_TOPIC, MQTT_BASE_TOPIC);
     strcat(MQTT_TELEMETRY_TOPIC, "/");
+    strcat(MQTT_TELEMETRY_TOPIC, SENSOR_PREFIX);
     strcat(MQTT_TELEMETRY_TOPIC, esp_chipid);
     // Set Dual Access Point and Station WiFi mode
     WiFi.mode(WIFI_AP_STA); // ToDo: Configure this when not on power saving mode.
@@ -400,22 +404,35 @@ void loop()
     }
 
     // Send telemetry data over MQTT
-    if (millis() - last_send_telemetry > SEND_TELEMETRY_INTERVAL_MS)
+    if ((millis() - last_send_telemetry > SEND_TELEMETRY_INTERVAL_MS) && (CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE))
     {
-
-        if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable) // Write now we only send telemetry over GSM, but we can extend this to WiFi in the future when we add support for WiFi telemetry. We can check the preferred comms and send telemetry over that.
+        // Check if MQTT credentials are set
+        if (MY_MQTT_BROKER[0] == '\0' || MY_MQTT_USERNAME[0] == '\0' || MY_MQTT_PASSWORD[0] == '\0')
         {
-
-            if (MY_MQTT_BROKER[0] == '\0' || MY_MQTT_USERNAME[0] == '\0' || MY_MQTT_PASSWORD[0] == '\0')
+            Serial.println("MQTT credentials not set. Skipping telemetry send.");
+        }
+        else
+        {
+            // Try WiFi MQTT first if WiFi is available
+            if (DeviceConfigState.wifiConnected && WiFi.status() == WL_CONNECTED)
             {
-                Serial.println("MQTT credentials not set. Skipping telemetry send.");
+                Serial.println("Sending telemetry via WiFi MQTT");
+                sendWiFiMQTTTelemetry(MY_MQTT_BROKER, MY_MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MY_MQTT_USERNAME, MY_MQTT_PASSWORD);
+                last_send_telemetry = millis();
             }
-            else
+            // Fall back to GSM MQTT if WiFi is not available but GSM is
+            else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
             {
+                Serial.println("Sending telemetry via GSM MQTT");
                 initAndSendMQTTTelemetry(MY_MQTT_BROKER, MY_MQTT_PORT, MQTT_TELEMETRY_TOPIC, 0, MY_MQTT_USERNAME, MY_MQTT_PASSWORD, true);
                 last_send_telemetry = millis();
             }
+            else
+            {
+                Serial.println("No internet connectivity available for MQTT telemetry");
+            }
         }
+        last_send_telemetry = millis();
     }
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
@@ -2105,6 +2122,54 @@ bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *top
         delay(500);
         Serial.println("initAndSendMQTTTelemetry: Disconnecting MQTT...");
         MQTT_disconnect(client_id);
+    }
+
+    return result;
+}
+
+/// @brief Send telemetry data to MQTT broker via WiFi (PubSubClient)
+/// @param broker MQTT broker hostname/IP address
+/// @param port MQTT broker port (default 1883)
+/// @param client_id MQTT client ID
+/// @param topic MQTT topic to publish to
+/// @param username MQTT username (optional)
+/// @param password MQTT password (optional)
+/// @return true if telemetry sent successfully, false otherwise
+bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client_id, const char *topic,
+                           const char *username = nullptr, const char *password = nullptr)
+{
+    // Check if WiFi is connected
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("sendWiFiMQTTTelemetry: WiFi not connected - cannot send telemetry");
+        return false;
+    }
+
+    Serial.println("sendWiFiMQTTTelemetry: WiFi connected, proceeding with MQTT publish");
+
+    // Build telemetry payload
+    char mqtt_payload[2048] = {}; // Large buffer for comprehensive telemetry
+    if (!buildMQTTTelemetryPayload(mqtt_payload, sizeof(mqtt_payload)))
+    {
+        Serial.println("sendWiFiMQTTTelemetry: Failed to build telemetry payload");
+        return false;
+    }
+
+    Serial.print("sendWiFiMQTTTelemetry: Payload size: ");
+    Serial.print(strlen(mqtt_payload));
+    Serial.println(" bytes");
+
+    // Send telemetry via WiFi MQTT
+    bool result = wifiMQTTSendTelemetry(broker, port, topic, client_id, mqtt_payload, username, password, true);
+
+    if (result)
+    {
+        Serial.println("sendWiFiMQTTTelemetry: Telemetry sent successfully via WiFi");
+        count_sends++;
+    }
+    else
+    {
+        Serial.println("sendWiFiMQTTTelemetry: Failed to send telemetry via WiFi");
     }
 
     return result;
