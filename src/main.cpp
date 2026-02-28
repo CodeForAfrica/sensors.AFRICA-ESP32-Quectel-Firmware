@@ -1866,3 +1866,108 @@ void listenSerial()
         }
     }
 }
+
+/// @brief Build MQTT telemetry JSON payload with device, GSM, WiFi, and sensor information
+/// @param mqtt_payload Buffer to store the JSON payload
+/// @param payload_size Size of the payload buffer
+/// @return true if payload built successfully, false otherwise
+bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size)
+{
+    try
+    {
+        JsonDocument telemetry_doc;
+
+        // Timestamp
+        String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
+        telemetry_doc["timestamp"] = datetime;
+
+        telemetry_doc["device_id"] = esp_chipid;
+
+        // GSM Information
+        if (gsm_capable && DeviceConfigState.gsmConnected)
+        {
+            JsonObject gsm = telemetry_doc["gsm"].to<JsonObject>();
+            gsm["connected"] = GPRS_CONNECTED;
+            gsm["network_name"] = GSMRuntimeInfo.operator_name;
+            gsm["signal_strength"] = GSMRuntimeInfo.signal_strength;
+            gsm["imei"] = GSMRuntimeInfo.imei;
+            gsm["model"] = GSMRuntimeInfo.model_id;
+            gsm["firmware"] = GSMRuntimeInfo.firmware_version;
+            gsm["sim_ccid"] = GSMRuntimeInfo.sim_ccid;
+        }
+
+        // WiFi Information
+        if (DeviceConfigState.wifiConnected)
+        {
+            JsonObject wifi = telemetry_doc["wifi"].to<JsonObject>();
+            wifi["connected"] = true;
+            wifi["ssid"] = wifi_info["SSID"];
+            wifi["signal_strength"] = wifi_info["Signal Strength"];
+            wifi["ip_address"] = wifi_info["IP Address"];
+        }
+        else
+        {
+            JsonObject wifi = telemetry_doc["wifi"].to<JsonObject>();
+            wifi["connected"] = false;
+        }
+
+        // Device Configuration
+        JsonObject config = telemetry_doc["config"].to<JsonObject>();
+        config["power_saving_mode"] = DeviceConfig.power_saving_mode;
+        config["wifi_enabled"] = DeviceConfig.useWiFi;
+        config["gsm_enabled"] = DeviceConfig.useGSM;
+        config["sampling_interval_ms"] = sampling_interval;
+        config["sending_interval_ms"] = sending_intervall_ms;
+
+        // Communication Status
+        JsonObject comms = telemetry_doc["communications"].to<JsonObject>();
+        comms["wifi_available"] = CommsManagerState.wifiOnline;
+        comms["gsm_available"] = CommsManagerState.gsmOnline;
+        comms["internet_available"] = DeviceConfigState.internetAvailable;
+        comms["preferred"] = (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::WIFI) ? "WiFi" : (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::GSM) ? "GSM"
+                                                                                                                                                                                             : "None";
+
+        // Sensor Data
+        JsonObject sensors = telemetry_doc["sensors"].to<JsonObject>();
+        if (current_sensor_data["PM"])
+        {
+            JsonObject pm = sensors["PM"].to<JsonObject>();
+            if (current_sensor_data["PM"]["PM1"])
+                pm["PM1"] = current_sensor_data["PM"]["PM1"];
+            if (current_sensor_data["PM"]["PM2.5"])
+                pm["PM2.5"] = current_sensor_data["PM"]["PM2.5"];
+            if (current_sensor_data["PM"]["PM10"])
+                pm["PM10"] = current_sensor_data["PM"]["PM10"];
+        }
+
+        if (current_sensor_data["DHT"])
+        {
+            JsonObject dht = sensors["DHT"].to<JsonObject>();
+            if (current_sensor_data["DHT"]["temperature"])
+                dht["temperature"] = current_sensor_data["DHT"]["temperature"];
+            if (current_sensor_data["DHT"]["humidity"])
+                dht["humidity"] = current_sensor_data["DHT"]["humidity"];
+        }
+
+        // System Status
+        JsonObject system = telemetry_doc["system"].to<JsonObject>();
+        system["uptime_ms"] = millis();
+        system["free_heap"] = ESP.getFreeHeap();
+        system["data_sends_count"] = count_sends;
+        system["data_points_logged"] = JSON_PAYLOAD_LOGGER.log_count;
+
+        // Serialize to buffer
+        if (serializeJson(telemetry_doc, mqtt_payload, payload_size) == 0)
+        {
+            Serial.println("buildMQTTTelemetryPayload: Failed to serialize JSON - buffer too small");
+            return false;
+        }
+
+        return true;
+    }
+    catch (...)
+    {
+        Serial.println("buildMQTTTelemetryPayload: Exception occurred while building payload");
+        return false;
+    }
+}
