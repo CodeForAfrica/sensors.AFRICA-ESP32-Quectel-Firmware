@@ -55,4 +55,10 @@ static int SD_CS = 39;
 #define DHT_LED 37 // 30
                    // endif
 
+#define MQTT_BASE_TOPIC "devices/nodes/telemetry"
+#define MY_MQTT_BROKER "" // server must be set to enable MQTT telemetry
+#define MY_MQTT_PORT 1883
+#define MY_MQTT_USERNAME "" // set to enable MQTT authentication
+#define MY_MQTT_PASSWORD "" // set to enable MQTT authentication
+#define MY_MQTT_CLIENT_ID 5
 #endif

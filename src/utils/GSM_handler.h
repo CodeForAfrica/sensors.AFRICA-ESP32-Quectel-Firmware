@@ -69,6 +69,26 @@ struct GSMRuntimeInfo
     String model_id; // EC200XXXXXXX
 };
 
+enum MQTTConnStatus
+{
+    MQTT_DISCONNECTED = 0,
+    MQTT_BROKER_OPEN = 1,
+    MQTT_CONNECTED = 2
+};
+
+bool MQTT_CONFIGURED = false;
+bool mqttBrokerOpen = false;
+bool mqttConnected = false;
+MQTTConnStatus mqtt_status = MQTT_DISCONNECTED;
+int MQTT_INIT_FAIL_COUNT = 0;
+int MQTT_PUB_FAIL = 0;
+String MQTT_INIT_ERROR = "";
+char MQTT_BROKER[64] = "";
+uint16_t MQTT_PORT = 1883;
+char MQTT_CLIENT_ID[64] = "esp32_ec200u";
+char MQTT_USERNAME[64] = "";
+char MQTT_PASSWORD[64] = "";
+
 bool GSM_init();
 bool register_to_network();
 void SIM_PIN_Setup();
@@ -106,6 +126,17 @@ String getFirwmareVersion();
 String getModelID();
 String getProductInfo();
 bool pingIP(const char *host, uint8_t contextID = 1);
+
+// MQTT Functions
+bool MQTT_configure(uint8_t client_id = 0, uint8_t recv_mode = 0, uint8_t msg_do = 0, uint8_t msg_len = 1);
+bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port);
+bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username = nullptr, const char *password = nullptr);
+bool MQTT_subscribe(uint8_t client_id, uint16_t msg_id, const char *topic, uint8_t qos = 0);
+bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const char *payload, uint8_t qos = 0, uint8_t retain = 0);
+bool MQTT_unsubscribe(uint8_t client_id, uint16_t msg_id, const char *topic);
+bool MQTT_disconnect(uint8_t client_id);
+MQTTConnStatus MQTT_getStatus(uint8_t client_id);
+bool MQTT_isConnected();
 
 /// @brief Initialize GSM module and SIM card
 /// @return true if GSM initialization successful
@@ -1167,6 +1198,384 @@ void GSM_sleep()
     {
         Serial.println("Failed to put GSM module in sleep mode");
     }
+}
+
+// ================================================================================
+//          MQTT FUNCTIONS
+// ================================================================================
+
+/// @brief Configure MQTT settings
+/// @param client_id MQTT client ID (0-5)
+/// @param recv_mode Reception mode (0=URC with data, 1=URC without data)
+/// @param msg_do Message delivery option (0=automatic, 1=manual)
+/// @param msg_len Message length display (0=no, 1=yes)
+/// @return true if configuration successful
+bool MQTT_configure(uint8_t client_id, uint8_t recv_mode, uint8_t msg_do, uint8_t msg_len)
+{
+    char config_cmd[64] = "";
+
+    snprintf(config_cmd, sizeof(config_cmd), "AT+QMTCFG=\"recv/mode\",%d,%d,%d",
+             client_id, recv_mode, msg_len);
+
+    Serial.print("MQTT Config: ");
+    Serial.println(config_cmd);
+
+    if (!sendAndCheck(config_cmd, "OK", 5000))
+    {
+        MQTT_INIT_ERROR = "Failed to configure MQTT receiving mode";
+        Serial.println(MQTT_INIT_ERROR);
+        return false;
+    }
+
+    MQTT_CONFIGURED = true;
+    Serial.println("MQTT configured successfully");
+    return true;
+}
+
+/// @brief Open MQTT broker connection
+/// @param client_id MQTT client ID (0-5)
+/// @param broker Broker hostname or IP address
+/// @param port Broker port (typically 1883 for non-SSL, 8883 for SSL)
+/// @return true if broker connection opened successfully
+bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port)
+{
+    char open_cmd[128] = "";
+
+    // Store broker info
+    strcpy(MQTT_BROKER, broker);
+    MQTT_PORT = port;
+
+    snprintf(open_cmd, sizeof(open_cmd), "AT+QMTOPEN=%d,\"%s\",%d",
+             client_id, broker, port);
+
+    Serial.print("MQTT Open: ");
+    Serial.println(open_cmd);
+
+    flushSerial();
+
+    if (!sendAndCheck(open_cmd, "OK", 10000))
+    {
+        MQTT_INIT_ERROR = "Failed to open MQTT broker connection";
+        Serial.println(MQTT_INIT_ERROR);
+        MQTT_INIT_FAIL_COUNT++;
+        return false;
+    }
+
+    // Wait for broker open URC: +QMTOPEN: <client_id>,0
+    // Docs state max response time is 120 s (network-dependent); 30 s covers most cases.
+    char urc[32];
+    if (!waitForURC("+QMTOPEN:", urc, sizeof(urc), 30000))
+    {
+        MQTT_INIT_ERROR = "MQTT broker open URC not received";
+        Serial.println(MQTT_INIT_ERROR);
+        MQTT_INIT_FAIL_COUNT++;
+        return false;
+    }
+
+    // Parse URC response
+    if (strstr(urc, "+QMTOPEN:") && strstr(urc, ",0"))
+    {
+        mqttBrokerOpen = true;
+        mqtt_status = MQTT_BROKER_OPEN;
+        Serial.println("MQTT broker connection opened successfully");
+        return true;
+    }
+
+    MQTT_INIT_ERROR = "Invalid MQTT broker open response";
+    Serial.println(MQTT_INIT_ERROR);
+    MQTT_INIT_FAIL_COUNT++;
+    return false;
+}
+
+/// @brief Connect MQTT client to broker
+/// @param client_id MQTT client ID (0-5)
+/// @param clientid MQTT client identifier string
+/// @param username Username for MQTT authentication (optional)
+/// @param password Password for MQTT authentication (optional)
+/// @return true if client connected successfully
+bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username, const char *password)
+{
+    char conn_cmd[256] = "";
+
+    // Store credentials
+    strcpy(MQTT_CLIENT_ID, clientid);
+    if (username != nullptr)
+        strcpy(MQTT_USERNAME, username);
+    if (password != nullptr)
+        strcpy(MQTT_PASSWORD, password);
+
+    // Build AT command based on whether credentials are provided
+    if (username != nullptr && password != nullptr)
+    {
+        snprintf(conn_cmd, sizeof(conn_cmd), "AT+QMTCONN=%d,\"%s\",\"%s\",\"%s\"",
+                 client_id, clientid, username, password);
+    }
+    else
+    {
+        snprintf(conn_cmd, sizeof(conn_cmd), "AT+QMTCONN=%d,\"%s\"",
+                 client_id, clientid);
+    }
+
+    Serial.print("MQTT Connect: ");
+    Serial.println(conn_cmd);
+
+    flushSerial();
+
+    if (!sendAndCheck(conn_cmd, "OK", 10000))
+    {
+        MQTT_INIT_ERROR = "Failed to send MQTT connect command";
+        Serial.println(MQTT_INIT_ERROR);
+        MQTT_INIT_FAIL_COUNT++;
+        return false;
+    }
+
+    // Wait for connect URC: +QMTCONN: <client_id>,0,0
+    char urc[32];
+    if (!waitForURC("+QMTCONN:", urc, sizeof(urc), 10000))
+    {
+        MQTT_INIT_ERROR = "MQTT connect URC not received";
+        Serial.println(MQTT_INIT_ERROR);
+        MQTT_INIT_FAIL_COUNT++;
+        return false;
+    }
+
+    // Parse URC response - successful connection returns +QMTCONN: <client_id>,0,0
+    if (strstr(urc, "+QMTCONN:") && strstr(urc, ",0,0"))
+    {
+        mqttConnected = true;
+        mqtt_status = MQTT_CONNECTED;
+        MQTT_INIT_FAIL_COUNT = 0;
+        Serial.println("MQTT client connected to broker successfully");
+        return true;
+    }
+
+    MQTT_INIT_ERROR = "Invalid MQTT connect response";
+    Serial.println(MQTT_INIT_ERROR);
+    MQTT_INIT_FAIL_COUNT++;
+    return false;
+}
+
+/// @brief Subscribe to MQTT topic
+/// @param client_id MQTT client ID (0-5)
+/// @param msg_id Message ID for subscription (used to track subscription)
+/// @param topic Topic name to subscribe to
+/// @param qos Quality of Service level (0-2)
+/// @return true if subscription successful
+bool MQTT_subscribe(uint8_t client_id, uint16_t msg_id, const char *topic, uint8_t qos)
+{
+    char sub_cmd[128] = "";
+
+    if (qos > 2)
+        qos = 2;
+
+    snprintf(sub_cmd, sizeof(sub_cmd), "AT+QMTSUB=%d,%d,\"%s\",%d",
+             client_id, msg_id, topic, qos);
+
+    Serial.print("MQTT Subscribe: ");
+    Serial.println(sub_cmd);
+
+    flushSerial();
+
+    if (!sendAndCheck(sub_cmd, "OK", 10000))
+    {
+        Serial.println("Failed to send MQTT subscribe command");
+        return false;
+    }
+
+    // Wait for subscription URC: +QMTSUB: <client_id>,<msg_id>,0,<qos>
+    char urc[32];
+    if (!waitForURC("+QMTSUB:", urc, sizeof(urc), 5000))
+    {
+        Serial.println("MQTT subscribe URC not received");
+        return false;
+    }
+
+    Serial.print("Subscribed to topic: ");
+    Serial.println(topic);
+    return true;
+}
+
+/// @brief Publish MQTT message to topic
+/// @param client_id MQTT client ID (0-5)
+/// @param msg_id Message ID for tracking
+/// @param topic Topic name to publish to
+/// @param payload Message payload to publish
+/// @param qos Quality of Service level (0-2)
+/// @param retain Retain flag (0=no, 1=yes)
+/// @return true if publish successful
+bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const char *payload, uint8_t qos, uint8_t retain)
+{
+    char pub_cmd[256] = "";
+    size_t payload_len = strlen(payload);
+
+    if (qos > 2)
+        qos = 2;
+    if (retain > 1)
+        retain = 1;
+
+    // Validate payload length (max 1500 bytes for EC200U)
+    if (payload_len > 1500)
+    {
+        Serial.println("MQTT payload exceeds maximum length of 1500 bytes");
+        return false;
+    }
+
+    // Build publish command: AT+QMTPUBEX=<client_id>,<msg_id>,<qos>,<retain>,"topic",<length>
+    snprintf(pub_cmd, sizeof(pub_cmd), "AT+QMTPUBEX=%d,%d,%d,%d,\"%s\",%d",
+             client_id, msg_id, qos, retain, topic, (int)payload_len);
+
+    Serial.print("MQTT Publish: ");
+    Serial.println(pub_cmd);
+
+    flushSerial();
+    GSMSerial.println(pub_cmd);
+
+    // Wait for ">" prompt to send payload.
+    // Per Quectel docs the modem returns "OK" then ">" — waitForReply scans the full
+    // stream so it catches ">" whenever it arrives. 15 s covers a slow GSM TCP handshake.
+    if (!waitForReply(">", 15000))
+    {
+        Serial.println("MQTT publish: no '>' data-input prompt received from modem");
+        MQTT_PUB_FAIL++;
+        return false;
+    }
+
+    // Send payload
+    GSMSerial.write((const uint8_t *)payload, payload_len);
+
+    // Wait for OK
+    if (!waitForReply("OK", 10000))
+    {
+        Serial.println("MQTT publish failed - no OK response");
+        MQTT_PUB_FAIL++;
+        return false;
+    }
+
+    // Wait for publish URC: +QMTPUBEX: <client_id>,<msg_id>,0
+    char urc[32];
+    if (!waitForURC("+QMTPUBEX:", urc, sizeof(urc), 5000))
+    {
+        Serial.println("MQTT publish URC not received");
+        MQTT_PUB_FAIL++;
+        return false;
+    }
+
+    if (strstr(urc, ",0")) // Check for success code 0
+    {
+        Serial.print("Published to topic: ");
+        Serial.println(topic);
+        MQTT_PUB_FAIL = 0;
+        return true;
+    }
+
+    Serial.println("MQTT publish failed");
+    MQTT_PUB_FAIL++;
+    return false;
+}
+
+/// @brief Unsubscribe from MQTT topic
+/// @param client_id MQTT client ID (0-5)
+/// @param msg_id Message ID for unsubscription
+/// @param topic Topic name to unsubscribe from
+/// @return true if unsubscription successful
+bool MQTT_unsubscribe(uint8_t client_id, uint16_t msg_id, const char *topic)
+{
+    char unsub_cmd[128] = "";
+
+    snprintf(unsub_cmd, sizeof(unsub_cmd), "AT+QMTUNS=%d,%d,\"%s\"",
+             client_id, msg_id, topic);
+
+    Serial.print("MQTT Unsubscribe: ");
+    Serial.println(unsub_cmd);
+
+    flushSerial();
+
+    if (!sendAndCheck(unsub_cmd, "OK", 10000))
+    {
+        Serial.println("Failed to send MQTT unsubscribe command");
+        return false;
+    }
+
+    // Wait for unsubscribe URC: +QMTUNS: <client_id>,<msg_id>,0
+    char urc[32];
+    if (!waitForURC("+QMTUNS:", urc, sizeof(urc), 5000))
+    {
+        Serial.println("MQTT unsubscribe URC not received");
+        return false;
+    }
+
+    Serial.print("Unsubscribed from topic: ");
+    Serial.println(topic);
+    return true;
+}
+
+/// @brief Disconnect MQTT client from broker
+/// @param client_id MQTT client ID (0-5)
+/// @return true if disconnection successful
+bool MQTT_disconnect(uint8_t client_id)
+{
+    char disc_cmd[32] = "";
+
+    snprintf(disc_cmd, sizeof(disc_cmd), "AT+QMTDISC=%d", client_id);
+
+    Serial.print("MQTT Disconnect: ");
+    Serial.println(disc_cmd);
+
+    flushSerial();
+
+    if (!sendAndCheck(disc_cmd, "OK", 10000))
+    {
+        Serial.println("Failed to send MQTT disconnect command");
+        return false;
+    }
+
+    // Wait for disconnect URC: +QMTDISC: <client_id>,0
+    char urc[32];
+    if (!waitForURC("+QMTDISC:", urc, sizeof(urc), 5000))
+    {
+        Serial.println("MQTT disconnect URC not received");
+        return false;
+    }
+
+    mqttConnected = false;
+    mqttBrokerOpen = false;
+    mqtt_status = MQTT_DISCONNECTED;
+    Serial.println("MQTT client disconnected successfully");
+    return true;
+}
+
+/// @brief Get current MQTT connection status
+/// @param client_id MQTT client ID (0-5)
+/// @return Current MQTT connection status
+MQTTConnStatus MQTT_getStatus(uint8_t client_id)
+{
+    char query_cmd[32] = "";
+
+    snprintf(query_cmd, sizeof(query_cmd), "AT+QMTOPEN?");
+
+    String response = "";
+    if (!sendAndCheck(query_cmd, "OK", response, 5000))
+    {
+        return MQTT_DISCONNECTED;
+    }
+
+    // Parse response to get current status
+    if (strstr(response.c_str(), "+QMTOPEN:"))
+    {
+        if (strstr(response.c_str(), ",1"))
+            return MQTT_BROKER_OPEN;
+        if (strstr(response.c_str(), ",0"))
+            return MQTT_CONNECTED;
+    }
+
+    return MQTT_DISCONNECTED;
+}
+
+/// @brief Check if MQTT is connected and ready
+/// @return true if MQTT client is connected to broker
+bool MQTT_isConnected()
+{
+    return mqttConnected;
 }
 
 // Testing POST data

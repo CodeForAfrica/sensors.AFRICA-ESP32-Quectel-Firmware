@@ -59,6 +59,7 @@
 #include "utils/wifi.h"
 #include "utils/deviceconfig.h"
 #include "webserver/asyncserver.h"
+#include "utils/mqtt_wifi.h"
 
 size_t max_wifi_hotspots_size = sizeof(struct_wifiInfo) * 20;
 struct struct_wifiInfo *wifiInfo = (struct_wifiInfo *)malloc(max_wifi_hotspots_size);
@@ -69,6 +70,7 @@ SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 
 const unsigned long ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
 const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS * 28; // force a reboot every month /
+const unsigned long SEND_TELEMETRY_INTERVAL_MS = 30 * 60 * 1000;            // 30 minutes
 
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
@@ -76,6 +78,9 @@ int sampling_interval = 5 * 60 * 1000; // 5 minutes
 unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
+unsigned long last_send_telemetry = 0;
+bool boot_telemetry_sent = false;                        // Tracks if telemetry has been sent on boot
+const unsigned long BOOT_TELEMETRY_DELAY_MS = 30 * 1000; // 30 seconds - time to allow connections to establish
 
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
 
@@ -88,6 +93,7 @@ char SENSORS_JSON_DATA_PATH[128] = {};
 char SENSORS_CSV_DATA_PATH[128] = {};
 char SENSORS_FAILED_DATA_SEND_STORE_FILE[40] = "failed_send_payloads.txt";
 char SENSORS_FAILED_DATA_SEND_STORE_PATH[128] = {};
+char MQTT_TELEMETRY_TOPIC[128] = {};
 
 char esp_chipid[18] = {};
 
@@ -207,6 +213,13 @@ bool isConnectivityAvailable();
 bool pingServer(const char *server, uint16_t port, uint16_t timeout_ms);
 void updateCommsPreference();
 void initComms();
+bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size);
+bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, const char *topic,
+                          const char *username, const char *password);
+bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *topic, uint8_t client_id,
+                              const char *username, const char *password, bool disconnect_after);
+bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client_id, const char *topic,
+                           const char *username, const char *password);
 void listenSerial();
 
 enum Month
@@ -245,6 +258,11 @@ void setup()
     strcpy(ROOT_DIR, "/");
     strcat(ROOT_DIR, SENSOR_PREFIX); //? Refactor to copy AP_SSID if it remains unchanged
     strcat(ROOT_DIR, esp_chipid);
+
+    strcat(MQTT_TELEMETRY_TOPIC, MQTT_BASE_TOPIC);
+    strcat(MQTT_TELEMETRY_TOPIC, "/");
+    strcat(MQTT_TELEMETRY_TOPIC, SENSOR_PREFIX);
+    strcat(MQTT_TELEMETRY_TOPIC, esp_chipid);
     // Set Dual Access Point and Station WiFi mode
     WiFi.mode(WIFI_AP_STA); // ToDo: Configure this when not on power saving mode.
     strcat(AP_SSID, SENSOR_PREFIX);
@@ -385,6 +403,62 @@ void loop()
         }
 
         starttime = millis();
+    }
+
+    // Send telemetry data over MQTT
+    // Determine if it's time to send telemetry (boot telemetry or interval-based)
+    bool time_to_send_telemetry = false;
+    bool is_boot_telemetry = false;
+
+    // Check if setup is complete and we haven't sent boot telemetry yet
+    if (!boot_telemetry_sent && !DeviceConfigState.configurationRequired && millis() - boottime > BOOT_TELEMETRY_DELAY_MS)
+    {
+        time_to_send_telemetry = true;
+        is_boot_telemetry = true;
+        Serial.println("Time for boot telemetry send");
+    }
+    // Check if it's time for regular interval-based telemetry
+    else if (millis() - last_send_telemetry > SEND_TELEMETRY_INTERVAL_MS)
+    {
+        time_to_send_telemetry = true;
+        Serial.println("Time for regular interval telemetry send");
+    }
+
+    if (time_to_send_telemetry && (CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE))
+    {
+        // Check if MQTT credentials are set
+        if (MY_MQTT_BROKER[0] == '\0' || MY_MQTT_USERNAME[0] == '\0' || MY_MQTT_PASSWORD[0] == '\0')
+        {
+            Serial.println("MQTT credentials not set. Skipping telemetry send.");
+        }
+        else
+        {
+            bool telemetry_sent = false;
+            // Try WiFi MQTT first if WiFi is available
+            if (DeviceConfigState.wifiConnected && WiFi.status() == WL_CONNECTED)
+            {
+                Serial.println("Sending telemetry via WiFi MQTT");
+                telemetry_sent = sendWiFiMQTTTelemetry(MY_MQTT_BROKER, MY_MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MY_MQTT_USERNAME, MY_MQTT_PASSWORD);
+            }
+            // Fall back to GSM MQTT if WiFi is not available but GSM is
+            else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
+            {
+                Serial.println("Sending telemetry via GSM MQTT");
+                telemetry_sent = initAndSendMQTTTelemetry(MY_MQTT_BROKER, MY_MQTT_PORT, MQTT_TELEMETRY_TOPIC, 0, MY_MQTT_USERNAME, MY_MQTT_PASSWORD, true);
+            }
+            else
+            {
+                Serial.println("No internet connectivity available for MQTT telemetry");
+            }
+
+            // Update telemetry tracking
+            if (is_boot_telemetry && telemetry_sent)
+            {
+                boot_telemetry_sent = true;
+                Serial.println("Boot telemetry sent successfully");
+            }
+            last_send_telemetry = millis();
+        }
     }
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
@@ -1329,11 +1403,10 @@ void sendFromMemoryLog(LOGGER &logger)
             if (api_pin != -1)
             {
                 if (!sendData(logger.DATA_STORE[i], api_pin, HOST_CFA, URL_CFA))
-                    /
-                    {
-                        // Append to file for sending later // ToDo: Check the state of DeviceConfigState.sdCardInitialized before attempting to write to SD card
-                        appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
-                    }
+                {
+                    // Append to file for sending later // ToDo: Check the state of DeviceConfigState.sdCardInitialized before attempting to write to SD card
+                    appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
+                }
             }
 
             memset(logger.DATA_STORE[i], '\0', 255);
@@ -1866,4 +1939,264 @@ void listenSerial()
             Serial.println("Unknown command: " + command);
         }
     }
+}
+
+/// @brief Build MQTT telemetry JSON payload with device, GSM, WiFi, and sensor information
+/// @param mqtt_payload Buffer to store the JSON payload
+/// @param payload_size Size of the payload buffer
+/// @return true if payload built successfully, false otherwise
+bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size)
+{
+    try
+    {
+        JsonDocument telemetry_doc;
+
+        // Timestamp
+        String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
+        telemetry_doc["timestamp"] = datetime;
+
+        telemetry_doc["device_id"] = esp_chipid;
+
+        // GSM Information
+        if (gsm_capable && DeviceConfigState.gsmConnected)
+        {
+            JsonObject gsm = telemetry_doc["gsm"].to<JsonObject>();
+            gsm["connected"] = GPRS_CONNECTED;
+            gsm["network_name"] = GSMRuntimeInfo.operator_name;
+            gsm["signal_strength"] = GSMRuntimeInfo.signal_strength;
+            gsm["imei"] = GSMRuntimeInfo.imei;
+            gsm["model"] = GSMRuntimeInfo.model_id;
+            gsm["firmware"] = GSMRuntimeInfo.firmware_version;
+            gsm["sim_ccid"] = GSMRuntimeInfo.sim_ccid;
+        }
+
+        // WiFi Information
+        if (DeviceConfigState.wifiConnected)
+        {
+            JsonObject wifi = telemetry_doc["wifi"].to<JsonObject>();
+            wifi["connected"] = true;
+            wifi["ssid"] = wifi_info["SSID"];
+            wifi["signal_strength"] = wifi_info["Signal Strength"];
+            wifi["ip_address"] = wifi_info["IP Address"];
+        }
+        else
+        {
+            JsonObject wifi = telemetry_doc["wifi"].to<JsonObject>();
+            wifi["connected"] = false;
+        }
+
+        // Device Configuration
+        JsonObject config = telemetry_doc["config"].to<JsonObject>();
+        config["power_saving_mode"] = DeviceConfig.power_saving_mode;
+        config["wifi_enabled"] = DeviceConfig.useWiFi;
+        config["gsm_enabled"] = DeviceConfig.useGSM;
+        config["sampling_interval_ms"] = sampling_interval;
+        config["sending_interval_ms"] = sending_intervall_ms;
+
+        // Communication Status
+        JsonObject comms = telemetry_doc["communications"].to<JsonObject>();
+        comms["wifi_available"] = CommsManagerState.wifiOnline;
+        comms["gsm_available"] = CommsManagerState.gsmOnline;
+        comms["internet_available"] = DeviceConfigState.internetAvailable;
+        comms["preferred"] = (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::WIFI) ? "WiFi" : (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::GSM) ? "GSM"
+                                                                                                                                                                                             : "None";
+
+        // Sensor Data
+        JsonObject sensors = telemetry_doc["sensors"].to<JsonObject>();
+        if (current_sensor_data["PM"])
+        {
+            JsonObject pm = sensors["PM"].to<JsonObject>();
+            if (current_sensor_data["PM"]["PM1"])
+                pm["PM1"] = current_sensor_data["PM"]["PM1"];
+            if (current_sensor_data["PM"]["PM2.5"])
+                pm["PM2.5"] = current_sensor_data["PM"]["PM2.5"];
+            if (current_sensor_data["PM"]["PM10"])
+                pm["PM10"] = current_sensor_data["PM"]["PM10"];
+        }
+
+        if (current_sensor_data["DHT"])
+        {
+            JsonObject dht = sensors["DHT"].to<JsonObject>();
+            if (current_sensor_data["DHT"]["temperature"])
+                dht["temperature"] = current_sensor_data["DHT"]["temperature"];
+            if (current_sensor_data["DHT"]["humidity"])
+                dht["humidity"] = current_sensor_data["DHT"]["humidity"];
+        }
+
+        // System Status
+        JsonObject system = telemetry_doc["system"].to<JsonObject>();
+        system["uptime_ms"] = millis();
+        system["free_heap"] = ESP.getFreeHeap();
+        system["data_sends_count"] = count_sends;
+        system["data_points_logged"] = JSON_PAYLOAD_LOGGER.log_count;
+
+        // Serialize to buffer
+        if (serializeJson(telemetry_doc, mqtt_payload, payload_size) == 0)
+        {
+            Serial.println("buildMQTTTelemetryPayload: Failed to serialize JSON - buffer too small");
+            return false;
+        }
+
+        return true;
+    }
+    catch (...)
+    {
+        Serial.println("buildMQTTTelemetryPayload: Exception occurred while building payload");
+        return false;
+    }
+}
+
+/// @brief Send telemetry data to MQTT broker
+/// @param broker MQTT broker hostname/IP address
+/// @param port MQTT broker port (default 1883)
+/// @param client_id MQTT client ID (0-5)
+/// @param topic MQTT topic to publish to
+/// @param username MQTT username (optional)
+/// @param password MQTT password (optional)
+/// @return true if telemetry sent successfully, false otherwise
+bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, const char *topic,
+                          const char *username = nullptr, const char *password = nullptr)
+{
+    // Check if GPRS is available (required for MQTT over GSM)
+    if (!GPRS_CONNECTED)
+    {
+        Serial.println("sendMQTTTelemetry: GPRS not connected - cannot send telemetry");
+        return false;
+    }
+
+    // Configure MQTT if not already done
+    if (!MQTT_CONFIGURED)
+    {
+        Serial.println("sendMQTTTelemetry: Configuring MQTT...");
+        if (!MQTT_configure(client_id))
+        {
+            Serial.println("sendMQTTTelemetry: Failed to configure MQTT");
+            return false;
+        }
+    }
+
+    // Open broker connection
+    if (!mqttBrokerOpen)
+    {
+        Serial.println("sendMQTTTelemetry: Opening MQTT broker connection...");
+        if (!MQTT_open(client_id, broker, port))
+        {
+            Serial.print("sendMQTTTelemetry: Failed to open MQTT broker - Error: ");
+            Serial.println(MQTT_INIT_ERROR);
+            return false;
+        }
+        delay(1000);
+    }
+
+    // Connect to broker
+    if (!mqttConnected)
+    {
+        Serial.println("sendMQTTTelemetry: Connecting MQTT client...");
+        if (!MQTT_connect(client_id, esp_chipid, username, password))
+        {
+            Serial.print("sendMQTTTelemetry: Failed to connect MQTT client - Error: ");
+            Serial.println(MQTT_INIT_ERROR);
+            return false;
+        }
+        delay(1000);
+    }
+
+    // Build telemetry payload
+    char mqtt_payload[2048] = {}; // Large buffer for comprehensive telemetry
+    if (!buildMQTTTelemetryPayload(mqtt_payload, sizeof(mqtt_payload)))
+    {
+        Serial.println("sendMQTTTelemetry: Failed to build telemetry payload");
+        return false;
+    }
+
+    Serial.print("sendMQTTTelemetry: Payload size: ");
+    Serial.print(strlen(mqtt_payload));
+    Serial.println(" bytes");
+
+    // Publish telemetry
+    Serial.print("sendMQTTTelemetry: Publishing to topic: ");
+    Serial.println(topic);
+
+    if (!MQTT_publish(client_id, 1, topic, mqtt_payload, 1, 0))
+    {
+        Serial.println("sendMQTTTelemetry: Failed to publish telemetry");
+        return false;
+    }
+
+    Serial.println("sendMQTTTelemetry: Telemetry published successfully");
+    count_sends++;
+    return true;
+}
+
+/// @brief Initialize MQTT and send telemetry, with automatic cleanup
+/// @param broker MQTT broker hostname/IP
+/// @param port MQTT broker port
+/// @param topic MQTT topic for telemetry
+/// @param client_id MQTT client ID
+/// @param username MQTT username (optional)
+/// @param password MQTT password (optional)
+/// @param disconnect_after If true, disconnect and close broker after sending
+/// @return true if successful, false otherwise
+bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *topic, uint8_t client_id = 0,
+                              const char *username = nullptr, const char *password = nullptr,
+                              bool disconnect_after = true)
+{
+    bool result = sendGsmMQTTTelemetry(broker, port, client_id, topic, username, password);
+
+    if (disconnect_after && mqttConnected)
+    {
+        delay(500);
+        Serial.println("initAndSendMQTTTelemetry: Disconnecting MQTT...");
+        MQTT_disconnect(client_id);
+    }
+
+    return result;
+}
+
+/// @brief Send telemetry data to MQTT broker via WiFi (PubSubClient)
+/// @param broker MQTT broker hostname/IP address
+/// @param port MQTT broker port (default 1883)
+/// @param client_id MQTT client ID
+/// @param topic MQTT topic to publish to
+/// @param username MQTT username (optional)
+/// @param password MQTT password (optional)
+/// @return true if telemetry sent successfully, false otherwise
+bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client_id, const char *topic,
+                           const char *username = nullptr, const char *password = nullptr)
+{
+    // Check if WiFi is connected
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("sendWiFiMQTTTelemetry: WiFi not connected - cannot send telemetry");
+        return false;
+    }
+
+    Serial.println("sendWiFiMQTTTelemetry: WiFi connected, proceeding with MQTT publish");
+
+    // Build telemetry payload
+    char mqtt_payload[2048] = {}; // Large buffer for comprehensive telemetry
+    if (!buildMQTTTelemetryPayload(mqtt_payload, sizeof(mqtt_payload)))
+    {
+        Serial.println("sendWiFiMQTTTelemetry: Failed to build telemetry payload");
+        return false;
+    }
+
+    Serial.print("sendWiFiMQTTTelemetry: Payload size: ");
+    Serial.print(strlen(mqtt_payload));
+    Serial.println(" bytes");
+
+    // Send telemetry via WiFi MQTT
+    bool result = wifiMQTTSendTelemetry(broker, port, topic, client_id, mqtt_payload, username, password, true);
+
+    if (result)
+    {
+        Serial.println("sendWiFiMQTTTelemetry: Telemetry sent successfully via WiFi");
+        count_sends++;
+    }
+    else
+    {
+        Serial.println("sendWiFiMQTTTelemetry: Failed to send telemetry via WiFi");
+    }
+
+    return result;
 }
