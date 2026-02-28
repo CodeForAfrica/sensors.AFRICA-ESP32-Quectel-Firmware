@@ -207,6 +207,9 @@ bool isConnectivityAvailable();
 bool pingServer(const char *server, uint16_t port, uint16_t timeout_ms);
 void updateCommsPreference();
 void initComms();
+bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size);
+bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, const char *topic,
+                          const char *username, const char *password);
 void listenSerial();
 
 enum Month
@@ -1970,4 +1973,86 @@ bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size)
         Serial.println("buildMQTTTelemetryPayload: Exception occurred while building payload");
         return false;
     }
+}
+
+/// @brief Send telemetry data to MQTT broker
+/// @param broker MQTT broker hostname/IP address
+/// @param port MQTT broker port (default 1883)
+/// @param client_id MQTT client ID (0-5)
+/// @param topic MQTT topic to publish to
+/// @param username MQTT username (optional)
+/// @param password MQTT password (optional)
+/// @return true if telemetry sent successfully, false otherwise
+bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, const char *topic,
+                          const char *username = nullptr, const char *password = nullptr)
+{
+    // Check if GPRS is available (required for MQTT over GSM)
+    if (!GPRS_CONNECTED)
+    {
+        Serial.println("sendMQTTTelemetry: GPRS not connected - cannot send telemetry");
+        return false;
+    }
+
+    // Configure MQTT if not already done
+    if (!MQTT_CONFIGURED)
+    {
+        Serial.println("sendMQTTTelemetry: Configuring MQTT...");
+        if (!MQTT_configure(client_id))
+        {
+            Serial.println("sendMQTTTelemetry: Failed to configure MQTT");
+            return false;
+        }
+    }
+
+    // Open broker connection
+    if (!mqttBrokerOpen)
+    {
+        Serial.println("sendMQTTTelemetry: Opening MQTT broker connection...");
+        if (!MQTT_open(client_id, broker, port))
+        {
+            Serial.print("sendMQTTTelemetry: Failed to open MQTT broker - Error: ");
+            Serial.println(MQTT_INIT_ERROR);
+            return false;
+        }
+        delay(1000);
+    }
+
+    // Connect to broker
+    if (!mqttConnected)
+    {
+        Serial.println("sendMQTTTelemetry: Connecting MQTT client...");
+        if (!MQTT_connect(client_id, esp_chipid, username, password))
+        {
+            Serial.print("sendMQTTTelemetry: Failed to connect MQTT client - Error: ");
+            Serial.println(MQTT_INIT_ERROR);
+            return false;
+        }
+        delay(1000);
+    }
+
+    // Build telemetry payload
+    char mqtt_payload[2048] = {}; // Large buffer for comprehensive telemetry
+    if (!buildMQTTTelemetryPayload(mqtt_payload, sizeof(mqtt_payload)))
+    {
+        Serial.println("sendMQTTTelemetry: Failed to build telemetry payload");
+        return false;
+    }
+
+    Serial.print("sendMQTTTelemetry: Payload size: ");
+    Serial.print(strlen(mqtt_payload));
+    Serial.println(" bytes");
+
+    // Publish telemetry
+    Serial.print("sendMQTTTelemetry: Publishing to topic: ");
+    Serial.println(topic);
+
+    if (!MQTT_publish(client_id, 1, topic, mqtt_payload, 1, 0))
+    {
+        Serial.println("sendMQTTTelemetry: Failed to publish telemetry");
+        return false;
+    }
+
+    Serial.println("sendMQTTTelemetry: Telemetry published successfully");
+    count_sends++;
+    return true;
 }

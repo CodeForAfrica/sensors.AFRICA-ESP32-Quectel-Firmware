@@ -127,6 +127,17 @@ String getModelID();
 String getProductInfo();
 bool pingIP(const char *host, uint8_t contextID = 1);
 
+// MQTT Functions
+bool MQTT_configure(uint8_t client_id = 0, uint8_t recv_mode = 0, uint8_t msg_do = 0, uint8_t msg_len = 1);
+bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port);
+bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username = nullptr, const char *password = nullptr);
+bool MQTT_subscribe(uint8_t client_id, uint16_t msg_id, const char *topic, uint8_t qos = 0);
+bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const char *payload, uint8_t qos = 0, uint8_t retain = 0);
+bool MQTT_unsubscribe(uint8_t client_id, uint16_t msg_id, const char *topic);
+bool MQTT_disconnect(uint8_t client_id);
+MQTTConnStatus MQTT_getStatus(uint8_t client_id);
+bool MQTT_isConnected();
+
 /// @brief Initialize GSM module and SIM card
 /// @return true if GSM initialization successful
 bool GSM_init()
@@ -1188,7 +1199,6 @@ void GSM_sleep()
         Serial.println("Failed to put GSM module in sleep mode");
     }
 }
-
 
 // ================================================================================
 //          MQTT FUNCTIONS
