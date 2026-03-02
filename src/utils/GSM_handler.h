@@ -121,6 +121,7 @@ String getFirwmareVersion();
 String getModelID();
 String getProductInfo();
 bool pingIP(const char *host, uint8_t contextID = 1);
+String getBatteryStatus();
 
 // MQTT Functions
 bool MQTT_configure(uint8_t client_id = 0, uint8_t recv_mode = 0, uint8_t msg_do = 0, uint8_t msg_len = 1);
@@ -1191,6 +1192,49 @@ void GSM_sleep()
     {
         Serial.println("Failed to put GSM module in sleep mode");
     }
+}
+
+String getBatteryStatus()
+{
+    String AT_response = "";
+    const char AT_cmd[] = "AT+CBC";
+    char buffer[64];
+
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return "";
+
+    // Extract the full "+CBC: <bcs>,<bcl>,<voltage>"" response line
+    if (extractText((char *)AT_response.c_str(), "+CBC: ", buffer, sizeof(buffer), '\n'))
+    {
+        // Parse the three values separated by commas
+        int bcs, bcl, voltage;
+        if (sscanf(buffer, "%d,%d,%d", &bcs, &bcl, &voltage) == 3)
+        {
+            // Map battery charge status to human-readable text
+            const char *status_text;
+            switch (bcs)
+            {
+            case 0:
+                status_text = "Not charging";
+                break;
+            case 1:
+                status_text = "Charging";
+                break;
+            case 2:
+                status_text = "Charging complete";
+                break;
+            default:
+                status_text = "Unknown";
+                break;
+            }
+
+            char formatted[64];
+            snprintf(formatted, sizeof(formatted), "%s %d%% %.1fv", status_text, bcl, voltage / 1000.0); // e.g. "charging 75% 4.2v"
+            return String(formatted);
+        }
+    }
+
+    return "";
 }
 
 // ================================================================================

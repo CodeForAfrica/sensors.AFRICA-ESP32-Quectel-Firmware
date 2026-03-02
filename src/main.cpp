@@ -1982,6 +1982,7 @@ bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size)
             gsm["model"] = GSMRuntimeInfo.model_id;
             gsm["firmware"] = GSMRuntimeInfo.firmware_version;
             gsm["sim_ccid"] = GSMRuntimeInfo.sim_ccid;
+            gsm["battery_status"] = getBatteryStatus();
         }
 
         // WiFi Information
