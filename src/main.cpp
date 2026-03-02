@@ -409,59 +409,62 @@ void loop()
         starttime = millis();
     }
 
-    // Check if setup is complete and we haven't sent boot telemetry yet
-    if (!boot_telemetry_sent && !DeviceConfigState.configurationRequired && millis() - boottime > BOOT_TELEMETRY_DELAY_MS)
+    if (DeviceConfigState.isMQTTConfigured)
     {
-        time_to_send_telemetry = true;
-        is_boot_telemetry = true;
-        Serial.println("Time for boot telemetry send");
-    }
-    // Check if it's time for regular interval-based telemetry
-    else if (millis() - last_send_telemetry > SEND_TELEMETRY_INTERVAL_MS)
-    {
-        time_to_send_telemetry = true;
-        Serial.println("Time for regular interval telemetry send");
-    }
-
-    if (time_to_send_telemetry && (CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE))
-    {
-        // Check if MQTT credentials are set
-        if (MQTT_BROKER[0] == '\0' || MQTT_USERNAME[0] == '\0' || MQTT_PASSWORD[0] == '\0')
+        // Check if setup is complete and we haven't sent boot telemetry yet
+        if (!boot_telemetry_sent && !DeviceConfigState.configurationRequired && millis() - boottime > BOOT_TELEMETRY_DELAY_MS)
         {
-            Serial.println("MQTT credentials not set. Skipping telemetry send.");
-            boot_telemetry_sent = true;
-            time_to_send_telemetry = false;
+            time_to_send_telemetry = true;
+            is_boot_telemetry = true;
+            Serial.println("Time for boot telemetry send");
         }
-        else
+        // Check if it's time for regular interval-based telemetry
+        else if (millis() - last_send_telemetry > SEND_TELEMETRY_INTERVAL_MS)
         {
-            bool telemetry_sent = false;
-            // Try WiFi MQTT first if WiFi is available
-            if (DeviceConfigState.wifiConnected && WiFi.status() == WL_CONNECTED)
+            time_to_send_telemetry = true;
+            Serial.println("Time for regular interval telemetry send");
+        }
+
+        if (time_to_send_telemetry && (CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE))
+        {
+            // Check if MQTT credentials are set
+            if (MQTT_BROKER[0] == '\0' || MQTT_USERNAME[0] == '\0' || MQTT_PASSWORD[0] == '\0')
             {
-                Serial.println("Sending telemetry via WiFi MQTT");
-                telemetry_sent = sendWiFiMQTTTelemetry(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MQTT_USERNAME, MQTT_PASSWORD);
-            }
-            // Fall back to GSM MQTT if WiFi is not available but GSM is
-            else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
-            {
-                Serial.println("Sending telemetry via GSM MQTT");
-                telemetry_sent = initAndSendMQTTTelemetry(MQTT_BROKER, MQTT_PORT, MQTT_TELEMETRY_TOPIC, 0, MQTT_USERNAME, MQTT_PASSWORD, true);
+                Serial.println("MQTT credentials not set. Skipping telemetry send.");
+                boot_telemetry_sent = true;
+                time_to_send_telemetry = false;
             }
             else
             {
-                Serial.println("No internet connectivity available for MQTT telemetry");
-            }
+                bool telemetry_sent = false;
+                // Try WiFi MQTT first if WiFi is available
+                if (DeviceConfigState.wifiConnected && WiFi.status() == WL_CONNECTED)
+                {
+                    Serial.println("Sending telemetry via WiFi MQTT");
+                    telemetry_sent = sendWiFiMQTTTelemetry(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MQTT_USERNAME, MQTT_PASSWORD);
+                }
+                // Fall back to GSM MQTT if WiFi is not available but GSM is
+                else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
+                {
+                    Serial.println("Sending telemetry via GSM MQTT");
+                    telemetry_sent = initAndSendMQTTTelemetry(MQTT_BROKER, MQTT_PORT, MQTT_TELEMETRY_TOPIC, 0, MQTT_USERNAME, MQTT_PASSWORD, true);
+                }
+                else
+                {
+                    Serial.println("No internet connectivity available for MQTT telemetry");
+                }
 
-            // Update telemetry tracking
-            if (is_boot_telemetry && telemetry_sent)
-            {
-                boot_telemetry_sent = true;
-                Serial.println("Boot telemetry sent successfully");
+                // Update telemetry tracking
+                if (is_boot_telemetry && telemetry_sent)
+                {
+                    boot_telemetry_sent = true;
+                    Serial.println("Boot telemetry sent successfully");
+                }
             }
+            // Always update the timestamp when time to send telemetry, regardless of credentials status
+            time_to_send_telemetry = false;
+            last_send_telemetry = millis();
         }
-        // Always update the timestamp when time to send telemetry, regardless of credentials status
-        time_to_send_telemetry = false;
-        last_send_telemetry = millis();
     }
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
@@ -1563,6 +1566,10 @@ void loadInitialConfigs()
 
     if (!DeviceConfig.useWiFi && !DeviceConfig.useGSM)
         DeviceConfigState.configurationRequired = true;
+
+#if defined(MQTT_BROKER) && MQTT_BROKER != "" && defined(MQTT_USER) && MQTT_USER != "" && defined(MQTT_PASSWORD) && MQTT_PASSWORD != ""
+    DeviceConfigState.isMQTTConfigured = true;
+#endif
 
     // if (DeviceConfig.power_saving_mode)
     //     {

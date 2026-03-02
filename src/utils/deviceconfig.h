@@ -38,6 +38,7 @@ struct DeviceConfigState
     bool internetAvailable = false;
     bool timeSet = false;
     bool sdCardInitialized = false;
+    bool isMQTTConfigured = false;
 };
 
 extern struct DeviceConfigState DeviceConfigState;
