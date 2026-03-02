@@ -428,7 +428,7 @@ void loop()
         if (time_to_send_telemetry && (CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE))
         {
             // Check if MQTT credentials are set
-            if (MQTT_BROKER[0] == '\0' || MQTT_USERNAME[0] == '\0' || MQTT_PASSWORD[0] == '\0')
+            if (MQTT_BROKER[0] == '\0' || MQTT_USERNAME[0] == '\0' || MQTT_PASSWORD[0] == '\0') //! Refactor as this check is repeated.
             {
                 Serial.println("MQTT credentials not set. Skipping telemetry send.");
                 boot_telemetry_sent = true;
@@ -1567,8 +1567,12 @@ void loadInitialConfigs()
     if (!DeviceConfig.useWiFi && !DeviceConfig.useGSM)
         DeviceConfigState.configurationRequired = true;
 
-#if defined(MQTT_BROKER) && MQTT_BROKER != "" && defined(MQTT_USER) && MQTT_USER != "" && defined(MQTT_PASSWORD) && MQTT_PASSWORD != ""
-    DeviceConfigState.isMQTTConfigured = true;
+#if defined(MQTT_BROKER) && defined(MQTT_USERNAME) && defined(MQTT_PASSWORD)
+    if (MQTT_BROKER[0] != '\0' && MQTT_USERNAME[0] != '\0' && MQTT_PASSWORD[0] != '\0')
+    {
+
+        DeviceConfigState.isMQTTConfigured = true;
+    }
 #endif
 
     // if (DeviceConfig.power_saving_mode)
