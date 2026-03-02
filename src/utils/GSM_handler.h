@@ -83,11 +83,6 @@ MQTTConnStatus mqtt_status = MQTT_DISCONNECTED;
 int MQTT_INIT_FAIL_COUNT = 0;
 int MQTT_PUB_FAIL = 0;
 String MQTT_INIT_ERROR = "";
-char MQTT_BROKER[64] = "";
-uint16_t MQTT_PORT = 1883;
-char MQTT_CLIENT_ID[64] = "esp32_ec200u";
-char MQTT_USERNAME[64] = "";
-char MQTT_PASSWORD[64] = "";
 
 bool GSM_init();
 bool register_to_network();
@@ -1079,8 +1074,6 @@ bool pingIP(const char *host, uint8_t contextID)
     snprintf(cmd, sizeof(cmd), "AT+QPING=%d,\"%s\",32,4",
              contextID, host);
 
-    Serial.println(cmd);
-
     flushSerial();
 
     // Wait for OK
@@ -1241,10 +1234,6 @@ bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port)
 {
     char open_cmd[128] = "";
 
-    // Store broker info
-    strcpy(MQTT_BROKER, broker);
-    MQTT_PORT = port;
-
     snprintf(open_cmd, sizeof(open_cmd), "AT+QMTOPEN=%d,\"%s\",%d",
              client_id, broker, port);
 
@@ -1296,13 +1285,6 @@ bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port)
 bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username, const char *password)
 {
     char conn_cmd[256] = "";
-
-    // Store credentials
-    strcpy(MQTT_CLIENT_ID, clientid);
-    if (username != nullptr)
-        strcpy(MQTT_USERNAME, username);
-    if (password != nullptr)
-        strcpy(MQTT_PASSWORD, password);
 
     // Build AT command based on whether credentials are provided
     if (username != nullptr && password != nullptr)

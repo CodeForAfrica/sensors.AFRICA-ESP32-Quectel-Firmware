@@ -70,7 +70,7 @@ SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 
 const unsigned long ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
 const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS * 28; // force a reboot every month /
-const unsigned long SEND_TELEMETRY_INTERVAL_MS = 2 * 60 * 1000;             // 30 minutes
+const unsigned long SEND_TELEMETRY_INTERVAL_MS = 30 * 60 * 1000;            // 30 minutes
 
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
@@ -426,7 +426,7 @@ void loop()
     if (time_to_send_telemetry && (CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE))
     {
         // Check if MQTT credentials are set
-        if (MY_MQTT_BROKER[0] == '\0' || MY_MQTT_USERNAME[0] == '\0' || MY_MQTT_PASSWORD[0] == '\0')
+        if (MQTT_BROKER[0] == '\0' || MQTT_USERNAME[0] == '\0' || MQTT_PASSWORD[0] == '\0')
         {
             Serial.println("MQTT credentials not set. Skipping telemetry send.");
             boot_telemetry_sent = true;
@@ -439,13 +439,13 @@ void loop()
             if (DeviceConfigState.wifiConnected && WiFi.status() == WL_CONNECTED)
             {
                 Serial.println("Sending telemetry via WiFi MQTT");
-                telemetry_sent = sendWiFiMQTTTelemetry(MY_MQTT_BROKER, MY_MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MY_MQTT_USERNAME, MY_MQTT_PASSWORD);
+                telemetry_sent = sendWiFiMQTTTelemetry(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MQTT_USERNAME, MQTT_PASSWORD);
             }
             // Fall back to GSM MQTT if WiFi is not available but GSM is
             else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
             {
                 Serial.println("Sending telemetry via GSM MQTT");
-                telemetry_sent = initAndSendMQTTTelemetry(MY_MQTT_BROKER, MY_MQTT_PORT, MQTT_TELEMETRY_TOPIC, 0, MY_MQTT_USERNAME, MY_MQTT_PASSWORD, true);
+                telemetry_sent = initAndSendMQTTTelemetry(MQTT_BROKER, MQTT_PORT, MQTT_TELEMETRY_TOPIC, 0, MQTT_USERNAME, MQTT_PASSWORD, true);
             }
             else
             {
