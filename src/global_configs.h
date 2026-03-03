@@ -61,4 +61,5 @@ static int SD_CS = 39;
 #define MQTT_USERNAME "" // set to enable MQTT authentication
 #define MQTT_PASSWORD "" // set to enable MQTT authentication
 #define MQTT_CLIENT_ID 5
+#define MQTT_SUBSCRIBE_TOPIC "devices/nodes/configuration"
 #endif

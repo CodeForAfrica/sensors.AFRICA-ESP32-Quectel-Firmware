@@ -35,7 +35,6 @@ static bool wifiMQTTConnect(const char *broker, uint16_t port, const char *clien
         return false;
     }
 
-
     // Set server
     mqttClient.setServer(broker, port);
 
@@ -190,6 +189,28 @@ static bool wifiMQTTSendTelemetry(const char *broker, uint16_t port, const char 
     }
 
     return true;
+}
+
+static void wifiMQTTCallback(char *topic, byte *payload, unsigned int length)
+{
+    Serial.print("wifiMQTTCallback: Message arrived on topic: ");
+    Serial.println(topic);
+    Serial.print("wifiMQTTCallback: Payload length: ");
+    Serial.println(length);
+
+    if (topic == MQTT_SUBSCRIBE_TOPIC)
+    {
+        Serial.println("wifiMQTTCallback: Received configuration update");
+        // ToDO: Process configuration update (e.g., parse JSON and apply settings)
+    }
+    // Convert payload to string
+    String message;
+    for (unsigned int i = 0; i < length; i++)
+    {
+        message += (char)payload[i];
+    }
+    Serial.print("wifiMQTTCallback: Payload: ");
+    Serial.println(message);
 }
 
 #endif // MQTT_WIFI_H

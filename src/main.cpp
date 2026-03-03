@@ -1927,6 +1927,15 @@ void initComms()
                 if (DeviceConfigState.isMQTTConfigured && !CommsManagerState.mqttConnectionInitialized)
                 {
                     CommsManagerState.mqttConnectionInitialized = wifiMQTTConnect(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+                    if (CommsManagerState.mqttConnectionInitialized)
+                    {
+                        Serial.println("Attempting to subscribe to MQTT topic: " + String(MQTT_SUBSCRIBE_TOPIC));
+                        mqttClient.setCallback(wifiMQTTCallback);
+                        if (!mqttClient.subscribe(MQTT_SUBSCRIBE_TOPIC))
+                        {
+                            Serial.println("Failed to subscribe to MQTT topic");
+                        }
+                    }
                 }
             }
         }
