@@ -19,8 +19,8 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gideon Maina
- * @date 2026-02-26
- * @version 1.3.2
+ * @date 2026-03-03
+ * @version 1.4.1
  *
  * @dependencies
  * - ArduinoJson
@@ -79,8 +79,9 @@ unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
 unsigned long last_send_telemetry = 0;
-bool boot_telemetry_sent = false;                        // Tracks if telemetry has been sent on boot
-const unsigned long BOOT_TELEMETRY_DELAY_MS = 30 * 1000; // 30 seconds - time to allow connections to establish
+bool boot_telemetry_sent = false;                                 // Tracks if telemetry has been sent on boot
+const unsigned long BOOT_TELEMETRY_DELAY_MS = 30 * 1000;          // 30 seconds - time to allow connections to establish
+const unsigned long MQTT_INCOMING_CHECK_INTERVAL = 5 * 60 * 1000; // 5 mminutes
 
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
 
@@ -168,6 +169,7 @@ struct CommsManagerState
     bool gsmOnline;
     bool maxReconnectAttemptsReached;
     bool mqttConnectionInitialized;
+    unsigned long lastMQTTCheck;
 
     // Initialize state
     void init()
@@ -184,6 +186,7 @@ struct CommsManagerState
         gsmOnline = false;
         maxReconnectAttemptsReached = false;
         mqttConnectionInitialized = false;
+        lastMQTTCheck = 0;
     }
 } CommsManagerState;
 
@@ -225,6 +228,7 @@ bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client
                            const char *username, const char *password);
 void listenSerial();
 void buildDeviceInfoJSON();
+void checkIncomingMQTTMessages();
 
 enum Month
 {
@@ -468,6 +472,8 @@ void loop()
             last_send_telemetry = millis();
         }
     }
+
+    checkIncomingMQTTMessages();
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
     {
@@ -2289,4 +2295,32 @@ void buildDeviceInfoJSON()
     {
         Serial.println("buildDeviceInfoJSON: Exception occurred while building device info JSON");
     }
+}
+
+void checkIncomingMQTTMessages()
+{
+    if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::NONE)
+        return;
+    if (millis() - CommsManagerState.lastMQTTCheck < MQTT_INCOMING_CHECK_INTERVAL)
+        return;
+
+    if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::WIFI && CommsManagerState.wifiOnline && CommsManagerState.mqttConnectionInitialized)
+    {
+        if (!mqttClient.connected())
+        {
+            bool conneceted = wifiMQTTConnect(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+            if (conneceted)
+            {
+                // mqttClient.setCallback(wifiMQTTCallback);
+                if (!mqttClient.subscribe(MQTT_SUBSCRIBE_TOPIC))
+                {
+                    Serial.println("Failed to subscribe to MQTT topic");
+                }
+            }
+        }
+
+        mqttClient.loop();
+    }
+
+    CommsManagerState.lastMQTTCheck = millis();
 }
