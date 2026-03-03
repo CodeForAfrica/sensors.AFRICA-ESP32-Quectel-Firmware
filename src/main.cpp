@@ -167,6 +167,7 @@ struct CommsManagerState
     bool wifiOnline;
     bool gsmOnline;
     bool maxReconnectAttemptsReached;
+    bool mqttConnectionInitialized;
 
     // Initialize state
     void init()
@@ -182,6 +183,7 @@ struct CommsManagerState
         wifiOnline = false;
         gsmOnline = false;
         maxReconnectAttemptsReached = false;
+        mqttConnectionInitialized = false;
     }
 } CommsManagerState;
 
@@ -1533,6 +1535,10 @@ void initializeAndConfigGSM()
             Serial.println("Failed to fetch time from network");
         }
     }
+    if (DeviceConfigState.gsmInternetAvailable && DeviceConfigState.isMQTTConfigured && !CommsManagerState.mqttConnectionInitialized)
+    {
+        CommsManagerState.mqttConnectionInitialized = MQTT_open(MQTT_CLIENT_ID, MQTT_BROKER, MQTT_PORT);
+    }
     captureGSMInfo();
     GSM_sleep();
 }
@@ -1916,6 +1922,12 @@ void initComms()
                 CommsManagerState.allCommsUnavailable = false;
                 CommsManagerState.wifiOnline = true;
                 configDeviceFromWiFiConn();
+
+                // init MQTT connection
+                if (DeviceConfigState.isMQTTConfigured && !CommsManagerState.mqttConnectionInitialized)
+                {
+                    CommsManagerState.mqttConnectionInitialized = wifiMQTTConnect(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+                }
             }
         }
     }
