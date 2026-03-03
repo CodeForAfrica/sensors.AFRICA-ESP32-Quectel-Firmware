@@ -1629,6 +1629,121 @@ bool MQTT_hasBufferedMessage(uint8_t client_id, uint8_t &recv_id_out)
     return false;
 }
 
+/// @brief Read buffered MQTT message from broker
+/// @param client_id MQTT client ID (0-5)
+/// @param recv_id Message ID of the buffered message to read
+/// @param topic_out Output buffer for topic name
+/// @param topic_size Size of topic output buffer
+/// @param payload_out Output buffer for message payload
+/// @param payload_size Size of payload output buffer
+/// @return true if message read successfully, false otherwise
+//! When configuring recv/mode using AT+QMTCFG="recv/mode",<client_idx>[,<msg_recv_mode>[,<msg_len_enable>]]
+//! set recv_mode=1 (buffered), msg_len=1 (include length) otherwise this function will fail
+//! be careful when using MQTT_configure() for this to work properly
+bool MQTT_readBufferedMessage(uint8_t client_id, uint8_t recv_id,
+                              char *topic_out, size_t topic_size,
+                              char *payload_out, size_t payload_size)
+{
+    char cmd[32];
+    snprintf(cmd, sizeof(cmd), "AT+QMTRECV=%d,%d", client_id, recv_id);
+
+    String full_response = "";
+    if (!sendAndCheck(cmd, "OK", full_response, 5000))
+    {
+        Serial.println("Failed to read buffered MQTT message");
+        return false;
+    }
+
+    // Find the start of the +QMTRECV line
+    int start_idx = full_response.indexOf("+QMTRECV:");
+    if (start_idx < 0)
+    {
+        Serial.println("No +QMTRECV line found in response");
+        return false;
+    }
+
+    String resp = full_response.substring(start_idx);
+
+    // Format we expect:
+    // +QMTRECV: 0,1234,"sensors/africa/cmd",42,{"action":"restart"}
+
+    // 1. Skip "+QMTRECV: " + client_idx + ","
+    int pos = resp.indexOf(':');
+    if (pos < 0)
+        return false;
+    pos += 1; // after :
+    while (resp[pos] == ' ')
+        pos++; // skip spaces
+
+    // Skip client_idx and comma
+    while (isdigit(resp[pos]) || resp[pos] == ',')
+        pos++;
+
+    // Skip msgid and comma
+    while (isdigit(resp[pos]) || resp[pos] == ',')
+        pos++;
+
+    // 2. Extract topic (quoted string)
+    if (resp[pos] != '"')
+        return false;
+    pos++; // skip opening quote
+
+    int topic_end = resp.indexOf('"', pos);
+    if (topic_end < 0)
+        return false;
+
+    String topic = resp.substring(pos, topic_end);
+    if (topic.length() >= topic_size)
+    {
+        Serial.println("Topic too long for buffer");
+        return false;
+    }
+    strcpy(topic_out, topic.c_str());
+
+    pos = topic_end + 1; // after closing quote
+
+    // 3. Expect comma + payload_len
+    if (resp[pos] != ',')
+        return false;
+    pos++;
+
+    // Read payload length
+    int payload_len = 0;
+    while (isdigit(resp[pos]))
+    {
+        payload_len = payload_len * 10 + (resp[pos] - '0');
+        pos++;
+    }
+
+    // 4. Expect comma after length
+    if (resp[pos] != ',')
+        return false;
+    pos++;
+
+    // 5. Now the payload starts — take exactly payload_len bytes
+    if (payload_len >= (int)payload_size)
+    {
+        Serial.println("Payload too large for buffer");
+        return false;
+    }
+
+    // Copy exactly payload_len characters
+    strncpy(payload_out, resp.c_str() + pos, payload_len);
+    payload_out[payload_len] = '\0'; // null-terminate
+
+    // Optional safety: if there are extra characters before OK, we ignore them
+    // (but in practice there should be none or just \r\n)
+
+    Serial.print("MQTT message received (buffered) → Topic: ");
+    Serial.print(topic_out);
+    Serial.print(" | Length: ");
+    Serial.print(payload_len);
+    Serial.print(" | Payload: ");
+    Serial.println(payload_out);
+
+    return true;
+}
+
 // Testing POST data
 // http://staging.api.sensors.africa/v1/push-sensor-data/
 
