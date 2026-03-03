@@ -1604,6 +1604,31 @@ bool MQTT_isConnected()
     return mqttConnected;
 }
 
+/// @brief Check for buffered MQTT messages from broker
+/// @param client_id MQTT client ID (0-5)
+/// @param recv_id_out Output parameter to receive message ID of buffered message
+/// @return true if buffered message is available, false otherwise
+bool MQTT_hasBufferedMessage(uint8_t client_id, uint8_t &recv_id_out)
+{
+    char urc[64] = {0};
+    // Short non-blocking check (50ms)
+    if (!waitForURC("+QMTRECV:", urc, sizeof(urc), 50))
+        return false;
+
+    // Format: +QMTRECV: 0,2[,len]
+    char temp[32];
+    if (extractText(urc, "+QMTRECV: ", temp, sizeof(temp), ','))
+    {
+        const char *p = strchr(temp, ','); // skip client_id
+        if (p)
+        {
+            recv_id_out = atoi(p + 1);
+            return true;
+        }
+    }
+    return false;
+}
+
 // Testing POST data
 // http://staging.api.sensors.africa/v1/push-sensor-data/
 
