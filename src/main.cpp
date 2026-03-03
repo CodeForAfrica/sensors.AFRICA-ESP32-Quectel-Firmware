@@ -2302,27 +2302,34 @@ void checkIncomingMQTTMessages()
     if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::NONE)
         return;
 
-    // bool subcheck = (millis() - CommsManagerState.lastMQTTCheck >= MQTT_INCOMING_CHECK_INTERVAL);
+    bool subscribe_time = (millis() - CommsManagerState.lastMQTTCheck >= MQTT_INCOMING_CHECK_INTERVAL);
+    bool subscribed = false;
 
     if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::WIFI && CommsManagerState.wifiOnline && CommsManagerState.mqttConnectionInitialized)
     {
         if (!mqttClient.connected())
         {
             bool conneceted = wifiMQTTConnect(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
-            // if (conneceted)
-            // {
-            //     // mqttClient.setCallback(wifiMQTTCallback);
-            //     if (!mqttClient.subscribe(MQTT_SUBSCRIBE_TOPIC))
-            //     {
-            //         Serial.println("Failed to subscribe to MQTT topic");
-            //     }
-            // }
         }
 
-        // CommsManagerState.lastMQTTCheck = millis();
-        else
+        if (subscribe_time)
         {
-            mqttClient.loop();
+            if (!mqttClient.subscribe(MQTT_SUBSCRIBE_TOPIC))
+            {
+                Serial.println("Failed to subscribe to MQTT topic");
+            }
+            else
+            {
+                subscribed = true;
+                CommsManagerState.lastMQTTCheck = millis();
+            }
+        }
+
+        mqttClient.loop();
+
+        if (subscribed) // Unsubscribe after receiving mesage //? I reckon that this step to unsubscribe from incoming messages topic would be useful when using cellular data than on WiFi connection. WiFi data allocation (capacity/limit) on basic subscriptions is incomparably huge to cellullar IoT data bundles
+        {
+            mqttClient.unsubscribe(MQTT_SUBSCRIBE_TOPIC);
         }
     }
 }
