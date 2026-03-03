@@ -198,11 +198,12 @@ static void wifiMQTTCallback(char *topic, byte *payload, unsigned int length)
     Serial.print("wifiMQTTCallback: Payload length: ");
     Serial.println(length);
 
-    if (topic == MQTT_SUBSCRIBE_TOPIC)
+    if (strcmp(topic, MQTT_SUBSCRIBE_TOPIC) == 0)
     {
         Serial.println("wifiMQTTCallback: Received configuration update");
         // ToDO: Process configuration update (e.g., parse JSON and apply settings)
     }
+
     // Convert payload to string
     String message;
     for (unsigned int i = 0; i < length; i++)

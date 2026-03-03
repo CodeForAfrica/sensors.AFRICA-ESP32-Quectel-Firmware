@@ -2301,26 +2301,28 @@ void checkIncomingMQTTMessages()
 {
     if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::NONE)
         return;
-    if (millis() - CommsManagerState.lastMQTTCheck < MQTT_INCOMING_CHECK_INTERVAL)
-        return;
+
+    // bool subcheck = (millis() - CommsManagerState.lastMQTTCheck >= MQTT_INCOMING_CHECK_INTERVAL);
 
     if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::WIFI && CommsManagerState.wifiOnline && CommsManagerState.mqttConnectionInitialized)
     {
         if (!mqttClient.connected())
         {
             bool conneceted = wifiMQTTConnect(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
-            if (conneceted)
-            {
-                // mqttClient.setCallback(wifiMQTTCallback);
-                if (!mqttClient.subscribe(MQTT_SUBSCRIBE_TOPIC))
-                {
-                    Serial.println("Failed to subscribe to MQTT topic");
-                }
-            }
+            // if (conneceted)
+            // {
+            //     // mqttClient.setCallback(wifiMQTTCallback);
+            //     if (!mqttClient.subscribe(MQTT_SUBSCRIBE_TOPIC))
+            //     {
+            //         Serial.println("Failed to subscribe to MQTT topic");
+            //     }
+            // }
         }
 
-        mqttClient.loop();
+        // CommsManagerState.lastMQTTCheck = millis();
+        else
+        {
+            mqttClient.loop();
+        }
     }
-
-    CommsManagerState.lastMQTTCheck = millis();
 }
