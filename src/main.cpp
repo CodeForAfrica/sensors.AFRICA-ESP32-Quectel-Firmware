@@ -2104,7 +2104,7 @@ bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, 
     if (!MQTT_CONFIGURED)
     {
         Serial.println("sendMQTTTelemetry: Configuring MQTT...");
-        if (!MQTT_configure(client_id))
+        if (!MQTT_configure(client_id, 1, 0, 1))
         {
             Serial.println("sendMQTTTelemetry: Failed to configure MQTT");
             return false;
