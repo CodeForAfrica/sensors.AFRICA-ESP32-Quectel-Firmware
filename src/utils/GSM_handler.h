@@ -76,8 +76,6 @@ enum GSMMQTTConnStatus
     MQTT_CONNECTED = 2
 };
 
-bool mqttBrokerOpen = false;
-bool mqttConnected = false;
 GSMMQTTConnStatus mqtt_status = MQTT_DISCONNECTED;
 int MQTT_INIT_FAIL_COUNT = 0;
 int MQTT_PUB_FAIL = 0;
@@ -130,6 +128,7 @@ bool MQTT_subscribe(uint8_t client_id, uint16_t msg_id, const char *topic, uint8
 bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const char *payload, uint8_t qos = 0, uint8_t retain = 0);
 bool MQTT_unsubscribe(uint8_t client_id, uint16_t msg_id, const char *topic);
 bool MQTT_disconnect(uint8_t client_id);
+bool MQTT_isBrokerConnected(uint8_t client_id);
 GSMMQTTConnStatus MQTT_getStatus(uint8_t client_id);
 bool MQTT_isClientConnected(uint8_t client_id);
 bool MQTT_hasBufferedMessage(uint8_t client_id);
@@ -1309,7 +1308,6 @@ bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port)
     // Parse URC response
     if (strstr(urc, "+QMTOPEN:") && strstr(urc, ",0"))
     {
-        mqttBrokerOpen = true;
         mqtt_status = MQTT_BROKER_OPEN;
         Serial.println("MQTT broker connection opened successfully");
         return true;
@@ -1369,7 +1367,6 @@ bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username,
     // Parse URC response - successful connection returns +QMTCONN: <client_id>,0,0
     if (strstr(urc, "+QMTCONN:") && strstr(urc, ",0,0"))
     {
-        mqttConnected = true;
         mqtt_status = MQTT_CONNECTED;
         MQTT_INIT_FAIL_COUNT = 0;
         Serial.println("MQTT client connected to broker successfully");
@@ -1563,9 +1560,6 @@ bool MQTT_disconnect(uint8_t client_id)
         Serial.println("MQTT disconnect URC not received");
         return false;
     }
-
-    mqttConnected = false;
-    mqttBrokerOpen = false;
     mqtt_status = MQTT_DISCONNECTED;
     Serial.println("MQTT client disconnected successfully");
     return true;
@@ -1629,6 +1623,39 @@ bool MQTT_isClientConnected(uint8_t client_id)
         return true;
     else
         return false;
+}
+
+/// @brief Check id broker is connected for an MQTT client
+/// @param client_id MQTT client id (0-5)
+/// @return true if connected (3), false if otherwise
+bool MQTT_isBrokerConnected(uint8_t client_id)
+{
+
+    String response = ""; // [+QMTCONN: <client_idx>,<state>]
+    if (!sendAndCheck("AT+QMTCONN?", "OK", response, 2000))
+        return false;
+
+    char prefix[16];
+    snprintf(prefix, sizeof(prefix), "+QMTCONN: %d,", client_id);
+
+    char status_str[32] = {0};
+
+    if (!extractText((char *)response.c_str(), prefix, status_str, sizeof(status_str), '\r'))
+        return false;
+    Serial.println(status_str);
+    const char *first_comma = strstr(status_str, ",");
+    char state = *first_comma++;
+    if (state == '3')
+    {
+        return true;
+    }
+    else
+    {
+        Serial.print("Broker not connected for client id ");
+        Serial.println(client_id);
+    }
+
+    return false;
 }
 
 /// @brief Check if there are any messages waiting in the buffer for a specific MQTT client. A maximum of 5 messages can be stored in the buffer.
