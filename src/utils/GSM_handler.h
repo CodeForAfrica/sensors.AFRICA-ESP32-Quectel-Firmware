@@ -121,7 +121,7 @@ bool pingIP(const char *host, uint8_t contextID = 1);
 String getBatteryStatus();
 
 // MQTT Functions
-bool MQTT_configure(uint8_t client_id = 0, uint8_t recv_mode = 0, uint8_t msg_do = 0, uint8_t msg_len = 1);
+bool MQTT_configure(uint8_t client_id = 0, uint8_t recv_mode = 0, uint8_t msg_len = 1);
 bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port);
 bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username = nullptr, const char *password = nullptr);
 bool MQTT_subscribe(uint8_t client_id, uint16_t msg_id, const char *topic, uint8_t qos = 0);
@@ -684,7 +684,7 @@ bool extractText(char *input, const char *target, char *output, uint8_t output_s
             }
         }
     }
-    Serial.println("Could not extact substring '" + (String)target + "' from the source");
+    // Serial.println("Could not extact substring '" + (String)target + "' from the source");
     return false;
 }
 
@@ -1245,10 +1245,9 @@ String getBatteryStatus()
 /// @brief Configure MQTT settings
 /// @param client_id MQTT client ID (0-5)
 /// @param recv_mode Reception mode (0=URC with data, 1=URC without data)
-/// @param msg_do Message delivery option (0=automatic, 1=manual)
 /// @param msg_len Message length display (0=no, 1=yes)
 /// @return true if configuration successful
-bool MQTT_configure(uint8_t client_id, uint8_t recv_mode, uint8_t msg_do, uint8_t msg_len)
+bool MQTT_configure(uint8_t client_id, uint8_t recv_mode, uint8_t msg_len)
 {
     char config_cmd[64] = "";
 
@@ -1276,6 +1275,7 @@ bool MQTT_configure(uint8_t client_id, uint8_t recv_mode, uint8_t msg_do, uint8_
 /// @return true if broker connection opened successfully
 bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port)
 {
+
     char open_cmd[128] = "";
 
     snprintf(open_cmd, sizeof(open_cmd), "AT+QMTOPEN=%d,\"%s\",%d",
@@ -1283,8 +1283,6 @@ bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port)
 
     Serial.print("MQTT Open: ");
     Serial.println(open_cmd);
-
-    flushSerial();
 
     if (!sendAndCheck(open_cmd, "OK", 10000))
     {
@@ -1296,8 +1294,11 @@ bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port)
 
     // Wait for broker open URC: +QMTOPEN: <client_id>,0
     // Docs state max response time is 120 s (network-dependent); 30 s covers most cases.
+    char broker_open[16];
+    snprintf(broker_open, sizeof(broker_open), "+QMTOPEN: %d,0", client_id);
+
     char urc[32];
-    if (!waitForURC("+QMTOPEN:", urc, sizeof(urc), 30000))
+    if (!waitForURC(broker_open, urc, sizeof(urc), 30000))
     {
         MQTT_INIT_ERROR = "MQTT broker open URC not received";
         Serial.println(MQTT_INIT_ERROR);
@@ -1305,18 +1306,7 @@ bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port)
         return false;
     }
 
-    // Parse URC response
-    if (strstr(urc, "+QMTOPEN:") && strstr(urc, ",0"))
-    {
-        mqtt_status = MQTT_BROKER_OPEN;
-        Serial.println("MQTT broker connection opened successfully");
-        return true;
-    }
-
-    MQTT_INIT_ERROR = "Invalid MQTT broker open response";
-    Serial.println(MQTT_INIT_ERROR);
-    MQTT_INIT_FAIL_COUNT++;
-    return false;
+    return true;
 }
 
 /// @brief Connect MQTT client to broker
@@ -1343,8 +1333,6 @@ bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username,
 
     Serial.print("MQTT Connect: ");
     Serial.println(conn_cmd);
-
-    flushSerial();
 
     if (!sendAndCheck(conn_cmd, "OK", 10000))
     {
@@ -1387,6 +1375,13 @@ bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username,
 /// @return true if subscription successful
 bool MQTT_subscribe(uint8_t client_id, uint16_t msg_id, const char *topic, uint8_t qos)
 {
+    // msg_id must be 1–65535 for AT+QMTSUB — 0 is rejected by the modem
+    if (msg_id == 0)
+    {
+        Serial.println("MQTT subscribe: msg_id must be >= 1");
+        return false;
+    }
+
     char sub_cmd[128] = "";
 
     if (qos > 2)
@@ -1411,6 +1406,25 @@ bool MQTT_subscribe(uint8_t client_id, uint16_t msg_id, const char *topic, uint8
     if (!waitForURC("+QMTSUB:", urc, sizeof(urc), 5000))
     {
         Serial.println("MQTT subscribe URC not received");
+        return false;
+    }
+
+    // Validate result field — format: +QMTSUB: <client_id>,<msg_id>,<result>
+    // Find the third comma-separated field (result)
+    const char *p = strchr(urc, ','); // after client_id
+    if (p)
+        p = strchr(p + 1, ','); // after msg_id
+    if (!p)
+    {
+        Serial.println("MQTT subscribe: malformed URC");
+        return false;
+    }
+
+    int result = atoi(p + 1);
+    if (result != 0)
+    {
+        Serial.print("MQTT subscribe failed with result: ");
+        Serial.println(result);
         return false;
     }
 
@@ -1545,17 +1559,17 @@ bool MQTT_disconnect(uint8_t client_id)
     Serial.print("MQTT Disconnect: ");
     Serial.println(disc_cmd);
 
-    flushSerial();
-
     if (!sendAndCheck(disc_cmd, "OK", 10000))
     {
         Serial.println("Failed to send MQTT disconnect command");
         return false;
     }
 
+    char success[16];
+    snprintf(success, sizeof(success), "+QMTDISC: %d,0", client_id);
     // Wait for disconnect URC: +QMTDISC: <client_id>,0
     char urc[32];
-    if (!waitForURC("+QMTDISC:", urc, sizeof(urc), 5000))
+    if (!waitForURC(success, urc, sizeof(urc), 5000))
     {
         Serial.println("MQTT disconnect URC not received");
         return false;
@@ -1643,8 +1657,11 @@ bool MQTT_isBrokerConnected(uint8_t client_id)
         return false;
 
     int state = atoi(status_str);
-
-    return (state == 3);
+    if (state == 3)
+    {
+        // Serial.println("MQTT Brocker connected");
+        return true;
+    }
     return false;
 }
 
@@ -1653,6 +1670,15 @@ bool MQTT_isBrokerConnected(uint8_t client_id)
 /// @return true if at least one message is waiting
 bool MQTT_hasBufferedMessage(uint8_t client_id)
 {
+
+    char expected_qurc[16]; //+QMTRECV: <client_idx>,<recv_id>
+    snprintf(expected_qurc, sizeof(expected_qurc), "+QMTRECV: %d", client_id);
+    char res[16];
+    if (waitForURC(expected_qurc, res, sizeof(res), 5000))
+    {
+        return true;
+    }
+
     char cmd[32];
     snprintf(cmd, sizeof(cmd), "AT+QMTRECV?");
 
@@ -1660,6 +1686,7 @@ bool MQTT_hasBufferedMessage(uint8_t client_id)
     if (!sendAndCheck(cmd, "OK", response, 1000))
         return false;
 
+    Serial.println(response);
     // Build exact prefix for this client, e.g. "+QMTRECV: 0,"
     char prefix[16];
     snprintf(prefix, sizeof(prefix), "+QMTRECV: %d,", client_id);
@@ -1668,7 +1695,6 @@ bool MQTT_hasBufferedMessage(uint8_t client_id)
 
     if (!extractText((char *)response.c_str(), prefix, status_str, sizeof(status_str), '\r'))
         return false;
-
     // status_str now contains something like "0,1,0,0,0" (the five store_status values)
     char *p = status_str;
     for (uint8_t i = 0; i < 5; i++)
@@ -1820,7 +1846,7 @@ bool MQTT_readBufferedMessage(uint8_t client_id, char *topic_out, size_t topic_s
     String full_response = "";
     if (!sendAndCheck(cmd, "OK", full_response, 5000))
     {
-        Serial.println("Failed to read buffered MQTT message");
+        // Serial.println("Failed to read buffered MQTT message");
         return false;
     }
 
@@ -1828,14 +1854,13 @@ bool MQTT_readBufferedMessage(uint8_t client_id, char *topic_out, size_t topic_s
     int start_idx = full_response.indexOf("+QMTRECV:");
     if (start_idx < 0)
     {
-        Serial.println("No +QMTRECV line found in response");
         return false;
     }
 
     String resp = full_response.substring(start_idx);
 
     // Format we expect:
-    // +QMTRECV: 0,1234,"sensors/africa/cmd",42,{"action":"restart"}
+    // +QMTRECV: 0,1234,"devices/nodes/cmd",20,{"action":"restart"}
 
     // 1. Skip "+QMTRECV: " + client_idx + ","
     int pos = resp.indexOf(':');
