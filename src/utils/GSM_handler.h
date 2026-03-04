@@ -1330,7 +1330,7 @@ bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username,
     char conn_cmd[256] = "";
 
     // Build AT command based on whether credentials are provided
-    if (username != nullptr && password != nullptr)
+    if (username && password && *username && *password)
     {
         snprintf(conn_cmd, sizeof(conn_cmd), "AT+QMTCONN=%d,\"%s\",\"%s\",\"%s\"",
                  client_id, clientid, username, password);
@@ -1638,23 +1638,13 @@ bool MQTT_isBrokerConnected(uint8_t client_id)
     char prefix[16];
     snprintf(prefix, sizeof(prefix), "+QMTCONN: %d,", client_id);
 
-    char status_str[32] = {0};
-
+    char status_str[4] = {0};
     if (!extractText((char *)response.c_str(), prefix, status_str, sizeof(status_str), '\r'))
         return false;
-    Serial.println(status_str);
-    const char *first_comma = strstr(status_str, ",");
-    char state = *first_comma++;
-    if (state == '3')
-    {
-        return true;
-    }
-    else
-    {
-        Serial.print("Broker not connected for client id ");
-        Serial.println(client_id);
-    }
 
+    int state = atoi(status_str);
+
+    return (state == 3);
     return false;
 }
 
