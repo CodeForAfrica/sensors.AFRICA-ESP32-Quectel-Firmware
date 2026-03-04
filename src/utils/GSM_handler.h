@@ -69,17 +69,16 @@ struct GSMRuntimeInfo
     String model_id; // EC200XXXXXXX
 };
 
-enum MQTTConnStatus
+enum GSMMQTTConnStatus
 {
     MQTT_DISCONNECTED = 0,
     MQTT_BROKER_OPEN = 1,
     MQTT_CONNECTED = 2
 };
 
-bool MQTT_CONFIGURED = false;
 bool mqttBrokerOpen = false;
 bool mqttConnected = false;
-MQTTConnStatus mqtt_status = MQTT_DISCONNECTED;
+GSMMQTTConnStatus mqtt_status = MQTT_DISCONNECTED;
 int MQTT_INIT_FAIL_COUNT = 0;
 int MQTT_PUB_FAIL = 0;
 String MQTT_INIT_ERROR = "";
@@ -131,8 +130,8 @@ bool MQTT_subscribe(uint8_t client_id, uint16_t msg_id, const char *topic, uint8
 bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const char *payload, uint8_t qos = 0, uint8_t retain = 0);
 bool MQTT_unsubscribe(uint8_t client_id, uint16_t msg_id, const char *topic);
 bool MQTT_disconnect(uint8_t client_id);
-MQTTConnStatus MQTT_getStatus(uint8_t client_id);
-bool MQTT_isConnected();
+GSMMQTTConnStatus MQTT_getStatus(uint8_t client_id);
+bool MQTT_isClientConnected(uint8_t client_id);
 bool MQTT_hasBufferedMessage(uint8_t client_id);
 bool MQTT_readBufferedMessage(uint8_t client_id, char *topic_out, size_t topic_size, char *payload_out, size_t payload_size);
 bool MQTT_readBufferedMessage(uint8_t client_id, uint8_t recv_id, char *topic_out, size_t topic_size, char *payload_out, size_t payload_size);
@@ -1267,7 +1266,6 @@ bool MQTT_configure(uint8_t client_id, uint8_t recv_mode, uint8_t msg_do, uint8_
         return false;
     }
 
-    MQTT_CONFIGURED = true;
     Serial.println("MQTT configured successfully");
     return true;
 }
@@ -1576,7 +1574,7 @@ bool MQTT_disconnect(uint8_t client_id)
 /// @brief Get current MQTT connection status
 /// @param client_id MQTT client ID (0-5)
 /// @return Current MQTT connection status
-MQTTConnStatus MQTT_getStatus(uint8_t client_id)
+GSMMQTTConnStatus MQTT_getStatus(uint8_t client_id)
 {
     char query_cmd[32] = "";
 
@@ -1622,10 +1620,15 @@ MQTTConnStatus MQTT_getStatus(uint8_t client_id)
 }
 
 /// @brief Check if MQTT is connected and ready
+/// @param client_id MQTT client id index (0-5)
 /// @return true if MQTT client is connected to broker
-bool MQTT_isConnected()
+bool MQTT_isClientConnected(uint8_t client_id)
 {
-    return mqttConnected;
+    GSMMQTTConnStatus status = MQTT_getStatus(client_id);
+    if (status == GSMMQTTConnStatus::MQTT_CONNECTED)
+        return true;
+    else
+        return false;
 }
 
 /// @brief Check if there are any messages waiting in the buffer for a specific MQTT client. A maximum of 5 messages can be stored in the buffer.
