@@ -1486,7 +1486,7 @@ bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const c
         return false;
     }
 
-    if (strstr(urc, ",0")) // Check for success code 0
+    if (strstr(urc, ",0")) // Check for success code 0 //! Success code is actually <client_idx>,<msg_id>,0 . Message id may be 0 for QoS 0
     {
         Serial.print("Published to topic: ");
         Serial.println(topic);
@@ -1585,13 +1585,34 @@ MQTTConnStatus MQTT_getStatus(uint8_t client_id)
         return MQTT_DISCONNECTED;
     }
 
-    // Parse response to get current status
-    if (strstr(response.c_str(), "+QMTOPEN:"))
+    // Parse response to check for +QMTOPEN: <client_id> pattern
+    // Response format: +QMTOPEN: <client_idx>,<host_name>,<port>
+    char search_pattern[16] = "";
+    snprintf(search_pattern, sizeof(search_pattern), "+QMTOPEN: %d,", client_id);
+
+    if (strstr(response.c_str(), search_pattern))
     {
-        if (strstr(response.c_str(), ",1"))
-            return MQTT_BROKER_OPEN;
-        if (strstr(response.c_str(), ",0"))
-            return MQTT_CONNECTED;
+        // Extract and print hostname and port
+        const char *start = strstr(response.c_str(), search_pattern);
+        if (start != nullptr)
+        {
+            // Skip past the pattern to get to hostname
+            start += strlen(search_pattern);
+            const char *end = strchr(start, '\r');
+            if (end == nullptr)
+                end = strchr(start, '\n');
+
+            if (end != nullptr)
+            {
+                size_t length = end - start;
+                char host_port_info[128];
+                strncpy(host_port_info, start, length);
+                host_port_info[length] = '\0';
+                Serial.print("MQTT connection found - Host/Port: ");
+                Serial.println(host_port_info);
+            }
+        }
+        return MQTT_CONNECTED;
     }
 
     return MQTT_DISCONNECTED;
