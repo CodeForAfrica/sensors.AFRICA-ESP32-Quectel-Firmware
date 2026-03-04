@@ -1625,29 +1625,42 @@ bool MQTT_isConnected()
     return mqttConnected;
 }
 
-/// @brief Check for buffered MQTT messages from broker
-/// @param client_id MQTT client ID (0-5)
-/// @param recv_id_out Output parameter to receive message ID of buffered message
-/// @return true if buffered message is available, false otherwise
-bool MQTT_hasBufferedMessage(uint8_t client_id, uint8_t &recv_id_out)
+/// @brief Check if there are any messages waiting in the buffer for a specific MQTT client. A maximum of 5 messages can be stored in the buffer.
+/// @param client_id   MQTT client id index (0-5)
+/// @return true if at least one message is waiting
+bool MQTT_hasBufferedMessage(uint8_t client_id)
 {
-    char urc[64] = {0};
-    // Short non-blocking check (50ms)
-    if (!waitForURC("+QMTRECV:", urc, sizeof(urc), 50))
+    char cmd[32];
+    snprintf(cmd, sizeof(cmd), "AT+QMTRECV?");
+
+    String response = "";
+    if (!sendAndCheck(cmd, "OK", response, 1000))
         return false;
 
-    // Format: +QMTRECV: 0,2[,len]
-    char temp[32];
-    if (extractText(urc, "+QMTRECV: ", temp, sizeof(temp), ','))
+    // Build exact prefix for this client, e.g. "+QMTRECV: 0,"
+    char prefix[16];
+    snprintf(prefix, sizeof(prefix), "+QMTRECV: %d,", client_id);
+
+    char status_str[32] = {0};
+
+    if (!extractText((char *)response.c_str(), prefix, status_str, sizeof(status_str), '\r'))
+        return false;
+
+    // status_str now contains something like "0,1,0,0,0" (the five store_status values)
+    char *p = status_str;
+    for (uint8_t i = 0; i < 5; i++)
     {
-        const char *p = strchr(temp, ','); // skip client_id
-        if (p)
+        if (*p == '1') // 1 = message waiting in this slot
         {
-            recv_id_out = atoi(p + 1);
             return true;
         }
+        p = strchr(p, ','); // move to next status
+        if (!p)
+            break;
+        p++;
     }
-    return false;
+
+    return false; // all slots empty for this client
 }
 
 /// @brief Read buffered MQTT message from broker
