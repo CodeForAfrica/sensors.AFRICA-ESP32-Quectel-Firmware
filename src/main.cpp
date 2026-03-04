@@ -453,7 +453,7 @@ void loop()
                 else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
                 {
                     Serial.println("Sending telemetry via GSM MQTT");
-                    telemetry_sent = initAndSendMQTTTelemetry(MQTT_BROKER, MQTT_PORT, MQTT_TELEMETRY_TOPIC, 0, MQTT_USERNAME, MQTT_PASSWORD, true);
+                    telemetry_sent = initAndSendMQTTTelemetry(MQTT_BROKER, MQTT_PORT, MQTT_TELEMETRY_TOPIC, MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, false);
                 }
                 else
                 {
@@ -1543,7 +1543,10 @@ void initializeAndConfigGSM()
     }
     if (DeviceConfigState.gsmInternetAvailable && DeviceConfigState.isMQTTConfigured && !CommsManagerState.mqttConnectionInitialized)
     {
+        MQTT_configure(MQTT_CLIENT_ID, 1, 1);
         CommsManagerState.mqttConnectionInitialized = MQTT_open(MQTT_CLIENT_ID, MQTT_BROKER, MQTT_PORT);
+        MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+        MQTT_subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
     }
     captureGSMInfo();
     GSM_sleep();
@@ -1649,7 +1652,7 @@ bool isConnectivityAvailable()
     unsigned long now = millis();
 
     // Perform connectivity check at regular intervals (every 15 minutes) to avoid excessive pinging
-    if (now - CommsManagerState.lastConnectivityCheck < 60000)
+    if (now - CommsManagerState.lastConnectivityCheck < 60000 * 15)
     {
         return !CommsManagerState.allCommsUnavailable;
     }
@@ -2100,25 +2103,15 @@ bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, 
                           const char *username = nullptr, const char *password = nullptr)
 {
     // Check if GPRS is available (required for MQTT over GSM)
-    if (!GPRS_CONNECTED)
+    if (!CommsManagerState.gsmOnline)
     {
         Serial.println("sendMQTTTelemetry: GPRS not connected - cannot send telemetry");
         return false;
     }
-
-    // Configure MQTT if not already done
-    if (!MQTT_CONFIGURED)
-    {
-        Serial.println("sendMQTTTelemetry: Configuring MQTT...");
-        if (!MQTT_configure(client_id, 1, 0, 1))
-        {
-            Serial.println("sendMQTTTelemetry: Failed to configure MQTT");
-            return false;
-        }
-    }
-
+    bool isBrokerConnected = MQTT_isBrokerConnected(client_id);
+    bool isClientConneted = MQTT_isClientConnected(client_id);
     // Open broker connection
-    if (!mqttBrokerOpen)
+    if (!isBrokerConnected)
     {
         Serial.println("sendMQTTTelemetry: Opening MQTT broker connection...");
         if (!MQTT_open(client_id, broker, port))
@@ -2127,11 +2120,10 @@ bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, 
             Serial.println(MQTT_INIT_ERROR);
             return false;
         }
-        delay(1000);
+        MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+        MQTT_isBrokerConnected(client_id);
     }
-
-    // Connect to broker
-    if (!mqttConnected)
+    else if (!isClientConneted)
     {
         Serial.println("sendMQTTTelemetry: Connecting MQTT client...");
         if (!MQTT_connect(client_id, esp_chipid, username, password))
@@ -2140,7 +2132,6 @@ bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, 
             Serial.println(MQTT_INIT_ERROR);
             return false;
         }
-        delay(1000);
     }
 
     // Build telemetry payload
@@ -2185,7 +2176,7 @@ bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *top
 {
     bool result = sendGsmMQTTTelemetry(broker, port, client_id, topic, username, password);
 
-    if (disconnect_after && mqttConnected)
+    if (disconnect_after && MQTT_isBrokerConnected(client_id))
     {
         delay(500);
         Serial.println("initAndSendMQTTTelemetry: Disconnecting MQTT...");
@@ -2330,6 +2321,40 @@ void checkIncomingMQTTMessages()
         if (subscribed) // Unsubscribe after receiving mesage //? I reckon that this step to unsubscribe from incoming messages topic would be useful when using cellular data than on WiFi connection. WiFi data allocation (capacity/limit) on basic subscriptions is incomparably huge to cellullar IoT data bundles
         {
             mqttClient.unsubscribe(MQTT_SUBSCRIBE_TOPIC);
+        }
+    }
+
+    else if (CommsManagerState.preferredComm == CommsManagerState::GSM && CommsManagerState.gsmOnline)
+    {
+        if (!MQTT_isBrokerConnected(MQTT_CLIENT_ID))
+        {
+            MQTT_configure(MQTT_CLIENT_ID, 1, 1);
+            if (!MQTT_open(MQTT_CLIENT_ID, MQTT_BROKER, MQTT_PORT))
+            {
+                Serial.print("receiveMQTTTelemetry: Failed to open MQTT broker - Error: ");
+                Serial.println(MQTT_INIT_ERROR);
+                return;
+            }
+            MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+            MQTT_subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
+        }
+        else if (!MQTT_isClientConnected(MQTT_CLIENT_ID))
+        {
+            Serial.println("receiveMQTTTelemetry: Connecting MQTT client...");
+            if (!MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD))
+            {
+                Serial.print("receiveMQTTTelemetry: Failed to connect MQTT client - Error: ");
+                Serial.println(MQTT_INIT_ERROR);
+                return;
+            }
+            MQTT_subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
+        }
+
+        if (MQTT_hasBufferedMessage(MQTT_CLIENT_ID))
+        {
+            char topic[64];
+            char payload[256];
+            MQTT_readBufferedMessage(MQTT_CLIENT_ID, topic, sizeof(topic), payload, sizeof(payload));
         }
     }
 }
