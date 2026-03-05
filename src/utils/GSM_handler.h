@@ -1858,7 +1858,7 @@ bool MQTT_readBufferedMessage(uint8_t client_id, char *topic_out, size_t topic_s
     }
 
     String resp = full_response.substring(start_idx);
-
+    Serial.print(resp);
     // Format we expect:
     // +QMTRECV: 0,1234,"devices/nodes/cmd",20,{"action":"restart"}
 
@@ -1914,6 +1914,9 @@ bool MQTT_readBufferedMessage(uint8_t client_id, char *topic_out, size_t topic_s
     if (resp[pos] != ',')
         return false;
     pos++;
+
+    if (resp[pos] == '"')
+        pos++;
 
     // 5. Now the payload starts — take exactly payload_len bytes
     if (payload_len >= (int)payload_size)
