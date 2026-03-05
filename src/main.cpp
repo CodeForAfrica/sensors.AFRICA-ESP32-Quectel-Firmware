@@ -97,8 +97,9 @@ char SENSORS_FAILED_DATA_SEND_STORE_PATH[128] = {};
 char MQTT_TELEMETRY_TOPIC[128] = {};
 
 char esp_chipid[18] = {};
-
 bool send_now = false;
+char incoming_topic_store[64];
+char incoming_message_store[256];
 
 ESP32Time RTC;
 char time_buff[32] = {};
@@ -170,6 +171,7 @@ struct CommsManagerState
     bool maxReconnectAttemptsReached;
     bool mqttConnectionInitialized;
     unsigned long lastMQTTCheck;
+    bool message_received;
 
     // Initialize state
     void init()
@@ -229,6 +231,7 @@ bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client
 void listenSerial();
 void buildDeviceInfoJSON();
 void checkIncomingMQTTMessages();
+void wifiMQTTCallback(char *topic, byte *payload, unsigned int length);
 
 enum Month
 {
@@ -2352,9 +2355,32 @@ void checkIncomingMQTTMessages()
 
         if (MQTT_hasBufferedMessage(MQTT_CLIENT_ID))
         {
-            char topic[64];
-            char payload[256];
-            MQTT_readBufferedMessage(MQTT_CLIENT_ID, topic, sizeof(topic), payload, sizeof(payload));
+            CommsManagerState.message_received = MQTT_readBufferedMessage(MQTT_CLIENT_ID, incoming_topic_store, sizeof(incoming_topic_store), incoming_message_store, sizeof(incoming_message_store));
         }
     }
+}
+
+void wifiMQTTCallback(char *topic, byte *payload, unsigned int length)
+{
+    if (strcmp(topic, MQTT_SUBSCRIBE_TOPIC) == 0)
+    {
+        Serial.println("wifiMQTTCallback: Received configuration update");
+        // ToDO: Process configuration update (e.g., parse JSON and apply settings)
+        CommsManagerState.message_received = true;
+    }
+    int topic_len = strlen(topic);
+    if ((topic_len < sizeof(incoming_topic_store)) && (length < sizeof(incoming_message_store)))
+    {
+        strcpy(incoming_topic_store, topic);
+        incoming_topic_store[topic_len] = '\0';
+        memcpy(incoming_message_store, payload, length);
+        incoming_message_store[length] = '\0';
+    }
+
+    Serial.print("wifiMQTTCallback: Message | topic: ");
+    Serial.print(topic);
+    Serial.print("| Payload length: ");
+    Serial.print(length);
+    Serial.print("| Payload: ");
+    Serial.write(payload, length);
 }
