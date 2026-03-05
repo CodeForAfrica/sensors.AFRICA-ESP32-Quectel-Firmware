@@ -230,6 +230,7 @@ void listenSerial();
 void buildDeviceInfoJSON();
 void checkIncomingMQTTMessages();
 void wifiMQTTCallback(char *topic, byte *payload, unsigned int length);
+void processIncomingData();
 
 enum Month
 {
@@ -473,7 +474,10 @@ void loop()
             last_send_telemetry = millis();
         }
     }
-
+    if (CommsManagerState.message_received)
+    {
+        processIncomingData();
+    }
     checkIncomingMQTTMessages();
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
@@ -2335,4 +2339,41 @@ void wifiMQTTCallback(char *topic, byte *payload, unsigned int length)
 
     String dbg = "wifiMQTTCallback: Message | topic: " + String(topic) + "| Payload length:" + "| Payload: " + String((char *)payload, length);
     Serial.println(dbg);
+}
+
+void processIncomingData()
+{
+
+    if (!strstr(incoming_message_store, esp_chipid))
+    {
+        CommsManagerState.message_received = false;
+        return;
+    }
+    JsonDocument doc;
+    if (validateJson(incoming_message_store))
+    {
+        deserializeJson(doc, incoming_message_store);
+    }
+    else
+    {
+        CommsManagerState.message_received = false;
+        return;
+    }
+
+    auto hasString = [&](JsonVariant v)
+    {
+        return !v.isNull() && v.is<const char *>() && v.as<const char *>()[0] != '\0';
+    };
+
+    if (hasString(doc["action"]))
+    {
+        if (doc["action"] == "restart")
+        {
+            Serial.println("Device restarting from remote command...");
+            delay(2000);
+            ESP.restart();
+        }
+    }
+
+    CommsManagerState.message_received = false; //! Very important
 }
