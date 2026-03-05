@@ -2047,28 +2047,6 @@ bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size)
         comms["preferred"] = (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::WIFI) ? "WiFi" : (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::GSM) ? "GSM"
                                                                                                                                                                                              : "None";
 
-        // Sensor Data
-        JsonObject sensors = telemetry_doc["sensors"].to<JsonObject>();
-        if (current_sensor_data["PM"])
-        {
-            JsonObject pm = sensors["PM"].to<JsonObject>();
-            if (current_sensor_data["PM"]["PM1"])
-                pm["PM1"] = current_sensor_data["PM"]["PM1"];
-            if (current_sensor_data["PM"]["PM2.5"])
-                pm["PM2.5"] = current_sensor_data["PM"]["PM2.5"];
-            if (current_sensor_data["PM"]["PM10"])
-                pm["PM10"] = current_sensor_data["PM"]["PM10"];
-        }
-
-        if (current_sensor_data["DHT"])
-        {
-            JsonObject dht = sensors["DHT"].to<JsonObject>();
-            if (current_sensor_data["DHT"]["temperature"])
-                dht["temperature"] = current_sensor_data["DHT"]["temperature"];
-            if (current_sensor_data["DHT"]["humidity"])
-                dht["humidity"] = current_sensor_data["DHT"]["humidity"];
-        }
-
         // System Status
         JsonObject system = telemetry_doc["system"].to<JsonObject>();
         system["uptime_ms"] = millis();
