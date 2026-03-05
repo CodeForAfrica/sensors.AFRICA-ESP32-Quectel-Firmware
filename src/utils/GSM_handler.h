@@ -1617,8 +1617,8 @@ GSMMQTTConnStatus MQTT_getStatus(uint8_t client_id)
                 char host_port_info[128];
                 strncpy(host_port_info, start, length);
                 host_port_info[length] = '\0';
-                Serial.print("MQTT connection found - Host/Port: ");
-                Serial.println(host_port_info);
+                // Serial.print("MQTT connection found - Host/Port: ");
+                // Serial.println(host_port_info);
             }
         }
         return MQTT_CONNECTED;
@@ -1686,7 +1686,7 @@ bool MQTT_hasBufferedMessage(uint8_t client_id)
     if (!sendAndCheck(cmd, "OK", response, 1000))
         return false;
 
-    Serial.println(response);
+    // Serial.println(response);
     // Build exact prefix for this client, e.g. "+QMTRECV: 0,"
     char prefix[16];
     snprintf(prefix, sizeof(prefix), "+QMTRECV: %d,", client_id);

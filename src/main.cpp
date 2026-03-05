@@ -182,7 +182,7 @@ struct CommsManagerState
         lastGSMAttempt = 0;
         lastConnectivityCheck = 0;
         reconnectInterval = 60000 * 5; // Start with 5min interval
-        allCommsUnavailable = false;
+        allCommsUnavailable = true;
         wifiOnline = false;
         gsmOnline = false;
         maxReconnectAttemptsReached = false;
@@ -417,7 +417,7 @@ void loop()
         starttime = millis();
     }
 
-    if (DeviceConfigState.isMQTTConfigured)
+    if (DeviceConfigState.isMQTTConfigured && !CommsManagerState.allCommsUnavailable)
     {
         // Check if setup is complete and we haven't sent boot telemetry yet
         if (!boot_telemetry_sent && !DeviceConfigState.configurationRequired && millis() - boottime > BOOT_TELEMETRY_DELAY_MS)
@@ -1819,7 +1819,10 @@ void updateCommsPreference()
  */
 void commsManager()
 {
-
+    static unsigned long lastCommsCheck = 0;
+    if (millis() - lastCommsCheck < 60000 * 15)
+        return;
+    lastCommsCheck = millis();
     if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::NONE)
     {
         // If all comms are unavailable, attempt to update connectivity status and preference
@@ -1851,33 +1854,27 @@ void commsManager()
     // Update communication preference based on current state
     updateCommsPreference();
 
-    // Log current state periodically for debugging (every 10 minutes)
-    static unsigned long lastDebugLog = 0;
-    if (millis() - lastDebugLog > 60000 * 10)
+    Serial.println("----- Communication Manager State Unsolicited Report -----");
+    Serial.print("CommsManager State - WiFi: ");
+    Serial.print(CommsManagerState.wifiOnline ? "Online" : "Offline");
+    Serial.print(" (fails: ");
+    Serial.print(CommsManagerState.wifiFailCount);
+    Serial.print(") | GSM: ");
+    Serial.print(CommsManagerState.gsmOnline ? "Online" : "Offline");
+    Serial.print(" (fails: ");
+    Serial.print(CommsManagerState.gsmFailCount);
+    Serial.print(") | Preferred: ");
+    switch (CommsManagerState.preferredComm)
     {
-        lastDebugLog = millis();
-        Serial.println("----- Communication Manager State Unsolicited Report -----");
-        Serial.print("CommsManager State - WiFi: ");
-        Serial.print(CommsManagerState.wifiOnline ? "Online" : "Offline");
-        Serial.print(" (fails: ");
-        Serial.print(CommsManagerState.wifiFailCount);
-        Serial.print(") | GSM: ");
-        Serial.print(CommsManagerState.gsmOnline ? "Online" : "Offline");
-        Serial.print(" (fails: ");
-        Serial.print(CommsManagerState.gsmFailCount);
-        Serial.print(") | Preferred: ");
-        switch (CommsManagerState.preferredComm)
-        {
-        case CommsManagerState.PreferredComm::WIFI:
-            Serial.println("WiFi");
-            break;
-        case CommsManagerState.PreferredComm::GSM:
-            Serial.println("GSM");
-            break;
-        case CommsManagerState.PreferredComm::NONE:
-            Serial.println("None (All Failed)");
-            break;
-        }
+    case CommsManagerState.PreferredComm::WIFI:
+        Serial.println("WiFi");
+        break;
+    case CommsManagerState.PreferredComm::GSM:
+        Serial.println("GSM");
+        break;
+    case CommsManagerState.PreferredComm::NONE:
+        Serial.println("None (All Failed)");
+        break;
     }
 }
 
@@ -1913,6 +1910,7 @@ void initComms()
     else
     {
         CommsManagerState.preferredComm = CommsManagerState.PreferredComm::NONE;
+        Serial.println("All communication methods are disabled in configuration. Please enable at least one communication method to allow data transmission");
         return;
     }
 
