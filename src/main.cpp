@@ -79,9 +79,8 @@ unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
 unsigned long last_send_telemetry = 0;
-bool boot_telemetry_sent = false;                                 // Tracks if telemetry has been sent on boot
-const unsigned long BOOT_TELEMETRY_DELAY_MS = 30 * 1000;          // 30 seconds - time to allow connections to establish
-const unsigned long MQTT_INCOMING_CHECK_INTERVAL = 5 * 60 * 1000; // 5 mminutes
+bool boot_telemetry_sent = false;                        // Tracks if telemetry has been sent on boot
+const unsigned long BOOT_TELEMETRY_DELAY_MS = 30 * 1000; // 30 seconds - time to allow connections to establish
 
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
 
@@ -188,7 +187,6 @@ struct CommsManagerState
         gsmOnline = false;
         maxReconnectAttemptsReached = false;
         mqttConnectionInitialized = false;
-        lastMQTTCheck = 0;
     }
 } CommsManagerState;
 
@@ -2222,7 +2220,7 @@ bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client
     Serial.println(" bytes");
 
     // Send telemetry via WiFi MQTT
-    bool result = wifiMQTTSendTelemetry(broker, port, topic, client_id, mqtt_payload, username, password, true);
+    bool result = wifiMQTTSendTelemetry(broker, port, topic, client_id, mqtt_payload, username, password, false);
 
     if (result)
     {
@@ -2296,35 +2294,15 @@ void checkIncomingMQTTMessages()
     if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::NONE)
         return;
 
-    bool subscribe_time = (millis() - CommsManagerState.lastMQTTCheck >= MQTT_INCOMING_CHECK_INTERVAL);
-    bool subscribed = false;
-
     if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::WIFI && CommsManagerState.wifiOnline && CommsManagerState.mqttConnectionInitialized)
     {
         if (!mqttClient.connected())
         {
-            bool conneceted = wifiMQTTConnect(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
-        }
-
-        if (subscribe_time)
-        {
-            if (!mqttClient.subscribe(MQTT_SUBSCRIBE_TOPIC))
-            {
-                Serial.println("Failed to subscribe to MQTT topic");
-            }
-            else
-            {
-                subscribed = true;
-                CommsManagerState.lastMQTTCheck = millis();
-            }
+            if (wifiMQTTConnect(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD))
+                mqttClient.subscribe(MQTT_SUBSCRIBE_TOPIC);
         }
 
         mqttClient.loop();
-
-        if (subscribed) // Unsubscribe after receiving mesage //? I reckon that this step to unsubscribe from incoming messages topic would be useful when using cellular data than on WiFi connection. WiFi data allocation (capacity/limit) on basic subscriptions is incomparably huge to cellullar IoT data bundles
-        {
-            mqttClient.unsubscribe(MQTT_SUBSCRIBE_TOPIC);
-        }
     }
 
     else if (CommsManagerState.preferredComm == CommsManagerState::GSM && CommsManagerState.gsmOnline)
@@ -2377,10 +2355,6 @@ void wifiMQTTCallback(char *topic, byte *payload, unsigned int length)
         incoming_message_store[length] = '\0';
     }
 
-    Serial.print("wifiMQTTCallback: Message | topic: ");
-    Serial.print(topic);
-    Serial.print("| Payload length: ");
-    Serial.print(length);
-    Serial.print("| Payload: ");
-    Serial.write(payload, length);
+    String dbg = "wifiMQTTCallback: Message | topic: " + String(topic) + "| Payload length:" + "| Payload: " + String((char *)payload, length);
+    Serial.println(dbg);
 }
