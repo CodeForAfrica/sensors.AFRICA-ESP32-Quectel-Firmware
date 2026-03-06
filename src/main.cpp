@@ -375,6 +375,17 @@ void loop()
     listenSerial();
 #endif
 
+    if (DeviceConfigState.configurationRequired)
+    {
+
+        loadSavedDeviceConfigs();
+        if (DeviceConfigState.restartRequired)
+        {
+            Serial.println("New config(s) requries a restart. Restarting...");
+            ESP.restart();
+        }
+        DeviceConfigState.configurationRequired = false;
+    }
     // Manage communication device and connectivity state
     commsManager();
 

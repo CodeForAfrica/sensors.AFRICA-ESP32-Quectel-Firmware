@@ -39,6 +39,7 @@ struct DeviceConfigState
     bool timeSet = false;
     bool sdCardInitialized = false;
     bool isMQTTConfigured = false;
+    bool restartRequired = false;
 };
 
 extern struct DeviceConfigState DeviceConfigState;
@@ -49,7 +50,7 @@ struct DeviceConfig
     char wifi_sta_pwd[64] = {};
     char gsm_apn[32] = {};
     char gsm_apn_pwd[32] = {};
-    char sim_pin[5] = {};
+    char sim_pin[8] = {};
     bool power_saving_mode = false;
     bool useWiFi;
     bool useGSM;
@@ -157,6 +158,7 @@ static void saveConfig(JsonDocument &doc)
     Serial.println(mergedString);
     writeFile(LittleFS, new_config_file, mergedString.c_str());
     updateFileContents(LittleFS, "/config.json", new_config_file);
+    DeviceConfigState.configurationRequired = true;
 }
 
 static void loadSavedDeviceConfigs()
@@ -169,32 +171,57 @@ static void loadSavedDeviceConfigs()
         return !v.isNull() && v.is<const char *>() && v.as<const char *>()[0] != '\0';
     };
 
+    bool wiFiUpdated = false, wifiSSIDUpdated = false, wifiPwdUpdated = false, gsmUpdated = false, apnUpdated = false, apnPwdUpdated = false, pinUpdated = false, useGSMUpdated = false, useWiFiUpdated = false;
     if (hasString(config["ssid"]))
     {
+        wifiSSIDUpdated = !strstr(DeviceConfig.wifi_sta_ssid, config["ssid"]);
         strcpy(DeviceConfig.wifi_sta_ssid, config["ssid"]);
         if (hasString(config["wifiPwd"]))
+        {
+            wifiPwdUpdated = !strstr(DeviceConfig.wifi_sta_pwd, config["wifiPwd"]);
             strcpy(DeviceConfig.wifi_sta_pwd, config["wifiPwd"]);
+        }
     }
 
     if (hasString(config["apn"]))
     {
+        apnUpdated = !strstr(DeviceConfig.gsm_apn, config["apn"]);
         strcpy(DeviceConfig.gsm_apn, config["apn"]);
         if (hasString(config["apnPwd"]))
+        {
+            apnPwdUpdated = !strstr(DeviceConfig.gsm_apn_pwd, config["apnPwd"]);
             strcpy(DeviceConfig.gsm_apn_pwd, config["apnPwd"]);
+        }
     }
 
     if (hasString(config["simPin"]))
     {
+        pinUpdated = !strstr(DeviceConfig.sim_pin, config["simPin"]);
         strcpy(DeviceConfig.sim_pin, config["simPin"]);
     }
 
     if (hasString(config["powerSaver"]))
     {
-        if (config["powerSaver"] == "on")
-            DeviceConfig.power_saving_mode = true;
-        else
-            DeviceConfig.power_saving_mode = false;
+        DeviceConfig.power_saving_mode = (config["powerSaver"] == "on") ? true : false;
+        Serial.printf("Power saving mode updated to: %d\n", DeviceConfig.power_saving_mode);
     }
+    if (hasString(config["useGSM"]))
+    {
+        bool val = (config["useGSM"] == "true");
+        useGSMUpdated = (DeviceConfig.useGSM != val);
+        DeviceConfig.useGSM = val;
+    }
+    if (hasString(config["useWiFi"]))
+    {
+        bool val = (config["useWifFi"] == "true");
+        useWiFiUpdated = (DeviceConfig.useWiFi != val);
+        DeviceConfig.useWiFi = val;
+    }
+
+    gsmUpdated = apnPwdUpdated || apnPwdUpdated || pinUpdated;
+    wiFiUpdated = wifiSSIDUpdated || wifiPwdUpdated;
+
+    DeviceConfigState.restartRequired = gsmUpdated || wifiPwdUpdated || useWiFiUpdated || useGSMUpdated;
 }
 
 #endif
