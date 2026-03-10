@@ -11,7 +11,7 @@
 static JsonDocument getDeviceConfig();
 static void updateDeviceConfig();
 static void saveConfig(JsonDocument &doc);
-static void loadSavedDeviceConfigs();
+static void loadSavedDeviceConfigs(bool setConfigStates = true);
 
 enum ConfigurationState
 {
@@ -29,8 +29,8 @@ struct DeviceConfigState
     ConfigurationState state;
     unsigned long captivePortalStartTime;
     unsigned long captivePortalTimeoutMs; // 5-10 mins
-    bool configurationRequired;           // False if valid config exists
-    bool captivePortalAccessed;           // Tracks if user accessed it
+    bool configurationRequired = false;   // False if valid config exists
+    bool captivePortalAccessed = false;   // Tracks if user accessed it
     bool wifiConnected = false;
     bool gsmConnected = false;
     bool wifiInternetAvailable = false;
@@ -125,25 +125,17 @@ static void saveConfig(JsonDocument &doc)
     Serial.println(incoming);
 
     // If there is no existing config or it's invalid, just write the passed doc
-    if (existing == "" || !validateJson(existing.c_str())) // ToDo: reduce this with either validateJson or DeserializationError
+    if (existing == "" || !validateJson(existing.c_str()))
     {
         Serial.println("Invalid or empty json. Writing incoming config as new config");
         const char *c_string = incoming.c_str();
         writeFile(LittleFS, "/config.json", c_string);
+        DeviceConfigState.configurationRequired = true;
         return;
     }
 
     JsonDocument existingDoc;
     DeserializationError err = deserializeJson(existingDoc, existing);
-    if (err) //! Same thing as above ideally. Just an extra validation step. ToDo: reduce this with either validateJson or DeserializationError
-    {
-        Serial.println("\nDeserialization Error on existing doc. Writing incoming config as new config");
-        // Fallback: write the passed doc if existing couldn't be parsed //! Use this validaters with caution, they have failed in some tests.
-        const char *c_string = incoming.c_str();
-        writeFile(LittleFS, "/config.json", c_string);
-        return;
-    }
-
     JsonObject existingObj = existingDoc.as<JsonObject>();
     JsonObject newObj = doc.as<JsonObject>();
 
@@ -157,14 +149,19 @@ static void saveConfig(JsonDocument &doc)
     Serial.println("\nNew merged doc");
     Serial.println(mergedString);
     writeFile(LittleFS, new_config_file, mergedString.c_str());
-    updateFileContents(LittleFS, "/config.json", new_config_file);
+    updateFileContents(LittleFS, "/config.json", new_config_file); //? merged string already has everything we need so overwrite is safe
     DeviceConfigState.configurationRequired = true;
 }
 
-static void loadSavedDeviceConfigs()
+static void loadSavedDeviceConfigs(bool setConfigStates)
 {
-
+    Serial.println("Loading saved configs");
     JsonDocument config = getDeviceConfig(); // {"ssid":"myssid ","wifiPwd":"mypwd","apn":"myapn","apnPwd":"myapnpwd","powerSaver":"off"}
+    if (config.isNull())
+    {
+        Serial.println("Config non-existent or broken");
+        return;
+    }
 
     auto hasString = [&](JsonVariant v)
     {
@@ -221,7 +218,11 @@ static void loadSavedDeviceConfigs()
     gsmUpdated = apnPwdUpdated || apnPwdUpdated || pinUpdated;
     wiFiUpdated = wifiSSIDUpdated || wifiPwdUpdated;
 
-    DeviceConfigState.restartRequired = gsmUpdated || wifiPwdUpdated || useWiFiUpdated || useGSMUpdated;
+    if (setConfigStates)
+    {
+        if (DeviceConfig.useGSM || DeviceConfig.useWiFi)
+            DeviceConfigState.restartRequired = gsmUpdated || wifiPwdUpdated || useWiFiUpdated || useGSMUpdated;
+    }
 }
 
 #endif

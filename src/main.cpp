@@ -294,25 +294,17 @@ void setup()
     }
     else
     {
-        Serial.println("LittleFS mounted successfully");
-
-        // Step 1: Load existing config from LittleFS // ToDo: Refactor this to a function and call it in the captive portal flow as well after user submits config form. This is to ensure that we always have the latest config in memory, especially after user updates it via captive portal.
-        String existingConfig = readFile(LittleFS, "/config.json");
-        if (existingConfig != "" && validateJson(existingConfig.c_str()))
-        {
-            Serial.println(existingConfig);
-            DeviceConfigState.configurationRequired = false;
-        }
-        else
-        {
-            DeviceConfigState.configurationRequired = true;
-        }
+        Serial.println("LittleFS mounted successfully. Attempting to override firmware configs with saved configs");
+        // Override firmware configs with saveconfigs
+        loadSavedDeviceConfigs(false);
+        DeviceConfigState.configurationRequired = (!DeviceConfig.useGSM && !DeviceConfig.useWiFi);
     }
 
     // Device configuration
 
     if (DeviceConfigState.configurationRequired)
-    {
+    { 
+        DeviceConfigState.configurationRequired=false; //? This will be reset by saveConfig()
         // Step 2: Start WiFi AP
         WiFi.softAP(AP_SSID, AP_PWD);
         Serial.print("struct_wifiInfo* wifiInfo size: ");
@@ -328,16 +320,23 @@ void setup()
         dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
         setup_webserver();
 
-        // ToDO: Do not start captival portal if configs are valid
         // ToDo: This should probably be spinned in another core
         startCaptivePortal(DeviceConfigState.captivePortalAccessed, DeviceConfigState.captivePortalStartTime, DeviceConfigState.captivePortalTimeoutMs);
     }
+    else
+    {
 
-    // ToDo: go ahead and apply device configs. Check the default power saving mode and set default configs.
-    loadSavedDeviceConfigs(); // Override initial configs
+        WiFi.softAP(AP_SSID, AP_PWD); // start AP & webserver anyway
+        setup_webserver();
+    }
 
-    WiFi.softAP(AP_SSID, AP_PWD); // start AP & webserver anyway
-    setup_webserver();
+    // Check if a user entered new configs from the captive portal
+    if (DeviceConfigState.configurationRequired)
+    {
+        Serial.println("Overriding current configs with captive portal configs");
+        loadSavedDeviceConfigs(false);
+        DeviceConfigState.configurationRequired = false;
+    }
 
     initComms();
 
@@ -381,7 +380,7 @@ void loop()
         loadSavedDeviceConfigs();
         if (DeviceConfigState.restartRequired)
         {
-            Serial.println("New config(s) requries a restart. Restarting...");
+            Serial.println("New config(s) requries a restart. Restarting...\n\n");
             ESP.restart();
         }
         DeviceConfigState.configurationRequired = false;
