@@ -239,8 +239,8 @@
             <input type="text" id="apn" name="apn" />
           </div>
           <div class="form-group">
-            <label for="apn_pwd">APN Password</label>
-            <input type="text" id="apn_pwd" name="apn_pwd" />
+            <label for="apnPwd">APN Password</label>
+            <input type="text" id="apnPwd" name="apnPwd" />
           </div>
           <div class="form-group">
             <label for="simPin">SIM PIN</label>
@@ -309,7 +309,7 @@
           }
           if (formData.get("apn") === "") {
             formData.delete("apn");
-            formData.delete("apn_pwd");
+            formData.delete("apnPwd");
           }
 
           // ! make sure the value of Power Saver checkbox is parsed whether true or false

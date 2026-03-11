@@ -78,30 +78,6 @@ static void wifiAPbegin(const char *WIFI_AP_ID, const char *WIFI_AP_PWD)
     dnsServer.start(53, "*", AP_IP); // 53 is port for DNS server
 }
 
-static void wifi_Config()
-{
-
-    // setup_webserver(); //? Call in different section like void setup()
-    unsigned time_for_wifi_config = 60000;
-
-    // 10 minutes timeout for wifi config
-    unsigned long last_page_load = millis();
-    while ((millis() - last_page_load) < time_for_wifi_config + 500)
-    {
-        dnsServer.processNextRequest();
-        // server.handleClient();
-        yield();
-    }
-
-    WiFi.softAPdisconnect(true);
-    WiFi.mode(WIFI_STA);
-
-    dnsServer.stop();
-    delay(100);
-
-    // WiFi.begin(cfg::wlanssid, cfg::wlanpwd);
-    // wificonfig_loop = false;
-}
 
 static void wifiAPstop()
 {
@@ -217,14 +193,62 @@ static void connectWifi(const char *WLANSSID, const char *WLANPWD)
     }
 }
 
-static void startCaptivePortal(bool &isCaptivePortalViewed)
+static void startCaptivePortal(bool &isCaptivePortalViewed, unsigned long startTime, unsigned long timeout)
 {
 
-    while (!isCaptivePortalViewed)
+    while (!isCaptivePortalViewed && (millis() - startTime < timeout))
     {
         dnsServer.processNextRequest();
+        yield();
     }
     dnsServer.stop();
+}
+
+/// @brief: Determine whether the current station link has working internet connectivity. This is a lightweight "ping" equivalent: open a TCP socket to a well-known server and immediately close it.
+/// @param host: the host to ping for connectivity check. Default is Google DNS
+/// @param port: the port to ping for connectivity check. Default is 53 (DNS)
+/// @param timeoutMs: the timeout for the connectivity check in milliseconds. Default is 3000ms
+/// @return: true if the connectivity check succeeds, false otherwise
+inline bool wifiHasInternet(const char *host = "8.8.8.8", uint16_t port = 53, uint32_t timeoutMs = 3000)
+{
+    WiFiClient client;
+    bool ok = client.connect(host, port, timeoutMs);
+    if (ok)
+        client.stop();
+    return ok;
+}
+
+inline bool wifiConnect(const char *WLANSSID, const char *WLANPWD)
+{
+
+    Serial.printf("Attempting WiFi connection to SSID: %s\n", WLANSSID);
+    WiFi.begin(WLANSSID, WLANPWD);
+
+    unsigned long start = millis();
+    const unsigned long timeout = 60000UL;
+    while (WiFi.status() != WL_CONNECTED && millis() - start < timeout)
+    {
+        Serial.print('.');
+        delay(1000);
+    }
+    Serial.println();
+
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("Failed to connect to WiFi hotspot");
+        return false;
+    }
+
+    Serial.printf("WiFi connected, IP %s\n", WiFi.localIP().toString().c_str());
+
+    if (!wifiHasInternet()) //? it would be useless to stay connected to a WiFi network without internet or track its state, so disconnect and return false if we have no internet
+    {
+        Serial.println("WiFi link has no internet; disconnecting");
+        WiFi.disconnect();
+        return false;
+    }
+
+    return true;
 }
 
 #endif

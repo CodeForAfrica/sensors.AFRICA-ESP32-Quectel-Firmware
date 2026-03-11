@@ -17,17 +17,20 @@ extern char AP_SSID[64];
 String pendingFileList = "{}";
 bool fileListReady = false;
 AsyncWebServerRequest *pendingRequest = nullptr;
-extern JsonDocument gsm_info;
-extern bool isCaptivePortalViewed;
+extern JsonDocument device_info;
 
 void setup_webserver()
 {
   server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(LittleFS, "/config.html"); });
+            { request->send(LittleFS, "/style.css"); });
+  server.on("/style.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/style.min.css"); });
+  server.on("/scripts.min.js", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/scripts.min.js"); });
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/index.html"); });
   server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
-            { if(request->hasParam("skip")){isCaptivePortalViewed=true;} //? we don't care about the value of skip, so no need to parse it
+            { if(request->hasParam("skip")){DeviceConfigState.captivePortalAccessed=true;} //? we don't care about the value of skip, so no need to parse it
                else{request->send(LittleFS, "/config.html"); } });
   server.on("/device-details.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/device-details.html"); });
@@ -69,7 +72,7 @@ void setup_webserver()
                   }
 
                   String hotspots;
-                  serializeJsonPretty(doc,Serial);
+                  // serializeJsonPretty(doc,Serial); // Debugging
                   serializeJson(doc, hotspots);
                   request->send(200,"application/json",hotspots); });
 
@@ -83,7 +86,7 @@ void setup_webserver()
                 return;
               }
               request->send(200, "application/json", "{\"status\":\"Config received\"}");
-              
+              DeviceConfigState.captivePortalAccessed = true; // Mark captive portal as accessed when config is saved
               saveConfig(new_config); });
 
   server.on("/sensor-data", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -210,15 +213,15 @@ void setup_webserver()
 
     request->send(response); });
 
-  server.on("/gsm_info", HTTP_GET, [](AsyncWebServerRequest *request)
+  server.on("/device-details", HTTP_GET, [](AsyncWebServerRequest *request)
             {
               String res;
-              serializeJson(gsm_info,res);
+              serializeJson(device_info,res);
               request->send(200,"application/json", res); });
 
   // Captive portal redirect
   server.onNotFound([](AsyncWebServerRequest *request)
-                    { if(!isCaptivePortalViewed) request->redirect("/config"); else request->send(404, "text/plain", "Not found"); });
+                    { if(!DeviceConfigState.captivePortalAccessed) request->redirect("/config"); else request->send(404, "text/plain", "Not found"); });
 
   //! For comparison
   // void uploadFiles()

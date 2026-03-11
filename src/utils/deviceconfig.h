@@ -11,6 +11,52 @@
 static JsonDocument getDeviceConfig();
 static void updateDeviceConfig();
 static void saveConfig(JsonDocument &doc);
+static void loadSavedDeviceConfigs(bool setConfigStates = true);
+
+enum ConfigurationState
+{
+    CONFIG_BOOT_INIT,              // Reading existing config
+    CONFIG_CAPTIVE_PORTAL_ACTIVE,  // Waiting for user input
+    CONFIG_CAPTIVE_PORTAL_TIMEOUT, // Auto-continue
+    CONFIG_WIFI,
+    CONFIG_GSM,
+    CONFIG_APPLIED, // Configs loaded & applied
+    CONFIG_COMPLETE // Ready for runtime
+};
+
+struct DeviceConfigState
+{
+    ConfigurationState state;
+    unsigned long captivePortalStartTime;
+    unsigned long captivePortalTimeoutMs; // 5-10 mins
+    bool configurationRequired = false;   // False if valid config exists
+    bool captivePortalAccessed = false;   // Tracks if user accessed it
+    bool wifiConnected = false;
+    bool gsmConnected = false;
+    bool wifiInternetAvailable = false;
+    bool gsmInternetAvailable = false;
+    bool internetAvailable = false;
+    bool timeSet = false;
+    bool sdCardInitialized = false;
+    bool isMQTTConfigured = false;
+    bool restartRequired = false;
+};
+
+extern struct DeviceConfigState DeviceConfigState;
+
+struct DeviceConfig
+{
+    char wifi_sta_ssid[64] = {};
+    char wifi_sta_pwd[64] = {};
+    char gsm_apn[32] = {};
+    char gsm_apn_pwd[32] = {};
+    char sim_pin[8] = {};
+    bool power_saving_mode = false;
+    bool useWiFi;
+    bool useGSM;
+};
+
+extern struct DeviceConfig DeviceConfig;
 
 static JsonDocument getDeviceConfig()
 {
@@ -67,36 +113,29 @@ static void saveConfig(JsonDocument &doc)
     };
 
     const char *new_config_file = "/config.json.new";
-    listFiles(LittleFS);
-    String existing = readFile(LittleFS, "/config.json");
     String incoming;
-
-    Serial.println("\nExisting config: ");
-    Serial.println(existing);
+    String existing = readFile(LittleFS, "/config.json");
+    if (existing != "")
+    {
+        Serial.println("\nExisting config: ");
+        Serial.println(existing);
+    };
     Serial.println("\nIncoming doc");
     serializeJsonPretty(doc, incoming);
     Serial.println(incoming);
 
     // If there is no existing config or it's invalid, just write the passed doc
-    if (existing == "" || !validateJson(existing.c_str())) // ToDo: reduce this with either validateJson or DeserializationError
+    if (existing == "" || !validateJson(existing.c_str()))
     {
-        Serial.println("Invalid or empty json");
+        Serial.println("Invalid or empty json. Writing incoming config as new config");
         const char *c_string = incoming.c_str();
         writeFile(LittleFS, "/config.json", c_string);
+        DeviceConfigState.configurationRequired = true;
         return;
     }
 
     JsonDocument existingDoc;
     DeserializationError err = deserializeJson(existingDoc, existing);
-    if (err)
-    {
-        Serial.println("\nDeserialization Error on existing doc");
-        // Fallback: write the passed doc if existing couldn't be parsed //! Use this validaters with caution, they have failed in some tests.
-        const char *c_string = incoming.c_str();
-        writeFile(LittleFS, "/config.json", c_string);
-        return;
-    }
-
     JsonObject existingObj = existingDoc.as<JsonObject>();
     JsonObject newObj = doc.as<JsonObject>();
 
@@ -110,7 +149,80 @@ static void saveConfig(JsonDocument &doc)
     Serial.println("\nNew merged doc");
     Serial.println(mergedString);
     writeFile(LittleFS, new_config_file, mergedString.c_str());
-    updateFileContents(LittleFS, "/config.json", new_config_file);
+    updateFileContents(LittleFS, "/config.json", new_config_file); //? merged string already has everything we need so overwrite is safe
+    DeviceConfigState.configurationRequired = true;
+}
+
+static void loadSavedDeviceConfigs(bool setConfigStates)
+{
+    Serial.println("Loading saved configs");
+    JsonDocument config = getDeviceConfig(); // {"ssid":"myssid ","wifiPwd":"mypwd","apn":"myapn","apnPwd":"myapnpwd","powerSaver":"off"}
+    if (config.isNull())
+    {
+        Serial.println("Config non-existent or broken");
+        return;
+    }
+
+    auto hasString = [&](JsonVariant v)
+    {
+        return !v.isNull() && v.is<const char *>() && v.as<const char *>()[0] != '\0';
+    };
+
+    bool wiFiUpdated = false, wifiSSIDUpdated = false, wifiPwdUpdated = false, gsmUpdated = false, apnUpdated = false, apnPwdUpdated = false, pinUpdated = false, useGSMUpdated = false, useWiFiUpdated = false;
+    if (hasString(config["ssid"]))
+    {
+        wifiSSIDUpdated = !strstr(DeviceConfig.wifi_sta_ssid, config["ssid"]);
+        strcpy(DeviceConfig.wifi_sta_ssid, config["ssid"]);
+        if (hasString(config["wifiPwd"]))
+        {
+            wifiPwdUpdated = !strstr(DeviceConfig.wifi_sta_pwd, config["wifiPwd"]);
+            strcpy(DeviceConfig.wifi_sta_pwd, config["wifiPwd"]);
+        }
+    }
+
+    if (hasString(config["apn"]))
+    {
+        apnUpdated = !strstr(DeviceConfig.gsm_apn, config["apn"]);
+        strcpy(DeviceConfig.gsm_apn, config["apn"]);
+        if (hasString(config["apnPwd"]))
+        {
+            apnPwdUpdated = !strstr(DeviceConfig.gsm_apn_pwd, config["apnPwd"]);
+            strcpy(DeviceConfig.gsm_apn_pwd, config["apnPwd"]);
+        }
+    }
+
+    if (hasString(config["simPin"]))
+    {
+        pinUpdated = !strstr(DeviceConfig.sim_pin, config["simPin"]);
+        strcpy(DeviceConfig.sim_pin, config["simPin"]);
+    }
+
+    if (hasString(config["powerSaver"]))
+    {
+        DeviceConfig.power_saving_mode = (config["powerSaver"] == "on") ? true : false;
+        Serial.printf("Power saving mode updated to: %d\n", DeviceConfig.power_saving_mode);
+    }
+    if (hasString(config["useGSM"]))
+    {
+        bool val = (config["useGSM"] == "true");
+        useGSMUpdated = (DeviceConfig.useGSM != val);
+        DeviceConfig.useGSM = val;
+    }
+    if (hasString(config["useWiFi"]))
+    {
+        bool val = (config["useWifFi"] == "true");
+        useWiFiUpdated = (DeviceConfig.useWiFi != val);
+        DeviceConfig.useWiFi = val;
+    }
+
+    gsmUpdated = apnPwdUpdated || apnPwdUpdated || pinUpdated;
+    wiFiUpdated = wifiSSIDUpdated || wifiPwdUpdated;
+
+    if (setConfigStates)
+    {
+        if (DeviceConfig.useGSM || DeviceConfig.useWiFi)
+            DeviceConfigState.restartRequired = gsmUpdated || wifiPwdUpdated || useWiFiUpdated || useGSMUpdated;
+    }
 }
 
 #endif

@@ -1,3 +1,6 @@
+#ifndef SD_HANDLER_H
+#define SD_HANDLER_H
+
 #include "FS.h"
 #include "SD.h"
 #include "SPI.h"
@@ -62,7 +65,6 @@ static String readFile(fs::FS &fs, const char *path)
         return "";
     }
 
-    Serial.print("Read from file: ");
     while (file.available())
     {
         file_contents += (char)file.read();
@@ -115,6 +117,19 @@ static void appendFile(fs::FS &fs, const char *path, const char *message, bool n
         Serial.println("Append failed");
     }
     file.close();
+}
+
+static void deleteFile(fs::FS &fs, const char *path)
+{
+    Serial.printf("Deleting file: %s\n", path);
+    if (fs.remove(path))
+    {
+        Serial.println("File deleted");
+    }
+    else
+    {
+        Serial.println("Delete failed");
+    }
 }
 
 static bool SDattached()
@@ -243,3 +258,5 @@ static String listFiles(fs::FS &fs, String path = "/")
     Serial.println(file_list);
     return file_list;
 }
+
+#endif

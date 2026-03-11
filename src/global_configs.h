@@ -7,16 +7,20 @@ static const char URL_CFA[] = "/v1/push-sensor-data/";
 
 static const char SENSOR_PREFIX[] = "ESP32-";
 
-constexpr unsigned SMALL_STR = 64 - 1;
-constexpr unsigned MED_STR = 256 - 1;
-constexpr unsigned LARGE_STR = 512 - 1;
-constexpr unsigned XLARGE_STR = 1024 - 1;
-
+// user predefined device configurations
 #define POWER_SAVING_MODE 1
 
 static bool gsm_capable = true;
-static bool use_wifi = false;
-#define GSM_DEBUG
+static bool use_wifi = true;
+static bool use_gsm = true;
+
+enum CommunicationPriority
+{
+    WIFI,
+    GSM,
+};
+
+#define GSM_DEBUG true
 
 #define QUECTEL EC200CN
 
@@ -51,4 +55,11 @@ static int SD_CS = 39;
 #define DHT_LED 37 // 30
                    // endif
 
+#define MQTT_BASE_TOPIC "devices/nodes/telemetry"
+#define MQTT_BROKER "" // server must be set to enable MQTT telemetry
+#define MQTT_PORT 1883
+#define MQTT_USERNAME "" // set to enable MQTT authentication
+#define MQTT_PASSWORD "" // set to enable MQTT authentication
+#define MQTT_CLIENT_ID 5
+#define MQTT_SUBSCRIBE_TOPIC "devices/nodes/configuration"
 #endif
