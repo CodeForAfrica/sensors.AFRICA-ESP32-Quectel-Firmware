@@ -5,4 +5,7 @@
 .vscode/ipch
 .vscode
 .DS_Store
+
+#project files
 test
+data/
