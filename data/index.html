@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Home</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+      }
+      .navbar {
+        display: flex;
+        background: #2fb56b;
+        color: #fff;
+        align-items: center;
+        flex-wrap: wrap;
+        font-size: 20px;
+      }
+      .navbar-brand {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        font-size: 1em;
+        padding: 0.5em 1em;
+        gap: 0.2em;
+        min-height: 128px;
+      }
+      .navbar-brand img {
+        height: 100px;
+        width: 100px;
+        object-fit: contain;
+      }
+      .navbar-toggle {
+        display: none;
+        font-size: 1.5em;
+        background: none;
+        border: none;
+        color: #fff;
+        margin-left: auto;
+        cursor: pointer;
+      }
+      .navbar-links {
+        display: flex;
+        flex-direction: row;
+        gap: 1em;
+        margin: auto;
+      }
+      .navbar-links a {
+        color: #fff;
+        text-decoration: none;
+        transition: background 0.2s;
+        padding: 1em;
+      }
+      .navbar-links a:hover {
+        background: #06913e;
+      }
+      @media (max-width: 600px) {
+        .navbar-links {
+          flex-direction: column;
+          width: 100%;
+          display: none;
+          gap: 0;
+        }
+        .navbar-links a {
+          padding: 0.5em 1em;
+        }
+        .navbar-links.active {
+          display: flex;
+        }
+        .navbar-toggle {
+          display: block;
+        }
+      }
+
+      .sensordata-overview {
+        max-width: 600px;
+        height: 100%;
+        margin: 0.2em auto 1em;
+        padding: 1em;
+        background: #f9f9f9;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+      }
+
+      .sensor-group h3 {
+        color: #06913e;
+        margin-bottom: 0.5em;
+      }
+      .data-populate {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1em;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar">
+      <span class="navbar-brand">
+        <img src="sensors_logo.png" alt="sensors-logo" />
+        <span id="device-id"></span>
+      </span>
+      <button class="navbar-toggle" onclick="toggleNavbar()">&#9776;</button>
+      <div class="navbar-links" id="navbarLinks">
+        <a href="/">Home</a>
+        <a href="device-details.html">Device Details</a>
+        <a href="ota.html">OTA</a>
+        <a href="file-system.html">File Viewer</a>
+        <!-- <a href="advanced-settings.html">Advanced Settings</a> -->
+      </div>
+    </nav>
+    <main>
+      <section class="sensordata-overview">
+        <h2 style="text-align: center; color: #2fb56b">Sensor Data Overview</h2>
+        <div style="display: flex; flex-direction: column; gap: 1em">
+          <!-- Air Quality Group -->
+          <div class="sensor-group">
+            <h3>Air Quality</h3>
+            <div class="data-populate" id="PM_DATA">Unavailable</div>
+          </div>
+          <!-- Environment Group -->
+          <div class="sensor-group">
+            <h3>Environment</h3>
+            <div class="data-populate">
+              <div>
+                <strong>Temperature:</strong>
+                <span style="display: inline-block; vertical-align: middle">
+                  <span
+                    id="temperature"
+                    style="
+                      display: inline-block;
+                      width: 56px;
+                      height: 56px;
+                      padding: 2px;
+                      background: linear-gradient(
+                        135deg,
+                        #ff9800 60%,
+                        #fff3e0 100%
+                      );
+                      border-radius: 50%;
+                      text-align: center;
+                      line-height: 48px;
+                      font-size: 1em;
+                      font-weight: bold;
+                      color: #fff;
+                      margin-right: 0.5em;
+                      box-shadow: 0 2px 6px rgba(255, 152, 0, 0.15);
+                      border: 2px solid #ff9800;
+                      box-sizing: border-box;
+                    "
+                  ></span>
+                </span>
+              </div>
+              <div>
+                <strong>Humidity:</strong>
+                <span id="humidity">Unavailable</span>
+              </div>
+            </div>
+          </div>
+          <!-- Location Group -->
+          <!-- <div class="sensor-group">
+            <h3>Location</h3>
+            <div>
+              <strong>GPS Coordinates: </strong>
+              <span id="gps"> unavailable</span>
+            </div>
+          </div> -->
+        </div>
+      </section>
+    </main>
+    <script>
+      function toggleNavbar() {
+        var links = document.getElementById("navbarLinks");
+        links.classList.toggle("active");
+      }
+    </script>
+
+    <script>
+      const data_el_template = `<div><strong>$param:</strong> <span>$value $units</span></div>`;
+      const PM_data = document.getElementById("PM_DATA");
+      const temperature = document.getElementById("temperature");
+      const humidity = document.getElementById("humidity");
+      const fetchData = () => {
+        fetch("/sensor-data")
+          .then((response) => response.json())
+          .then((data) => {
+            if (data) {
+              console.log("Received sensor data: ", data);
+              if (data["PM"]) {
+                let pm_data_els = "";
+                for (const [pm, val] of Object.entries(data["PM"])) {
+                  let pm_el = data_el_template;
+                  pm_el = pm_el.replace("$param", pm);
+                  pm_el = pm_el.replace("$value", val);
+                  pm_el = pm_el.replace("$units", "ug/m3");
+                  pm_data_els += pm_el;
+                }
+                PM_data.innerHTML = pm_data_els;
+              }
+
+              if (data["DHT"]) {
+                temperature.textContent = data["DHT"]["temperature"] + "°C";
+                humidity.textContent = data["DHT"]["humidity"] + "%";
+              }
+              // document.getElementById("gps").textContent = data.gps;
+              // // Update temperature inside the styled span
+              // const tempSpan = document.querySelector("#temperature span");
+              // if (tempSpan) tempSpan.textContent = data.temperature + "°C";
+            }
+          })
+          .catch((error) => {
+            console.error("Error fetching sensor data:", error);
+          });
+      };
+      setInterval(fetchData, 5 * 60 * 1000);
+    </script>
+    <script>
+      fetch("/device-id")
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error("Network response not ok " + response.status);
+          }
+          return response.text();
+        })
+        .then(
+          (deviceId) =>
+            (document.getElementById("device-id").innerText = deviceId),
+        )
+        .catch((error) => {
+          console.error("Error fetching device id:", error);
+        });
+    </script>
+  </body>
+</html>

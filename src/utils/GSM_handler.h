@@ -57,6 +57,30 @@ static const char *const NET_STATUS_VERBOSE[] = {
     "Network registration status unknown",
     "Registered to roaming network"};
 
+struct GSMRuntimeInfo
+{
+    String operator_name;       // Network operator name
+    int8_t signal_strength;     // RSSI //!not in dBm: need mapping
+    String network_band[16];    // e.g., "LTE Band 7"
+    char network_technology[8]; // "2G", "3G", "4G"
+    char sim_ccid[21];
+    String imei;
+    String firmware_version;
+    String model_id; // EC200XXXXXXX
+};
+
+enum GSMMQTTConnStatus
+{
+    MQTT_DISCONNECTED = 0,
+    MQTT_BROKER_OPEN = 1,
+    MQTT_CONNECTED = 2
+};
+
+GSMMQTTConnStatus mqtt_status = MQTT_DISCONNECTED;
+int MQTT_INIT_FAIL_COUNT = 0;
+int MQTT_PUB_FAIL = 0;
+String MQTT_INIT_ERROR = "";
+
 bool GSM_init();
 bool register_to_network();
 void SIM_PIN_Setup();
@@ -93,6 +117,23 @@ void cycleNetworkMode();
 String getFirwmareVersion();
 String getModelID();
 String getProductInfo();
+bool pingIP(const char *host, uint8_t contextID = 1);
+String getBatteryStatus();
+
+// MQTT Functions
+bool MQTT_configure(uint8_t client_id = 0, uint8_t recv_mode = 0, uint8_t msg_len = 1);
+bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port);
+bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username = nullptr, const char *password = nullptr);
+bool MQTT_subscribe(uint8_t client_id, uint16_t msg_id, const char *topic, uint8_t qos = 0);
+bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const char *payload, uint8_t qos = 0, uint8_t retain = 0);
+bool MQTT_unsubscribe(uint8_t client_id, uint16_t msg_id, const char *topic);
+bool MQTT_disconnect(uint8_t client_id);
+bool MQTT_isBrokerConnected(uint8_t client_id);
+GSMMQTTConnStatus MQTT_getStatus(uint8_t client_id);
+bool MQTT_isClientConnected(uint8_t client_id);
+bool MQTT_hasBufferedMessage(uint8_t client_id);
+bool MQTT_readBufferedMessage(uint8_t client_id, char *topic_out, size_t topic_size, char *payload_out, size_t payload_size);
+bool MQTT_readBufferedMessage(uint8_t client_id, uint8_t recv_id, char *topic_out, size_t topic_size, char *payload_out, size_t payload_size);
 
 /// @brief Initialize GSM module and SIM card
 /// @return true if GSM initialization successful
@@ -171,6 +212,18 @@ String getProductInfo() // Combination of AT+GMI, AT+GMM and AT+GMR,
     return res.substring(res.indexOf("\n") + 1, res.indexOf("OK") - 3);
 }
 
+/// @brief Query IMEI : AT+GSN=1
+/// @return IMEI string
+String getIMEI()
+{
+    String res;
+    if (!sendAndCheck("AT+GSN=1", "OK", res))
+    {
+        return "";
+    }
+    return res.substring(res.indexOf("\"") + 1, res.indexOf("OK") - 5);
+}
+
 /// @brief Set modem network mode preference
 /// @param mode Network mode (AUTO, 2G, or 4G)
 /// @return true if mode set successfully
@@ -245,55 +298,44 @@ bool register_to_network()
     bool registered_to_network = false;
     int retry_count = 0;
     int8_t status;
-    cycleNetworkMode();
+    // cycleNetworkMode(); //! Only useful when register_to_network is called [1] in while loop either infinetely or timeout longer than time take for the function to excute; or [2] called multiple times in the code; otherwise, can be removed to save time during initialization. To be reviewed and refactored in future iterations.
+
     if (!sendAndCheck("AT+CREG=1\0", "OK"))
     {
         Serial.println("Manual network registration failed.");
     }
-    while (!registered_to_network && retry_count < 20)
+
+    do
+    {
+        status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
+        if (status == NetRegStatus::REGISTERED_TO_HOME_NETWORK || status == NetRegStatus::REGISTERED_ROAMING)
+        {
+            registered_to_network = true;
+            return registered_to_network;
+        }
+        else
+        {
+            Serial.println(NET_STATUS_VERBOSE[status]);
+        }
+    } while (!registered_to_network && retry_count < 20);
     {
         status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
 
         if (status == NetRegStatus::REGISTERED_TO_HOME_NETWORK || status == NetRegStatus::REGISTERED_ROAMING)
         {
             registered_to_network = true;
-            break;
         }
 
         else
         {
-            Serial.print(NET_STATUS_VERBOSE[status]);
+            Serial.print(".");
         }
 
         retry_count++;
         delay(3000);
     }
 
-    if (!registered_to_network)
-    {
-        error_msg = NET_STATUS_VERBOSE[status];
-        GSM_INIT_ERROR = error_msg;
-        REGISTER_TO_NETWORK_FAIL += 1;
-
-        // Attempt to enable network registration
-
-        if (!sendAndCheck("AT+CREG=1\0", "OK"))
-        {
-            Serial.println("Manual network registration failed.");
-        }
-
-        if (REGISTER_TO_NETWORK_FAIL > 5)
-        {
-            GSM_soft_reset();
-            //? Check if the SIM card is still there?
-            REGISTER_TO_NETWORK_FAIL = 0;
-        }
-        return false;
-    }
-
-    sendAndCheck("AT+COPS?", "OK");
-
-    return true;
+    return registered_to_network;
 }
 
 // static void unlock_pin(char *PIN)
@@ -424,13 +466,14 @@ bool GPRS_init()
     // "AT+SAPBR=1,1"
     // "AT+QCFG=\"gprsattach\",1"
 #endif
-
     if (!GPRS_CONNECTED)
     {
+        Serial.println("Failed to init GPRS");
         GPRS_INIT_FAIL_COUNT += 1;
     }
     else
     {
+        Serial.println("GPRS initialized!");
         http_preconfig();
     }
     return GPRS_CONNECTED;
@@ -641,7 +684,7 @@ bool extractText(char *input, const char *target, char *output, uint8_t output_s
             }
         }
     }
-    Serial.println("Could not extact substring '" + (String)target + "' from the source");
+    // Serial.println("Could not extact substring '" + (String)target + "' from the source");
     return false;
 }
 
@@ -1020,18 +1063,125 @@ String getNetworkBand()
     return "";
 }
 
+/// @brief Ping an IP address or hostname to check connectivity
+/// @param host IP address or hostname to ping
+/// @param contextID PDP context ID to use for ping (usually 1)
+/// @return true if ping successful, false otherwise
+bool pingIP(const char *host, uint8_t contextID)
+{
+    char cmd[256];
+
+    // AT+QPING=<contextID>,<host>[,<timeout>[,<pingnum>]]
+
+    snprintf(cmd, sizeof(cmd), "AT+QPING=%d,\"%s\",32,4",
+             contextID, host);
+
+    flushSerial();
+
+    // Wait for OK
+    if (!sendAndCheck(cmd, "OK", 2000))
+    {
+        return false;
+    }
+
+    char urc[64];
+    if (!waitForURC("+QPING:", urc, sizeof(urc), 5000))
+    {
+        NETWORK_NAME = String(NetworkName);
+        return NETWORK_NAME;
+    };
+
+    NETWORK_NAME = "";
+    return NETWORK_NAME;
+}
+/// @brief Query signal strength from network
+/// @return RSSI value or 99 on error //! Integer indicator. Not actual RSSI signal strength in dBm
+int8_t getSignalStrength()
+{
+    String AT_response = "";
+    const char AT_cmd[] = "AT+CSQ";
+    char rssi[4];
+
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return 99;
+
+    if (extractText((char *)AT_response.c_str(), "+CSQ: ", rssi, sizeof(rssi), ','))
+        return atoi(rssi);
+
+    return 99;
+}
+
+/// @brief Query active network band information
+/// @return Band name string
+String getNetworkBand()
+{
+    const char AT_cmd[] = "AT+QNWINFO";
+    char band[64];
+    String AT_response = "";
+
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return "";
+
+    // Extract network band from response
+    // Expected format: +QNWINFO: "FDD LTE","63902","LTE BAND 3",1650
+    // Extract text between second and third comma
+    if (extractText((char *)AT_response.c_str(), "+QNWINFO: \"", band, sizeof(band), '\n'))
+    {
+        // ToDo: Extract Access Technology: Particulary interested in "NO SERVICE" as part of response
+        // Find the second occurrence of comma and extract from there
+        const char *start = strchr((char *)AT_response.c_str(), ',');
+        if (start != nullptr)
+        {
+            start = strchr(start + 1, ',');
+            if (start != nullptr)
+            {
+                start++; // Move past the comma
+                // Skip leading quote if present
+                if (*start == '"')
+                    start++;
+
+                const char *end = strchr(start, '"');
+                if (end != nullptr)
+                {
+                    size_t length = end - start;
+                    if (length < sizeof(band))
+                    {
+                        strncpy(band, start, length);
+                        band[length] = '\0';
+                        return String(band);
+                    }
+                }
+            }
+        }
+    }
+
+    char expected[32];
+    snprintf(expected, sizeof(expected), "+QPING:");
+    Serial.println(urc);
+
+    return strstr(urc, expected) != NULL;
+}
+
 /// @brief Initialize serial communication with GSM module
 /// @return true if communication established
 bool GSM_Serial_begin()
 {
     pinMode(QUECTEL_PWR_KEY, OUTPUT);
+    pinMode(GSM_RST_PIN, OUTPUT);
+    digitalWrite(GSM_RST_PIN, LOW);
+    delay(1000);
+    digitalWrite(QUECTEL_PWR_KEY, LOW);
+    delay(500);
     digitalWrite(QUECTEL_PWR_KEY, HIGH);
+    delay(2500);
+    digitalWrite(QUECTEL_PWR_KEY, HIGH);
+    delay(4000);
 
     GSMSerial.begin(115200, SERIAL_8N1, MCU_RXD, MCU_TXD);
 
     bool comm_init = false;
 
-    int16_t timeout = 30000;
+    int16_t timeout = 60000;
 
     Serial.println("Attempting to initate comms with GSM module");
 
@@ -1048,6 +1198,7 @@ bool GSM_Serial_begin()
     }
     if (!comm_init)
     {
+        Serial.println("Failed to establish communication with GSM module");
         return false;
     }
 
@@ -1107,6 +1258,753 @@ void GSM_sleep()
     {
         Serial.println("Failed to put GSM module in sleep mode");
     }
+}
+
+String getBatteryStatus()
+{
+    String AT_response = "";
+    const char AT_cmd[] = "AT+CBC";
+    char buffer[64];
+
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return "";
+
+    // Extract the full "+CBC: <bcs>,<bcl>,<voltage>"" response line
+    if (extractText((char *)AT_response.c_str(), "+CBC: ", buffer, sizeof(buffer), '\n'))
+    {
+        // Parse the three values separated by commas
+        int bcs, bcl, voltage;
+        if (sscanf(buffer, "%d,%d,%d", &bcs, &bcl, &voltage) == 3)
+        {
+            // Map battery charge status to human-readable text
+            const char *status_text;
+            switch (bcs)
+            {
+            case 0:
+                status_text = "Not charging";
+                break;
+            case 1:
+                status_text = "Charging";
+                break;
+            case 2:
+                status_text = "Charging complete";
+                break;
+            default:
+                status_text = "Unknown";
+                break;
+            }
+
+            char formatted[64];
+            snprintf(formatted, sizeof(formatted), "%s %d%% %.1fv", status_text, bcl, voltage / 1000.0); // e.g. "charging 75% 4.2v"
+            return String(formatted);
+        }
+    }
+
+    return "";
+}
+
+// ================================================================================
+//          MQTT FUNCTIONS
+// ================================================================================
+
+/// @brief Configure MQTT settings
+/// @param client_id MQTT client ID (0-5)
+/// @param recv_mode Reception mode (0=URC with data, 1=URC without data)
+/// @param msg_len Message length display (0=no, 1=yes)
+/// @return true if configuration successful
+bool MQTT_configure(uint8_t client_id, uint8_t recv_mode, uint8_t msg_len)
+{
+    char config_cmd[64] = "";
+
+    snprintf(config_cmd, sizeof(config_cmd), "AT+QMTCFG=\"recv/mode\",%d,%d,%d",
+             client_id, recv_mode, msg_len);
+
+    Serial.print("MQTT Config: ");
+    Serial.println(config_cmd);
+
+    if (!sendAndCheck(config_cmd, "OK", 5000))
+    {
+        MQTT_INIT_ERROR = "Failed to configure MQTT receiving mode";
+        Serial.println(MQTT_INIT_ERROR);
+        return false;
+    }
+
+    Serial.println("MQTT configured successfully");
+    return true;
+}
+
+/// @brief Open MQTT broker connection
+/// @param client_id MQTT client ID (0-5)
+/// @param broker Broker hostname or IP address
+/// @param port Broker port (typically 1883 for non-SSL, 8883 for SSL)
+/// @return true if broker connection opened successfully
+bool MQTT_open(uint8_t client_id, const char *broker, uint16_t port)
+{
+
+    char open_cmd[128] = "";
+
+    snprintf(open_cmd, sizeof(open_cmd), "AT+QMTOPEN=%d,\"%s\",%d",
+             client_id, broker, port);
+
+    Serial.print("MQTT Open: ");
+    Serial.println(open_cmd);
+
+    if (!sendAndCheck(open_cmd, "OK", 10000))
+    {
+        MQTT_INIT_ERROR = "Failed to open MQTT broker connection";
+        Serial.println(MQTT_INIT_ERROR);
+        MQTT_INIT_FAIL_COUNT++;
+        return false;
+    }
+
+    // Wait for broker open URC: +QMTOPEN: <client_id>,0
+    // Docs state max response time is 120 s (network-dependent); 30 s covers most cases.
+    char broker_open[16];
+    snprintf(broker_open, sizeof(broker_open), "+QMTOPEN: %d,0", client_id);
+
+    char urc[32];
+    if (!waitForURC(broker_open, urc, sizeof(urc), 30000))
+    {
+        MQTT_INIT_ERROR = "MQTT broker open URC not received";
+        Serial.println(MQTT_INIT_ERROR);
+        MQTT_INIT_FAIL_COUNT++;
+        return false;
+    }
+
+    return true;
+}
+
+/// @brief Connect MQTT client to broker
+/// @param client_id MQTT client ID (0-5)
+/// @param clientid MQTT client identifier string
+/// @param username Username for MQTT authentication (optional)
+/// @param password Password for MQTT authentication (optional)
+/// @return true if client connected successfully
+bool MQTT_connect(uint8_t client_id, const char *clientid, const char *username, const char *password)
+{
+    char conn_cmd[256] = "";
+
+    // Build AT command based on whether credentials are provided
+    if (username && password && *username && *password)
+    {
+        snprintf(conn_cmd, sizeof(conn_cmd), "AT+QMTCONN=%d,\"%s\",\"%s\",\"%s\"",
+                 client_id, clientid, username, password);
+    }
+    else
+    {
+        snprintf(conn_cmd, sizeof(conn_cmd), "AT+QMTCONN=%d,\"%s\"",
+                 client_id, clientid);
+    }
+
+    Serial.print("MQTT Connect: ");
+    Serial.println(conn_cmd);
+
+    if (!sendAndCheck(conn_cmd, "OK", 10000))
+    {
+        MQTT_INIT_ERROR = "Failed to send MQTT connect command";
+        Serial.println(MQTT_INIT_ERROR);
+        MQTT_INIT_FAIL_COUNT++;
+        return false;
+    }
+
+    // Wait for connect URC: +QMTCONN: <client_id>,0,0
+    char urc[32];
+    if (!waitForURC("+QMTCONN:", urc, sizeof(urc), 10000))
+    {
+        MQTT_INIT_ERROR = "MQTT connect URC not received";
+        Serial.println(MQTT_INIT_ERROR);
+        MQTT_INIT_FAIL_COUNT++;
+        return false;
+    }
+
+    // Parse URC response - successful connection returns +QMTCONN: <client_id>,0,0
+    if (strstr(urc, "+QMTCONN:") && strstr(urc, ",0,0"))
+    {
+        mqtt_status = MQTT_CONNECTED;
+        MQTT_INIT_FAIL_COUNT = 0;
+        Serial.println("MQTT client connected to broker successfully");
+        return true;
+    }
+
+    MQTT_INIT_ERROR = "Invalid MQTT connect response";
+    Serial.println(MQTT_INIT_ERROR);
+    MQTT_INIT_FAIL_COUNT++;
+    return false;
+}
+
+/// @brief Subscribe to MQTT topic
+/// @param client_id MQTT client ID (0-5)
+/// @param msg_id Message ID for subscription (used to track subscription)
+/// @param topic Topic name to subscribe to
+/// @param qos Quality of Service level (0-2)
+/// @return true if subscription successful
+bool MQTT_subscribe(uint8_t client_id, uint16_t msg_id, const char *topic, uint8_t qos)
+{
+    // msg_id must be 1–65535 for AT+QMTSUB — 0 is rejected by the modem
+    if (msg_id == 0)
+    {
+        Serial.println("MQTT subscribe: msg_id must be >= 1");
+        return false;
+    }
+
+    char sub_cmd[128] = "";
+
+    if (qos > 2)
+        qos = 2;
+
+    snprintf(sub_cmd, sizeof(sub_cmd), "AT+QMTSUB=%d,%d,\"%s\",%d",
+             client_id, msg_id, topic, qos);
+
+    Serial.print("MQTT Subscribe: ");
+    Serial.println(sub_cmd);
+
+    flushSerial();
+
+    if (!sendAndCheck(sub_cmd, "OK", 10000))
+    {
+        Serial.println("Failed to send MQTT subscribe command");
+        return false;
+    }
+
+    // Wait for subscription URC: +QMTSUB: <client_id>,<msg_id>,0,<qos>
+    char urc[32];
+    if (!waitForURC("+QMTSUB:", urc, sizeof(urc), 5000))
+    {
+        Serial.println("MQTT subscribe URC not received");
+        return false;
+    }
+
+    // Validate result field — format: +QMTSUB: <client_id>,<msg_id>,<result>
+    // Find the third comma-separated field (result)
+    const char *p = strchr(urc, ','); // after client_id
+    if (p)
+        p = strchr(p + 1, ','); // after msg_id
+    if (!p)
+    {
+        Serial.println("MQTT subscribe: malformed URC");
+        return false;
+    }
+
+    int result = atoi(p + 1);
+    if (result != 0)
+    {
+        Serial.print("MQTT subscribe failed with result: ");
+        Serial.println(result);
+        return false;
+    }
+
+    Serial.print("Subscribed to topic: ");
+    Serial.println(topic);
+    return true;
+}
+
+/// @brief Publish MQTT message to topic
+/// @param client_id MQTT client ID (0-5)
+/// @param msg_id Message ID for tracking
+/// @param topic Topic name to publish to
+/// @param payload Message payload to publish
+/// @param qos Quality of Service level (0-2)
+/// @param retain Retain flag (0=no, 1=yes)
+/// @return true if publish successful
+bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const char *payload, uint8_t qos, uint8_t retain)
+{
+    char pub_cmd[256] = "";
+    size_t payload_len = strlen(payload);
+
+    if (qos > 2)
+        qos = 2;
+    if (retain > 1)
+        retain = 1;
+
+    // Validate payload length (max 1500 bytes for EC200U)
+    if (payload_len > 1500)
+    {
+        Serial.println("MQTT payload exceeds maximum length of 1500 bytes");
+        return false;
+    }
+
+    // Build publish command: AT+QMTPUBEX=<client_id>,<msg_id>,<qos>,<retain>,"topic",<length>
+    snprintf(pub_cmd, sizeof(pub_cmd), "AT+QMTPUBEX=%d,%d,%d,%d,\"%s\",%d",
+             client_id, msg_id, qos, retain, topic, (int)payload_len);
+
+    Serial.print("MQTT Publish: ");
+    Serial.println(pub_cmd);
+
+    flushSerial();
+    GSMSerial.println(pub_cmd);
+
+    // Wait for ">" prompt to send payload.
+    // Per Quectel docs the modem returns "OK" then ">" — waitForReply scans the full
+    // stream so it catches ">" whenever it arrives. 15 s covers a slow GSM TCP handshake.
+    if (!waitForReply(">", 15000))
+    {
+        Serial.println("MQTT publish: no '>' data-input prompt received from modem");
+        MQTT_PUB_FAIL++;
+        return false;
+    }
+
+    // Send payload
+    GSMSerial.write((const uint8_t *)payload, payload_len);
+
+    // Wait for OK
+    if (!waitForReply("OK", 10000))
+    {
+        Serial.println("MQTT publish failed - no OK response");
+        MQTT_PUB_FAIL++;
+        return false;
+    }
+
+    // Wait for publish URC: +QMTPUBEX: <client_id>,<msg_id>,0
+    char urc[32];
+    if (!waitForURC("+QMTPUBEX:", urc, sizeof(urc), 5000))
+    {
+        Serial.println("MQTT publish URC not received");
+        MQTT_PUB_FAIL++;
+        return false;
+    }
+
+    if (strstr(urc, ",0")) // Check for success code 0 //! Success code is actually <client_idx>,<msg_id>,0 . Message id may be 0 for QoS 0
+    {
+        Serial.print("Published to topic: ");
+        Serial.println(topic);
+        MQTT_PUB_FAIL = 0;
+        return true;
+    }
+
+    Serial.println("MQTT publish failed");
+    MQTT_PUB_FAIL++;
+    return false;
+}
+
+/// @brief Unsubscribe from MQTT topic
+/// @param client_id MQTT client ID (0-5)
+/// @param msg_id Message ID for unsubscription
+/// @param topic Topic name to unsubscribe from
+/// @return true if unsubscription successful
+bool MQTT_unsubscribe(uint8_t client_id, uint16_t msg_id, const char *topic)
+{
+    char unsub_cmd[128] = "";
+
+    snprintf(unsub_cmd, sizeof(unsub_cmd), "AT+QMTUNS=%d,%d,\"%s\"",
+             client_id, msg_id, topic);
+
+    Serial.print("MQTT Unsubscribe: ");
+    Serial.println(unsub_cmd);
+
+    flushSerial();
+
+    if (!sendAndCheck(unsub_cmd, "OK", 10000))
+    {
+        Serial.println("Failed to send MQTT unsubscribe command");
+        return false;
+    }
+
+    // Wait for unsubscribe URC: +QMTUNS: <client_id>,<msg_id>,0
+    char urc[32];
+    if (!waitForURC("+QMTUNS:", urc, sizeof(urc), 5000))
+    {
+        Serial.println("MQTT unsubscribe URC not received");
+        return false;
+    }
+
+    Serial.print("Unsubscribed from topic: ");
+    Serial.println(topic);
+    return true;
+}
+
+/// @brief Disconnect MQTT client from broker
+/// @param client_id MQTT client ID (0-5)
+/// @return true if disconnection successful
+bool MQTT_disconnect(uint8_t client_id)
+{
+    char disc_cmd[32] = "";
+
+    snprintf(disc_cmd, sizeof(disc_cmd), "AT+QMTDISC=%d", client_id);
+
+    Serial.print("MQTT Disconnect: ");
+    Serial.println(disc_cmd);
+
+    if (!sendAndCheck(disc_cmd, "OK", 10000))
+    {
+        Serial.println("Failed to send MQTT disconnect command");
+        return false;
+    }
+
+    char success[16];
+    snprintf(success, sizeof(success), "+QMTDISC: %d,0", client_id);
+    // Wait for disconnect URC: +QMTDISC: <client_id>,0
+    char urc[32];
+    if (!waitForURC(success, urc, sizeof(urc), 5000))
+    {
+        Serial.println("MQTT disconnect URC not received");
+        return false;
+    }
+    mqtt_status = MQTT_DISCONNECTED;
+    Serial.println("MQTT client disconnected successfully");
+    return true;
+}
+
+/// @brief Get current MQTT connection status
+/// @param client_id MQTT client ID (0-5)
+/// @return Current MQTT connection status
+GSMMQTTConnStatus MQTT_getStatus(uint8_t client_id)
+{
+    char query_cmd[32] = "";
+
+    snprintf(query_cmd, sizeof(query_cmd), "AT+QMTOPEN?");
+
+    String response = "";
+    if (!sendAndCheck(query_cmd, "OK", response, 5000))
+    {
+        return MQTT_DISCONNECTED;
+    }
+
+    // Parse response to check for +QMTOPEN: <client_id> pattern
+    // Response format: +QMTOPEN: <client_idx>,<host_name>,<port>
+    char search_pattern[16] = "";
+    snprintf(search_pattern, sizeof(search_pattern), "+QMTOPEN: %d,", client_id);
+
+    if (strstr(response.c_str(), search_pattern))
+    {
+        // Extract and print hostname and port
+        const char *start = strstr(response.c_str(), search_pattern);
+        if (start != nullptr)
+        {
+            // Skip past the pattern to get to hostname
+            start += strlen(search_pattern);
+            const char *end = strchr(start, '\r');
+            if (end == nullptr)
+                end = strchr(start, '\n');
+
+            if (end != nullptr)
+            {
+                size_t length = end - start;
+                char host_port_info[128];
+                strncpy(host_port_info, start, length);
+                host_port_info[length] = '\0';
+                // Serial.print("MQTT connection found - Host/Port: ");
+                // Serial.println(host_port_info);
+            }
+        }
+        return MQTT_CONNECTED;
+    }
+
+    return MQTT_DISCONNECTED;
+}
+
+/// @brief Check if MQTT is connected and ready
+/// @param client_id MQTT client id index (0-5)
+/// @return true if MQTT client is connected to broker
+bool MQTT_isClientConnected(uint8_t client_id)
+{
+    GSMMQTTConnStatus status = MQTT_getStatus(client_id);
+    if (status == GSMMQTTConnStatus::MQTT_CONNECTED)
+        return true;
+    else
+        return false;
+}
+
+/// @brief Check id broker is connected for an MQTT client
+/// @param client_id MQTT client id (0-5)
+/// @return true if connected (3), false if otherwise
+bool MQTT_isBrokerConnected(uint8_t client_id)
+{
+
+    String response = ""; // [+QMTCONN: <client_idx>,<state>]
+    if (!sendAndCheck("AT+QMTCONN?", "OK", response, 2000))
+        return false;
+
+    char prefix[16];
+    snprintf(prefix, sizeof(prefix), "+QMTCONN: %d,", client_id);
+
+    char status_str[4] = {0};
+    if (!extractText((char *)response.c_str(), prefix, status_str, sizeof(status_str), '\r'))
+        return false;
+
+    int state = atoi(status_str);
+    if (state == 3)
+    {
+        // Serial.println("MQTT Brocker connected");
+        return true;
+    }
+    return false;
+}
+
+/// @brief Check if there are any messages waiting in the buffer for a specific MQTT client. A maximum of 5 messages can be stored in the buffer.
+/// @param client_id   MQTT client id index (0-5)
+/// @return true if at least one message is waiting
+bool MQTT_hasBufferedMessage(uint8_t client_id)
+{
+
+    char expected_qurc[16]; //+QMTRECV: <client_idx>,<recv_id>
+    snprintf(expected_qurc, sizeof(expected_qurc), "+QMTRECV: %d", client_id);
+    char res[16];
+    if (waitForURC(expected_qurc, res, sizeof(res), 5000))
+    {
+        return true;
+    }
+
+    char cmd[32];
+    snprintf(cmd, sizeof(cmd), "AT+QMTRECV?");
+
+    String response = "";
+    if (!sendAndCheck(cmd, "OK", response, 1000))
+        return false;
+
+    // Serial.println(response);
+    // Build exact prefix for this client, e.g. "+QMTRECV: 0,"
+    char prefix[16];
+    snprintf(prefix, sizeof(prefix), "+QMTRECV: %d,", client_id);
+
+    char status_str[32] = {0};
+
+    if (!extractText((char *)response.c_str(), prefix, status_str, sizeof(status_str), '\r'))
+        return false;
+    // status_str now contains something like "0,1,0,0,0" (the five store_status values)
+    char *p = status_str;
+    for (uint8_t i = 0; i < 5; i++)
+    {
+        if (*p == '1') // 1 = message waiting in this slot
+        {
+            return true;
+        }
+        p = strchr(p, ','); // move to next status
+        if (!p)
+            break;
+        p++;
+    }
+
+    return false; // all slots empty for this client
+}
+
+/// @brief Read buffered MQTT message from broker
+/// @param client_id MQTT client ID (0-5)
+/// @param recv_id Message ID of the buffered message to read
+/// @param topic_out Output buffer for topic name
+/// @param topic_size Size of topic output buffer
+/// @param payload_out Output buffer for message payload
+/// @param payload_size Size of payload output buffer
+/// @return true if message read successfully, false otherwise
+//! When configuring recv/mode using AT+QMTCFG="recv/mode",<client_idx>[,<msg_recv_mode>[,<msg_len_enable>]]
+//! set recv_mode=1 (buffered), msg_len=1 (include length) otherwise this function will fail
+//! be careful when using MQTT_configure() for this to work properly
+bool MQTT_readBufferedMessage(uint8_t client_id, uint8_t recv_id,
+                              char *topic_out, size_t topic_size,
+                              char *payload_out, size_t payload_size) // ToDo: Remove if recv_id is not neccesary to get payload
+{
+    char cmd[32];
+    snprintf(cmd, sizeof(cmd), "AT+QMTRECV=%d,%d", client_id, recv_id);
+
+    String full_response = "";
+    if (!sendAndCheck(cmd, "OK", full_response, 5000))
+    {
+        Serial.println("Failed to read buffered MQTT message");
+        return false;
+    }
+
+    // Find the start of the +QMTRECV line
+    int start_idx = full_response.indexOf("+QMTRECV:");
+    if (start_idx < 0)
+    {
+        Serial.println("No +QMTRECV line found in response");
+        return false;
+    }
+
+    String resp = full_response.substring(start_idx);
+
+    // Format we expect:
+    // +QMTRECV: 0,1234,"sensors/africa/cmd",42,{"action":"restart"}
+
+    // 1. Skip "+QMTRECV: " + client_idx + ","
+    int pos = resp.indexOf(':');
+    if (pos < 0)
+        return false;
+    pos += 1; // after :
+    while (resp[pos] == ' ')
+        pos++; // skip spaces
+
+    // Skip client_idx and comma
+    while (isdigit(resp[pos]) || resp[pos] == ',')
+        pos++;
+
+    // Skip msgid and comma
+    while (isdigit(resp[pos]) || resp[pos] == ',')
+        pos++;
+
+    // 2. Extract topic (quoted string)
+    if (resp[pos] != '"')
+        return false;
+    pos++; // skip opening quote
+
+    int topic_end = resp.indexOf('"', pos);
+    if (topic_end < 0)
+        return false;
+
+    String topic = resp.substring(pos, topic_end);
+    if (topic.length() >= topic_size)
+    {
+        Serial.println("Topic too long for buffer");
+        return false;
+    }
+    strcpy(topic_out, topic.c_str());
+
+    pos = topic_end + 1; // after closing quote
+
+    // 3. Expect comma + payload_len
+    if (resp[pos] != ',')
+        return false;
+    pos++;
+
+    // Read payload length
+    int payload_len = 0;
+    while (isdigit(resp[pos]))
+    {
+        payload_len = payload_len * 10 + (resp[pos] - '0');
+        pos++;
+    }
+
+    // 4. Expect comma after length
+    if (resp[pos] != ',')
+        return false;
+    pos++;
+
+    // 5. Now the payload starts — take exactly payload_len bytes
+    if (payload_len >= (int)payload_size)
+    {
+        Serial.println("Payload too large for buffer");
+        return false;
+    }
+
+    // Copy exactly payload_len characters
+    strncpy(payload_out, resp.c_str() + pos, payload_len);
+    payload_out[payload_len] = '\0'; // null-terminate
+
+    // Optional safety: if there are extra characters before OK, we ignore them
+    // (but in practice there should be none or just \r\n)
+
+    Serial.print("MQTT message received (buffered) → Topic: ");
+    Serial.print(topic_out);
+    Serial.print(" | Length: ");
+    Serial.print(payload_len);
+    Serial.print(" | Payload: ");
+    Serial.println(payload_out);
+
+    return true;
+}
+
+/// @brief Read buffered MQTT message from broker
+/// @param client_id MQTT client ID (0-5)
+/// @param topic_out Output buffer for topic name
+/// @param topic_size Size of topic output buffer
+/// @param payload_out Output buffer for message payload
+/// @param payload_size Size of payload output buffer
+/// @return true if message read successfully, false otherwise
+//! When configuring recv/mode using AT+QMTCFG="recv/mode",<client_idx>[,<msg_recv_mode>[,<msg_len_enable>]]
+//! set recv_mode=1 (buffered), msg_len=1 (include length) otherwise this function will fail
+//! be careful when using MQTT_configure() for this to work properly
+bool MQTT_readBufferedMessage(uint8_t client_id, char *topic_out, size_t topic_size,
+                              char *payload_out, size_t payload_size) // ToDo: Remove if recv_id is neccesary to get payload
+{
+    char cmd[32];
+    snprintf(cmd, sizeof(cmd), "AT+QMTRECV=%d", client_id);
+
+    String full_response = "";
+    if (!sendAndCheck(cmd, "OK", full_response, 5000))
+    {
+        // Serial.println("Failed to read buffered MQTT message");
+        return false;
+    }
+
+    // Find the start of the +QMTRECV line
+    int start_idx = full_response.indexOf("+QMTRECV:");
+    if (start_idx < 0)
+    {
+        return false;
+    }
+
+    String resp = full_response.substring(start_idx);
+    Serial.print(resp);
+    // Format we expect:
+    // +QMTRECV: 0,1234,"devices/nodes/cmd",20,{"action":"restart"}
+
+    // 1. Skip "+QMTRECV: " + client_idx + ","
+    int pos = resp.indexOf(':');
+    if (pos < 0)
+        return false;
+    pos += 1; // after :
+    while (resp[pos] == ' ')
+        pos++; // skip spaces
+
+    // Skip client_idx and comma
+    while (isdigit(resp[pos]) || resp[pos] == ',')
+        pos++;
+
+    // Skip msgid and comma
+    while (isdigit(resp[pos]) || resp[pos] == ',')
+        pos++;
+
+    // 2. Extract topic (quoted string)
+    if (resp[pos] != '"')
+        return false;
+    pos++; // skip opening quote
+
+    int topic_end = resp.indexOf('"', pos);
+    if (topic_end < 0)
+        return false;
+
+    String topic = resp.substring(pos, topic_end);
+    if (topic.length() >= topic_size)
+    {
+        Serial.println("Topic too long for buffer");
+        return false;
+    }
+    strcpy(topic_out, topic.c_str());
+
+    pos = topic_end + 1; // after closing quote
+
+    // 3. Expect comma + payload_len
+    if (resp[pos] != ',')
+        return false;
+    pos++;
+
+    // Read payload length
+    int payload_len = 0;
+    while (isdigit(resp[pos]))
+    {
+        payload_len = payload_len * 10 + (resp[pos] - '0');
+        pos++;
+    }
+
+    // 4. Expect comma after length
+    if (resp[pos] != ',')
+        return false;
+    pos++;
+
+    if (resp[pos] == '"')
+        pos++;
+
+    // 5. Now the payload starts — take exactly payload_len bytes
+    if (payload_len >= (int)payload_size)
+    {
+        Serial.println("Payload too large for buffer");
+        return false;
+    }
+
+    // Copy exactly payload_len characters
+    strncpy(payload_out, resp.c_str() + pos, payload_len);
+    payload_out[payload_len] = '\0'; // null-terminate
+
+    // Optional safety: if there are extra characters before OK, we ignore them
+    // (but in practice there should be none or just \r\n)
+
+    Serial.print("MQTT message received (buffered) → Topic: ");
+    Serial.print(topic_out);
+    Serial.print(" | Length: ");
+    Serial.print(payload_len);
+    Serial.print(" | Payload: ");
+    Serial.println(payload_out);
+
+    return true;
 }
 
 // Testing POST data

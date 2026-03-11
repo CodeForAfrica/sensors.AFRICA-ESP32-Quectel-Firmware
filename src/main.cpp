@@ -19,8 +19,8 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gideon Maina
- * @date 2025-06-13
- * @version 1.2.0
+ * @date 2026-03-03
+ * @version 1.4.1
  *
  * @dependencies
  * - ArduinoJson
@@ -54,13 +54,23 @@
 #include <TimeLib.h>
 #include <ESP32Time.h>
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 #include "dhtnew.h"
+#include "utils/wifi.h"
+#include "utils/deviceconfig.h"
+#include "webserver/asyncserver.h"
+#include "utils/mqtt_wifi.h"
+
+size_t max_wifi_hotspots_size = sizeof(struct_wifiInfo) * 20;
+struct struct_wifiInfo *wifiInfo = (struct_wifiInfo *)malloc(max_wifi_hotspots_size);
+uint8_t count_wifiInfo;
 
 DHTNEW dht(ONEWIRE_PIN);                           // DHT sensor, pin, type
 SerialPM pms(PMS5003, PM_SERIAL_RX, PM_SERIAL_TX); // PMSx003, RX, TX
 
 const unsigned long ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
 const unsigned long DURATION_BEFORE_FORCED_RESTART_MS = ONE_DAY_IN_MS * 28; // force a reboot every month /
+const unsigned long SEND_TELEMETRY_INTERVAL_MS = 30 * 60 * 1000;            // 30 minutes
 
 unsigned long act_milli;
 unsigned long last_read_sensors_data = 0;
@@ -68,6 +78,9 @@ int sampling_interval = 5 * 60 * 1000; // 5 minutes
 unsigned long starttime, boottime = 0;
 unsigned sending_intervall_ms = 30 * 60 * 1000; // 30 minutes
 unsigned long count_sends = 0;
+unsigned long last_send_telemetry = 0;
+bool boot_telemetry_sent = false;                        // Tracks if telemetry has been sent on boot
+const unsigned long BOOT_TELEMETRY_DELAY_MS = 30 * 1000; // 30 seconds - time to allow connections to establish
 
 char csv_header[255] = "timestamp,value_type,value,unit,sensor_type";
 
@@ -80,10 +93,12 @@ char SENSORS_JSON_DATA_PATH[128] = {};
 char SENSORS_CSV_DATA_PATH[128] = {};
 char SENSORS_FAILED_DATA_SEND_STORE_FILE[40] = "failed_send_payloads.txt";
 char SENSORS_FAILED_DATA_SEND_STORE_PATH[128] = {};
+char MQTT_TELEMETRY_TOPIC[128] = {};
 
 char esp_chipid[18] = {};
-
 bool send_now = false;
+char incoming_topic_store[64];
+char incoming_message_store[256];
 
 ESP32Time RTC;
 char time_buff[32] = {};
@@ -118,6 +133,63 @@ struct LOGGER
     int log_count = 0;
 } JSON_PAYLOAD_LOGGER, CSV_PAYLOAD_LOGGER;
 
+struct GSMRuntimeInfo GSMRuntimeInfo;
+JsonDocument gsm_info;
+JsonDocument device_info;
+struct DeviceConfigState DeviceConfigState;
+struct DeviceConfig DeviceConfig;
+
+// WiFi credentials
+char AP_SSID[64];
+const char *AP_PWD = "admin@sensors.cfa";
+JsonDocument wifi_info;
+
+/**
+ * @brief Communication Manager State
+ * Tracks communication status, connectivity, and failover logic
+ */
+struct CommsManagerState
+{
+    enum PreferredComm
+    {
+        NONE = 0,
+        WIFI = 1,
+        GSM = 2
+    } preferredComm;
+
+    uint8_t wifiFailCount;
+    uint8_t gsmFailCount;
+    uint8_t MAX_RETRY_ATTEMPTS = 10;
+    unsigned long lastWiFiAttempt;
+    unsigned long lastGSMAttempt;
+    unsigned long lastConnectivityCheck; // Last ping check time
+    unsigned long reconnectInterval;     // Dynamic interval based on failures
+    bool allCommsUnavailable;
+    bool wifiOnline;
+    bool gsmOnline;
+    bool maxReconnectAttemptsReached;
+    bool mqttConnectionInitialized;
+    unsigned long lastMQTTCheck;
+    bool message_received;
+
+    // Initialize state
+    void init()
+    {
+        preferredComm = NONE;
+        wifiFailCount = 0;
+        gsmFailCount = 0;
+        lastWiFiAttempt = 0;
+        lastGSMAttempt = 0;
+        lastConnectivityCheck = 0;
+        reconnectInterval = 60000 * 5; // Start with 5min interval
+        allCommsUnavailable = true;
+        wifiOnline = false;
+        gsmOnline = false;
+        maxReconnectAttemptsReached = false;
+        mqttConnectionInitialized = false;
+    }
+} CommsManagerState;
+
 void readDHT();
 void getPMSREADINGS();
 void printPM_values();
@@ -137,6 +209,28 @@ void memoryDataLog(LOGGER &logger, const char *data);
 void fileDataLog(LOGGER &logger);
 void resetLogger(LOGGER &logger);
 void sendFromMemoryLog(LOGGER &logger);
+void captureGSMInfo();
+void captureWiFiInfo();
+void loadInitialConfigs();
+void configDeviceFromWiFiConn(); //? get a better name
+void initializeAndConfigGSM();
+void commsManager();
+bool isConnectivityAvailable();
+bool pingServer(const char *server, uint16_t port, uint16_t timeout_ms);
+void updateCommsPreference();
+void initComms();
+bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size);
+bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, const char *topic,
+                          const char *username, const char *password);
+bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *topic, uint8_t client_id,
+                              const char *username, const char *password, bool disconnect_after);
+bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client_id, const char *topic,
+                           const char *username, const char *password);
+void listenSerial();
+void buildDeviceInfoJSON();
+void checkIncomingMQTTMessages();
+void wifiMQTTCallback(char *topic, byte *payload, unsigned int length);
+void processIncomingData();
 
 enum Month
 {
@@ -157,92 +251,94 @@ enum Month
 
 int current_year, current_month = 0;
 
+JsonDocument current_sensor_data;
+bool time_to_send_telemetry = false;
+bool is_boot_telemetry = false;
 void setup()
 {
     Serial.begin(115200);
     boottime = millis();
+    DeviceConfigState.state = CONFIG_BOOT_INIT;
+
     uint64_t chipid_num;
     chipid_num = ESP.getEfuseMac();
     snprintf(esp_chipid, sizeof(esp_chipid), "%llX", chipid_num);
+    delay(3000);
     Serial.print("ESP32 Chip ID: ");
     Serial.println(esp_chipid);
-    Serial.println("Initializing PMS5003 sensor");
+    strcpy(ROOT_DIR, "/");
+    strcat(ROOT_DIR, SENSOR_PREFIX); //? Refactor to copy AP_SSID if it remains unchanged
+    strcat(ROOT_DIR, esp_chipid);
+
+    strcat(MQTT_TELEMETRY_TOPIC, MQTT_BASE_TOPIC);
+    strcat(MQTT_TELEMETRY_TOPIC, "/");
+    strcat(MQTT_TELEMETRY_TOPIC, SENSOR_PREFIX);
+    strcat(MQTT_TELEMETRY_TOPIC, esp_chipid);
+    // Set Dual Access Point and Station WiFi mode
+    WiFi.mode(WIFI_AP_STA); // ToDo: Configure this when not on power saving mode.
+    strcat(AP_SSID, SENSOR_PREFIX);
+    strcat(AP_SSID, esp_chipid);
+
     init_memory_loggers();
+    Serial.println("Initializing PMS5003 sensor");
     pms.init();
     delay(2000);
     pms.sleep();
     dht.setType(DHTTYPE);
 
-    if (gsm_capable)
+    loadInitialConfigs(); // from global config file after compilation
+
+    if (!LittleFS.begin(true))
     {
-        if (GSM_Serial_begin())
-        {
-
-            if (!GSM_init())
-            {
-                Serial.println("GSM not fully configured");
-                Serial.print("Failure point: ");
-                Serial.println(GSM_INIT_ERROR);
-                Serial.println();
-                return;
-            }
-            else
-            {
-                GSM_CONNECTED = true;
-
-                while (!register_to_network()) // ! INFINITE LOOP!
-                {
-                    Serial.println("Retrying network registration...");
-                }
-
-                Serial.print("Registered to: ");
-                Serial.print(getNetworkName());
-                Serial.print(", Band: ");
-                Serial.print(getNetworkBand());
-                Serial.print(", Signal Strength (not dBm): ");
-                Serial.println(getSignalStrength());
-                Serial.print("SIM ICCID: ");
-                Serial.println(SIM_CCID);
-
-                // GPRS init
-
-                if (!GPRS_init())
-                {
-                    Serial.println("Failed to init GPRS");
-                }
-                else
-                {
-                    Serial.println("GPRS initialized!");
-                }
-
-                if (getNetworkTime(time_buff))
-                {
-
-                    // update RTC time and calendar;
-                    Serial.println("GSM Network Time: " + String(time_buff));
-                    esp_datetime_tz = extractDateTime(String(time_buff));
-                    RTC.setTime(esp_datetime_tz.timestamp);
-                    initCalender(RTC.getYear(), RTC.getMonth() + 1);
-                }
-                else
-                {
-                    Serial.println("Failed to fetch time from network");
-                }
-            }
-
-            GSM_sleep();
-        }
-        else
-        {
-            Serial.println("Could not communicate to GSM module.");
-        }
+        Serial.println("An error has occurred while mounting LittleFS");
     }
-
     else
     {
-        // connectWifi();
-        Serial.println("Support for other network connections not yet implemented");
+        Serial.println("LittleFS mounted successfully. Attempting to override firmware configs with saved configs");
+        // Override firmware configs with saveconfigs
+        loadSavedDeviceConfigs(false);
+        DeviceConfigState.configurationRequired = (!DeviceConfig.useGSM && !DeviceConfig.useWiFi);
     }
+
+    // Device configuration
+
+    if (DeviceConfigState.configurationRequired)
+    { 
+        DeviceConfigState.configurationRequired=false; //? This will be reset by saveConfig()
+        // Step 2: Start WiFi AP
+        WiFi.softAP(AP_SSID, AP_PWD);
+        Serial.print("struct_wifiInfo* wifiInfo size: ");
+        Serial.println(max_wifi_hotspots_size);
+
+        wifi_networks_scan(wifiInfo, count_wifiInfo);
+
+        // Step 3: Start Captive Portal & Web Server
+        DeviceConfigState.state = CONFIG_CAPTIVE_PORTAL_ACTIVE;
+        DeviceConfigState.captivePortalStartTime = millis();
+        DeviceConfigState.captivePortalTimeoutMs = 5 * 60 * 1000; // 5 minutes
+        // DNS server for captive portal
+        dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+        setup_webserver();
+
+        // ToDo: This should probably be spinned in another core
+        startCaptivePortal(DeviceConfigState.captivePortalAccessed, DeviceConfigState.captivePortalStartTime, DeviceConfigState.captivePortalTimeoutMs);
+    }
+    else
+    {
+
+        WiFi.softAP(AP_SSID, AP_PWD); // start AP & webserver anyway
+        setup_webserver();
+    }
+
+    // Check if a user entered new configs from the captive portal
+    if (DeviceConfigState.configurationRequired)
+    {
+        Serial.println("Overriding current configs with captive portal configs");
+        loadSavedDeviceConfigs(false);
+        DeviceConfigState.configurationRequired = false;
+    }
+
+    initComms();
 
 // SD INIT
 #ifdef REASSIGN_PINS
@@ -255,65 +351,144 @@ void setup()
 #endif
 
         SD_Attached = SDattached();
+        DeviceConfigState.sdCardInitialized = SD_Attached;
 
         if (SD_Attached)
         {
             init_SD_loggers();
         }
     }
+    else
+    {
+        DeviceConfigState.sdCardInitialized = false;
+    }
 
+    buildDeviceInfoJSON();
     starttime = millis();
 }
 
 // ToDo: introduce ESP light sleep mode
 void loop()
 {
-    unsigned sum_send_time = 0;
-    act_milli = millis();
-
-#if defined(POWER_SAVING_MODE)
-
-    if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
-    {
-        getPMSREADINGS();
-        readDHT();
-        last_read_sensors_data = millis();
-    }
-
-#else
-    send_now = act_milli - starttime > sending_intervall_ms;
-
-    if (act_milli - last_read_sensors_data > sampling_interval)
-    {
-        getPMSREADINGS();
-        readDHT();
-        last_read_sensors_data = millis();
-    }
+#if defined(SERIAL_DEBUG) && SERIAL_DEBUG
+    listenSerial();
 #endif
 
-    if (send_now)
+    if (DeviceConfigState.configurationRequired)
     {
 
-        if (!GPRS_CONNECTED)
+        loadSavedDeviceConfigs();
+        if (DeviceConfigState.restartRequired)
         {
-            GPRS_init();
+            Serial.println("New config(s) requries a restart. Restarting...\n\n");
+            ESP.restart();
         }
-        else
+        DeviceConfigState.configurationRequired = false;
+    }
+    // Manage communication device and connectivity state
+    commsManager();
+
+    act_milli = millis();
+
+    if (DeviceConfig.power_saving_mode)
+    {
+        if (act_milli - last_read_sensors_data > sampling_interval && !send_now) // only send data after the memory logger is full
         {
+            getPMSREADINGS();
+            readDHT();
+            last_read_sensors_data = millis();
+        }
+    }
+    else
+    {
+        send_now = act_milli - starttime > sending_intervall_ms;
 
-            // Send data from memory loggers
-            sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
-            // send payloads from the files that stores data that failed posting previously
-            readSendDelete(SENSORS_FAILED_DATA_SEND_STORE_PATH);
+        if (act_milli - last_read_sensors_data > sampling_interval)
+        {
+            getPMSREADINGS();
+            readDHT();
+            last_read_sensors_data = millis();
+        }
+    }
 
-            // Serial.println("Time for Sending (ms): " + String(sum_send_time));
+    if (send_now && CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE)
+    {
 
-            // Serial.println("Sent data counts: " + count_sends);
+        // Send data from memory loggers
+        sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
+        // send payloads from the files that stores data that failed posting previously
+        readSendDelete(SENSORS_FAILED_DATA_SEND_STORE_PATH);
+
+        if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
+        {
             GSM_sleep();
         }
 
         starttime = millis();
     }
+
+    if (DeviceConfigState.isMQTTConfigured && !CommsManagerState.allCommsUnavailable)
+    {
+        // Check if setup is complete and we haven't sent boot telemetry yet
+        if (!boot_telemetry_sent && !DeviceConfigState.configurationRequired && millis() - boottime > BOOT_TELEMETRY_DELAY_MS)
+        {
+            time_to_send_telemetry = true;
+            is_boot_telemetry = true;
+            Serial.println("Time for boot telemetry send");
+        }
+        // Check if it's time for regular interval-based telemetry
+        else if (millis() - last_send_telemetry > SEND_TELEMETRY_INTERVAL_MS)
+        {
+            time_to_send_telemetry = true;
+            Serial.println("Time for regular interval telemetry send");
+        }
+
+        if (time_to_send_telemetry && (CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE))
+        {
+            // Check if MQTT credentials are set
+            if (MQTT_BROKER[0] == '\0' || MQTT_USERNAME[0] == '\0' || MQTT_PASSWORD[0] == '\0') //! Refactor as this check is repeated.
+            {
+                Serial.println("MQTT credentials not set. Skipping telemetry send.");
+                boot_telemetry_sent = true;
+                time_to_send_telemetry = false;
+            }
+            else
+            {
+                bool telemetry_sent = false;
+                // Try WiFi MQTT first if WiFi is available
+                if (DeviceConfigState.wifiConnected && WiFi.status() == WL_CONNECTED)
+                {
+                    Serial.println("Sending telemetry via WiFi MQTT");
+                    telemetry_sent = sendWiFiMQTTTelemetry(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MQTT_USERNAME, MQTT_PASSWORD);
+                }
+                // Fall back to GSM MQTT if WiFi is not available but GSM is
+                else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
+                {
+                    Serial.println("Sending telemetry via GSM MQTT");
+                    telemetry_sent = initAndSendMQTTTelemetry(MQTT_BROKER, MQTT_PORT, MQTT_TELEMETRY_TOPIC, MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, false);
+                }
+                else
+                {
+                    Serial.println("No internet connectivity available for MQTT telemetry");
+                }
+
+                // Update telemetry tracking
+                if (is_boot_telemetry && telemetry_sent)
+                {
+                    boot_telemetry_sent = true;
+                    Serial.println("Boot telemetry sent successfully");
+                }
+            }
+            // Always update the timestamp when time to send telemetry, regardless of credentials status
+            time_to_send_telemetry = false;
+            last_send_telemetry = millis();
+        }
+    }
+    if (CommsManagerState.message_received)
+    {
+        processIncomingData();
+    }
+    checkIncomingMQTTMessages();
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
     {
@@ -361,6 +536,13 @@ void readDHT()
             generateCSV_payload(resultDHT, sizeof(resultDHT), datetime.c_str(), "temperature", temperature, "°C", "DHT22");
             generateCSV_payload(resultDHT, sizeof(resultDHT), datetime.c_str(), "humidity", humidity, "%", "DHT22");
             memoryDataLog(CSV_PAYLOAD_LOGGER, resultDHT);
+
+            // update current sensor data
+            JsonObject dht_obj = DHT_data_doc.to<JsonObject>();
+            dht_obj["temperature"] = temperature;
+            dht_obj["humidity"] = humidity;
+            current_sensor_data["DHT"] = dht_obj;
+            serializeJsonPretty(current_sensor_data, Serial);
         }
 
         break;
@@ -408,7 +590,6 @@ void getPMSREADINGS()
     if (pms) // Successfull read
     {
         pms.sleep();
-        char read_time[32];
         String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
 
         // print the results
@@ -443,6 +624,14 @@ void getPMSREADINGS()
             memoryDataLog(CSV_PAYLOAD_LOGGER, result_PMS);
             generateCSV_payload(result_PMS, sizeof(result_PMS), datetime.c_str(), "PM10", pms.pm10, "ug/m3", "PMS");
             memoryDataLog(CSV_PAYLOAD_LOGGER, result_PMS);
+
+            // update current sensor data
+            JsonObject pm_obj = PM_data_doc.to<JsonObject>();
+            pm_obj["PM2.5"] = pms.pm25;
+            pm_obj["PM10"] = pms.pm10;
+            pm_obj["PM1"] = pms.pm01;
+
+            current_sensor_data["PM"] = pm_obj;
         }
     }
     else // something went wrong
@@ -654,19 +843,126 @@ String getRTCdatetimetz(const char *format, char *timezone)
 }
 
 /*****************************************************************
- * send data to rest api                                         *
+ * send data via WiFi                                            *
  *****************************************************************/
 /**
-    @brief: Send data to the server
+    @brief: Send data to the server via WiFi
     @param data : JSON payload to send
     @param _pin : pin number of the sensor as configured in the API
     @param host : host name of the server
     @param url : url path to send the data
     @return: true if data is sent successfully, false otherwise
 **/
-bool sendData(const char *data, const int _pin, const char *host, const char *url)
+bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const char *url)
 {
-    // unsigned long start_send = millis();
+    if (!DeviceConfigState.wifiConnected || !DeviceConfigState.wifiInternetAvailable)
+    {
+        Serial.println("WiFi not connected or no internet available");
+        return false;
+    }
+
+    WiFiClient client;
+    char pin[4];
+    itoa(_pin, pin, 10);
+
+    // Build HTTP request
+    char http_headers[3][40] = {};
+    strcat(http_headers[0], "X-PIN: ");
+    strcat(http_headers[0], pin);
+
+    strcat(http_headers[1], "X-Sensor: ");
+    strcat(http_headers[1], SENSOR_PREFIX);
+    strcat(http_headers[1], esp_chipid);
+    strcat(http_headers[2], "Content-Type: application/json");
+
+    // Connect to server
+    if (!client.connect(host, PORT_CFA))
+    {
+        Serial.println("WiFi: Failed to connect to server");
+        return false;
+    }
+
+    // Build HTTP POST request
+    String http_request = "POST ";
+    http_request += url;
+    http_request += " HTTP/1.1\r\n";
+    http_request += "Host: ";
+    http_request += host;
+    http_request += "\r\n";
+    http_request += "Content-Length: ";
+    http_request += strlen(data);
+    http_request += "\r\n";
+    http_request += http_headers[0]; // X-PIN
+    http_request += "\r\n";
+    http_request += http_headers[1]; // X-Sensor
+    http_request += "\r\n";
+    http_request += http_headers[2]; // Content-Type
+    http_request += "\r\n";
+    http_request += "Connection: close\r\n";
+    http_request += "\r\n";
+    http_request += data;
+
+    // Send the request
+    client.print(http_request);
+
+    // Wait for response and check status code
+    unsigned long timeout = millis() + 10000; // 10 second timeout
+    uint8_t statuscode = 0;
+    bool parsing_status = false;
+
+    while (client.connected() && millis() < timeout)
+    {
+        String line = client.readStringUntil('\n');
+        if (line.length() == 0)
+            break;
+
+        // Parse HTTP status code (first line: HTTP/1.1 200 OK)
+        if (!parsing_status && line.startsWith("HTTP/1."))
+        {
+            int space_pos = line.indexOf(' ');
+            if (space_pos > 0)
+            {
+                String status_str = line.substring(space_pos + 1, space_pos + 4);
+                statuscode = status_str.toInt();
+                parsing_status = true;
+                Serial.print("WiFi: HTTP Status Code: ");
+                Serial.println(statuscode);
+            }
+        }
+    }
+
+    client.stop();
+
+    if (statuscode == 200 || statuscode == 201)
+    {
+        Serial.println("WiFi: Data sent successfully");
+        return true;
+    }
+    else
+    {
+        Serial.println("WiFi: Data send failed with HTTP status: " + String(statuscode));
+        return false;
+    }
+}
+
+/*****************************************************************
+ * send data via GSM                                             *
+ *****************************************************************/
+/**
+    @brief: Send data to the server via GSM/GPRS
+    @param data : JSON payload to send
+    @param _pin : pin number of the sensor as configured in the API
+    @param host : host name of the server
+    @param url : url path to send the data
+    @return: true if data is sent successfully, false otherwise
+**/
+bool sendDataViaGSM(const char *data, const int _pin, const char *host, const char *url)
+{
+    if (!gsm_capable || !GPRS_CONNECTED)
+    {
+        Serial.println("GSM not capable or GPRS not connected");
+        return false;
+    }
 
     char gprs_url[64] = {};
     strcat(gprs_url, host);
@@ -675,43 +971,147 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
     char pin[4];
     itoa(_pin, pin, 10);
 
-    if (gsm_capable && GPRS_CONNECTED)
-    {
-
-        int retry_count = 0;
-        uint8_t statuscode = 0;
-        int16_t length;
-
 #ifdef QUECTEL
-        char Quectel_headers[3][40] = {};
-        strcat(Quectel_headers[0], "X-PIN: ");
-        strcat(Quectel_headers[0], pin);
+    uint8_t statuscode = 0;
 
-        strcat(Quectel_headers[1], "X-Sensor: ");
-        strcat(Quectel_headers[1], SENSOR_PREFIX);
-        strcat(Quectel_headers[1], esp_chipid);
-        strcat(Quectel_headers[2], "Content-Type: application/json");
+    char http_headers[3][40] = {};
+    strcat(http_headers[0], "X-PIN: ");
+    strcat(http_headers[0], pin);
 
-        // int header_size = sizeof(Quectel_headers) / sizeof(Quectel_headers[0]);
+    strcat(http_headers[1], "X-Sensor: ");
+    strcat(http_headers[1], SENSOR_PREFIX);
+    strcat(http_headers[1], esp_chipid);
+    strcat(http_headers[2], "Content-Type: application/json");
 
-        QUECTEL_POST(gprs_url, Quectel_headers, 3, data, strlen(data), statuscode);
+    QUECTEL_POST(gprs_url, http_headers, 3, data, strlen(data), statuscode);
 
-        if (!(statuscode == 200 || statuscode == 201))
-        {
-            return false;
-        }
-
-        // ToDo: close HTTP session/ PDP context
-#endif
+    if (statuscode == 200 || statuscode == 201)
+    {
+        Serial.println("GSM: Data sent successfully");
+        return true;
+    }
+    else
+    {
+        Serial.println("GSM: Data send failed with HTTP status: " + String(statuscode));
+        return false;
     }
 
-    // #if defined(ESP8266)
-    //     wdt_reset();
-    // #endif
-    //     yield();
-    //     return millis() - start_send;
+    // ToDo: close HTTP session/ PDP context
+#else
+    return false;
+#endif
+}
 
-    return true;
+/*****************************************************************
+ * send data to rest api with fallback                           *
+ *****************************************************************/
+/**
+    @brief: Send data to the server with communication priority and fallback
+    @param data : JSON payload to send
+    @param _pin : pin number of the sensor as configured in the API
+    @param host : host name of the server
+    @param url : url path to send the data
+    @return: true if data is sent successfully via any method, false otherwise
+    @note: Respects CommunicationPriority order and attempts fallback method if primary fails
+**/
+bool sendData(const char *data, const int _pin, const char *host, const char *url)
+{
+    bool send_result = false;
+
+    // Check if any communication method is available
+    if (CommsManagerState.allCommsUnavailable)
+    {
+        Serial.println("SendData: All communication methods are unavailable - data will be stored for later transmission");
+        return false;
+    }
+
+    // Use preferred communication method determined by CommsManager
+    switch (CommsManagerState.preferredComm)
+    {
+    case CommsManagerState.PreferredComm::WIFI:
+        if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
+        {
+            Serial.println("SendData: Attempting WiFi (preferred)...");
+            send_result = sendDataViaWiFi(data, _pin, host, url);
+
+            if (send_result)
+            {
+                return true;
+            }
+
+            // WiFi failed, try GSM fallback
+            CommsManagerState.wifiFailCount++;
+            Serial.println("SendData: WiFi failed, attempting GSM fallback...");
+
+            if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
+            {
+                send_result = sendDataViaGSM(data, _pin, host, url);
+                if (send_result)
+                {
+                    CommsManagerState.wifiFailCount = 0; // Reset on success
+                    return true;
+                }
+                CommsManagerState.gsmFailCount++;
+            }
+        }
+        break;
+
+    case CommsManagerState.PreferredComm::GSM:
+        if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
+        {
+            Serial.println("SendData: Attempting GSM (preferred)...");
+            send_result = sendDataViaGSM(data, _pin, host, url);
+
+            if (send_result)
+            {
+                return true;
+            }
+
+            // GSM failed, try WiFi fallback
+            CommsManagerState.gsmFailCount++;
+            Serial.println("SendData: GSM failed, attempting WiFi fallback...");
+
+            if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
+            {
+                send_result = sendDataViaWiFi(data, _pin, host, url);
+                if (send_result)
+                {
+                    CommsManagerState.gsmFailCount = 0; // Reset on success
+                    return true;
+                }
+                CommsManagerState.wifiFailCount++;
+            }
+        }
+        break;
+
+    case CommsManagerState.PreferredComm::NONE:
+        // No preferred comms available, attempt either if configured
+        if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
+        {
+            Serial.println("SendData: Attempting WiFi (no preferred)...");
+            send_result = sendDataViaWiFi(data, _pin, host, url);
+            if (send_result)
+                return true;
+            CommsManagerState.wifiFailCount++;
+        }
+
+        if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
+        {
+            Serial.println("SendData: Attempting GSM (no preferred)...");
+            send_result = sendDataViaGSM(data, _pin, host, url);
+            if (send_result)
+                return true;
+            CommsManagerState.gsmFailCount++;
+        }
+        break;
+    }
+
+    if (!send_result)
+    {
+        Serial.println("SendData: Data transmission failed via all available methods - will retry later");
+    }
+
+    return send_result;
 }
 
 void init_memory_loggers()
@@ -730,9 +1130,6 @@ void init_memory_loggers()
 void init_SD_loggers()
 {
     // Root directory
-    strcpy(ROOT_DIR, "/");
-    strcat(ROOT_DIR, SENSOR_PREFIX);
-    strcat(ROOT_DIR, esp_chipid);
     createDir(SD, ROOT_DIR);
 
     if (current_year != 0 && current_month != 0)
@@ -1036,7 +1433,7 @@ void sendFromMemoryLog(LOGGER &logger)
             {
                 if (!sendData(logger.DATA_STORE[i], api_pin, HOST_CFA, URL_CFA))
                 {
-                    // Append to file for sending later
+                    // Append to file for sending later // ToDo: Check the state of DeviceConfigState.sdCardInitialized before attempting to write to SD card
                     appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
                 }
             }
@@ -1048,4 +1445,943 @@ void sendFromMemoryLog(LOGGER &logger)
 
     //? call resetLogger(logger) to reset the logger
     //? or just clear the memory
+}
+
+// Get current sensor data;
+
+JsonDocument getCurrentSensorData()
+{
+    return current_sensor_data;
+}
+
+void captureGSMInfo()
+{
+    // ToDo: Reduce memory footprint by moving global gsm_info doc to  scoped local variable asyncwebserver
+    gsm_info["Network Name"] = GSMRuntimeInfo.operator_name = getNetworkName();
+    // gsm_info["Network Band"] = GSMRuntimeInfo.network_band = getNetworkBand();
+    gsm_info["Signal Strength"] = GSMRuntimeInfo.signal_strength = getSignalStrength();
+    strcpy(GSMRuntimeInfo.sim_ccid, SIM_CCID);
+    gsm_info["SIM ICCID"] = GSMRuntimeInfo.sim_ccid;
+    gsm_info["Model ID"] = GSMRuntimeInfo.model_id = getModelID();
+    gsm_info["Firmware Version"] = GSMRuntimeInfo.firmware_version = getFirwmareVersion();
+    gsm_info["IMEI"] = GSMRuntimeInfo.imei = getIMEI();
+}
+
+void configDeviceFromWiFiConn()
+{
+
+    captureWiFiInfo();
+
+    if (!DeviceConfigState.timeSet)
+    {
+        // synchronise system clock over NTP
+        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        time_t now = time(nullptr);
+        RTC.setTime(now);
+        initCalender(RTC.getYear(), RTC.getMonth() + 1);
+        DeviceConfigState.timeSet = true;
+    }
+}
+
+void captureWiFiInfo()
+{
+    wifi_info["SSID"] = WiFi.SSID();
+    wifi_info["BSSID"] = WiFi.BSSIDstr();
+    wifi_info["Signal Strength"] = WiFi.RSSI();
+    wifi_info["IP Address"] = WiFi.localIP().toString();
+}
+
+/**
+    @brief Initialize and configure GSM module
+    @details This function handles GSM serial initialization, GSM module initialization,
+             network registration with timeout, GPRS initialization, time fetching, and puts GSM to sleep.
+    @return : void
+**/
+void initializeAndConfigGSM()
+{
+    DeviceConfigState.state = ConfigurationState::CONFIG_GSM;
+    DeviceConfigState.gsmConnected = GSM_Serial_begin();
+
+    if (!DeviceConfigState.gsmConnected)
+        return;
+    DeviceConfigState.gsmConnected = GSM_init();
+    if (!DeviceConfigState.gsmConnected)
+        return;
+
+    // GSM initialization successful
+    GSM_CONNECTED = true; // TODO: Refactor to remove global variable and use state struct instead
+
+    bool network_registered = false;
+
+    if (setNetworkMode(NetMode::AUTO))
+    {
+        network_registered = register_to_network();
+    }
+    else if (setNetworkMode(NetMode::_2G))
+    {
+        network_registered = register_to_network();
+    }
+    else if (setNetworkMode(NetMode::_4G))
+    {
+        network_registered = register_to_network();
+    }
+    else
+    {
+        if (!network_registered)
+        {
+            Serial.println("Failed to register to GSM network");
+            return;
+        }
+    }
+
+    // GPRS initialization
+    DeviceConfigState.gsmInternetAvailable = GPRS_init();
+    CommsManagerState.gsmOnline = DeviceConfigState.gsmInternetAvailable;
+    CommsManagerState.allCommsUnavailable = !DeviceConfigState.gsmInternetAvailable;
+
+    // Fetch network time and update RTC
+    if (!DeviceConfigState.timeSet)
+    {
+        if (getNetworkTime(time_buff))
+        {
+            // Update RTC time and calendar
+            Serial.println("GSM Network Time: " + String(time_buff));
+            esp_datetime_tz = extractDateTime(String(time_buff));
+            RTC.setTime(esp_datetime_tz.timestamp);
+            initCalender(RTC.getYear(), RTC.getMonth() + 1);
+            DeviceConfigState.timeSet = true;
+        }
+        else
+        {
+            Serial.println("Failed to fetch time from network");
+        }
+    }
+    if (DeviceConfigState.gsmInternetAvailable && DeviceConfigState.isMQTTConfigured && !CommsManagerState.mqttConnectionInitialized)
+    {
+        MQTT_configure(MQTT_CLIENT_ID, 1, 1);
+        CommsManagerState.mqttConnectionInitialized = MQTT_open(MQTT_CLIENT_ID, MQTT_BROKER, MQTT_PORT);
+        MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+        MQTT_subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
+    }
+    captureGSMInfo();
+    GSM_sleep();
+}
+
+void loadInitialConfigs()
+{
+
+#if defined(POWER_SAVING_MODE)
+    DeviceConfig.power_saving_mode = POWER_SAVING_MODE;
+#endif
+#if defined(GSM_APN)
+    DeviceConfig.gsm_apn = GSM_APN;
+#endif
+#if defined(GSM_APN_PWD)
+    DeviceConfig.gsm_apn_pwd = GSM_APN_PWD;
+#endif
+#if defined(WIFI_STA_SSID)
+    DeviceConfig.wifi_sta_ssid = WIFI_STA_SSID;
+#endif
+#if defined(WIFI_STA_PWD)
+    DeviceConfig.wifi_sta_pwd = WIFI_STA_PWD;
+#endif
+#if defined(SIM_PIN)
+    DeviceConfig.sim_pin = SIM_PIN;
+#endif
+
+    if (gsm_capable)
+        DeviceConfig.useGSM = use_gsm;
+
+    DeviceConfig.useWiFi = use_wifi;
+
+    if (!DeviceConfig.useWiFi && !DeviceConfig.useGSM)
+        DeviceConfigState.configurationRequired = true;
+
+#if defined(MQTT_BROKER) && defined(MQTT_USERNAME) && defined(MQTT_PASSWORD)
+    if (MQTT_BROKER[0] != '\0' && MQTT_USERNAME[0] != '\0' && MQTT_PASSWORD[0] != '\0')
+    {
+
+        DeviceConfigState.isMQTTConfigured = true;
+    }
+#endif
+
+    // if (DeviceConfig.power_saving_mode)
+    //     {
+    //         sampling_interval = 15 * 60 * 1000; // 15 minutes
+    //         sending_intervall_ms = 60 * 60 * 1000; // 1 hour
+    //     }
+    // else
+    //     {
+    //         sampling_interval = 1 * 60 * 1000; // 1 minute
+    //         sending_intervall_ms = 5 * 60 * 1000; // 5 minutes
+    //     }
+}
+
+/**
+ * @brief Ping a server to verify internet connectivity
+ * @param server : Server address/hostname to ping
+ * @param port : Port number (typically 80 for HTTP, 443 for HTTPS)
+ * @param timeout_ms : Timeout in milliseconds
+ * @return : true if ping successful, false otherwise
+ * @note : This function simplistically checks connectivity by attempting a TCP connection
+ */
+bool pingServer(const char *server, uint16_t port, uint16_t timeout_ms)
+{
+    if (server == nullptr)
+        return false;
+
+    // Try WiFi if available
+    if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected)
+    {
+        bool wifi_internet_access = wifiHasInternet(server, port, timeout_ms);
+        if (wifi_internet_access)
+        {
+            return true;
+        }
+    }
+
+    // Try GSM if WiFi failed and GSM is available
+    if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected && GPRS_CONNECTED)
+    {
+        bool ping_success = pingIP(server);
+
+        if (ping_success)
+            return true;
+    }
+
+    return false;
+}
+
+/**
+ * @brief Check if any communication method has internet connectivity
+ * @details Attempts to ping a known server to verify actual internet availability
+ *          Updates DeviceConfigState.wifiOnline and gsmOnline flags
+ * @return : true if any communication is available, false if all failed
+ */
+bool isConnectivityAvailable()
+{
+    const char *PING_SERVER = "8.8.8.8";
+    const uint16_t PING_PORT = 53;
+    const uint16_t PING_TIMEOUT = 5000;
+
+    unsigned long now = millis();
+
+    // Perform connectivity check at regular intervals (every 15 minutes) to avoid excessive pinging
+    if (now - CommsManagerState.lastConnectivityCheck < 60000 * 15)
+    {
+        return !CommsManagerState.allCommsUnavailable;
+    }
+
+    CommsManagerState.lastConnectivityCheck = now;
+
+    // Check WiFi connectivity
+    if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected)
+    {
+        CommsManagerState.wifiOnline = pingServer(PING_SERVER, PING_PORT, PING_TIMEOUT);
+        if (CommsManagerState.wifiOnline)
+        {
+            return true;
+        }
+    }
+    else
+    {
+        CommsManagerState.wifiOnline = false;
+    }
+
+    // Check GSM connectivity
+    if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
+    {
+        CommsManagerState.gsmOnline = pingServer(PING_SERVER, PING_PORT, PING_TIMEOUT);
+        if (CommsManagerState.gsmOnline)
+        {
+            return true;
+        }
+    }
+    else
+    {
+        CommsManagerState.gsmOnline = false;
+    }
+
+    // Both comms unavailable
+    CommsManagerState.allCommsUnavailable = !(CommsManagerState.wifiOnline || CommsManagerState.gsmOnline);
+    return !CommsManagerState.allCommsUnavailable;
+}
+
+/**
+ * @brief Update communication preference based on current state
+ * @details Determines the best communication method to use based on:
+ *          - Device configuration preferences (useWiFi, useGSM)
+ *          - Communication priority settings
+ *          - Current connectivity status
+ *          - Failure counts and retry logic
+ */
+void updateCommsPreference()
+{
+    unsigned long now = millis();
+
+    // Determine if we should attempt to reconnect to failed comms
+    bool attemptWiFi = DeviceConfig.useWiFi &&
+                       (CommsManagerState.wifiFailCount < CommsManagerState.MAX_RETRY_ATTEMPTS) &&
+                       (now - CommsManagerState.lastWiFiAttempt > CommsManagerState.reconnectInterval);
+
+    bool attemptGSM = DeviceConfig.useGSM &&
+                      (CommsManagerState.gsmFailCount < CommsManagerState.MAX_RETRY_ATTEMPTS) &&
+                      (now - CommsManagerState.lastGSMAttempt > CommsManagerState.reconnectInterval);
+
+    // Determine preferred communication based on priority and online status
+    if (CommunicationPriority::WIFI == 0) // WiFi has priority
+    {
+        if (CommsManagerState.wifiOnline)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+            CommsManagerState.wifiFailCount = 0; // Reset fail count on successful connection
+            return;
+        }
+        else if (CommsManagerState.gsmOnline)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+            CommsManagerState.gsmFailCount = 0;
+            return;
+        }
+    }
+    else if (CommunicationPriority::GSM == 0) // GSM has priority
+    {
+        if (CommsManagerState.gsmOnline)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+            CommsManagerState.gsmFailCount = 0;
+            return;
+        }
+        else if (CommsManagerState.wifiOnline)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+            CommsManagerState.wifiFailCount = 0;
+            return;
+        }
+    }
+
+    // If here, preferred comms is not available, attempt reconnection if allowed
+    if (attemptWiFi && DeviceConfig.useWiFi && !CommsManagerState.wifiOnline)
+    {
+        Serial.println("CommsManager: Attempting WiFi reconnection...");
+        CommsManagerState.lastWiFiAttempt = now;
+        CommsManagerState.wifiFailCount++;
+
+        // For WiFi, attempt to reconnect
+        if (!DeviceConfigState.wifiConnected)
+        {
+            DeviceConfigState.state = ConfigurationState::CONFIG_WIFI;
+            DeviceConfigState.wifiConnected = wifiConnect(DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
+            if (DeviceConfigState.wifiConnected)
+            {
+                configDeviceFromWiFiConn();
+                Serial.println("CommsManager: WiFi reconnected successfully");
+                CommsManagerState.wifiFailCount = 0;
+                CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+                return;
+            }
+        }
+    }
+
+    if (attemptGSM && DeviceConfig.useGSM && !CommsManagerState.gsmOnline)
+    {
+        Serial.println("CommsManager: Attempting GSM reconnection...");
+        CommsManagerState.lastGSMAttempt = now;
+        CommsManagerState.gsmFailCount++;
+
+        // For GSM, attempt to wake and reconnect
+        if (!DeviceConfigState.gsmConnected || !DeviceConfigState.gsmInternetAvailable)
+        {
+            DeviceConfigState.state = ConfigurationState::CONFIG_GSM;
+            initializeAndConfigGSM();
+            if (DeviceConfigState.gsmInternetAvailable)
+            {
+                Serial.println("CommsManager: GSM reconnected successfully");
+                CommsManagerState.gsmFailCount = 0;
+                CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+                return;
+            }
+        }
+    }
+
+    // Increase reconnect interval with each failure (exponential backoff: 30s, 60s, 120s, etc.)
+    if (CommsManagerState.wifiFailCount > 0 || CommsManagerState.gsmFailCount > 0)
+    {
+        uint8_t maxFailCount = max(CommsManagerState.wifiFailCount, CommsManagerState.gsmFailCount);
+        CommsManagerState.reconnectInterval = 30000 * (1 << min(maxFailCount, (uint8_t)4)); // Cap at 8 minutes
+    }
+
+    // If both have exceeded max retries, mark all comms as unavailable
+    if (CommsManagerState.wifiFailCount >= CommsManagerState.MAX_RETRY_ATTEMPTS &&
+        CommsManagerState.gsmFailCount >= CommsManagerState.MAX_RETRY_ATTEMPTS)
+    {
+        CommsManagerState.allCommsUnavailable = true;
+        CommsManagerState.preferredComm = CommsManagerState.PreferredComm::NONE;
+        CommsManagerState.maxReconnectAttemptsReached = true;
+        Serial.println("CommsManager: All communication methods have failed. Giving up on reconnection attempts.");
+    }
+}
+
+/**
+ * @brief Communication Manager - runs in main loop
+ * @details Manages communication device selection, monitors connectivity, and handles failover
+ *          Should be called frequently from loop() to maintain up-to-date communication state
+ */
+void commsManager()
+{
+    static unsigned long lastCommsCheck = 0;
+    if (millis() - lastCommsCheck < 60000 * 15)
+        return;
+    lastCommsCheck = millis();
+    if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::NONE)
+    {
+        // If all comms are unavailable, attempt to update connectivity status and preference
+        Serial.print("[CommsManager]: No communication methods available: [Reason]: ");
+        if (CommsManagerState.maxReconnectAttemptsReached)
+        {
+            Serial.println("Max reconnect attempts reached for all communication methods. No further attempts will be made until next device restart.");
+        }
+        else if (!DeviceConfig.useWiFi && !DeviceConfig.useGSM)
+        {
+            Serial.println("All communication methods are disabled in configuration. Please enable at least one communication method to allow data transmission.");
+        }
+
+        return;
+    }
+    // Set initial preferred comms based on configuration
+    if (DeviceConfig.useWiFi && DeviceConfigState.wifiConnected || CommunicationPriority::WIFI == 0)
+    {
+        CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+    }
+    else if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected || CommunicationPriority::GSM == 0)
+    {
+        CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+    }
+
+    // Check network connectivity status
+    isConnectivityAvailable();
+
+    // Update communication preference based on current state
+    updateCommsPreference();
+
+    Serial.println("----- Communication Manager State Unsolicited Report -----");
+    Serial.print("CommsManager State - WiFi: ");
+    Serial.print(CommsManagerState.wifiOnline ? "Online" : "Offline");
+    Serial.print(" (fails: ");
+    Serial.print(CommsManagerState.wifiFailCount);
+    Serial.print(") | GSM: ");
+    Serial.print(CommsManagerState.gsmOnline ? "Online" : "Offline");
+    Serial.print(" (fails: ");
+    Serial.print(CommsManagerState.gsmFailCount);
+    Serial.print(") | Preferred: ");
+    switch (CommsManagerState.preferredComm)
+    {
+    case CommsManagerState.PreferredComm::WIFI:
+        Serial.println("WiFi");
+        break;
+    case CommsManagerState.PreferredComm::GSM:
+        Serial.println("GSM");
+        break;
+    case CommsManagerState.PreferredComm::NONE:
+        Serial.println("None (All Failed)");
+        break;
+    }
+}
+
+/// @brief Initialize communication modules based on configuration and priority
+void initComms()
+{
+    // ToDo: Shift DeviceConfigState comms tracking to CommManagerState struct to simplify comms state management
+    CommsManagerState.init();
+    if (DeviceConfig.useGSM || DeviceConfig.useWiFi)
+    {
+        // Set preferredComm based on CommunicationPriority and DeviceConfig states
+        if (DeviceConfig.useWiFi && CommunicationPriority::WIFI == 0)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+        }
+        else if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+        }
+        else if (DeviceConfig.useWiFi)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::WIFI;
+        }
+        else if (DeviceConfig.useGSM)
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+        }
+        else
+        {
+            CommsManagerState.preferredComm = CommsManagerState.PreferredComm::NONE;
+        }
+    }
+    else
+    {
+        CommsManagerState.preferredComm = CommsManagerState.PreferredComm::NONE;
+        Serial.println("All communication methods are disabled in configuration. Please enable at least one communication method to allow data transmission");
+        return;
+    }
+
+    if (DeviceConfig.useWiFi && CommunicationPriority::WIFI == 0 || (DeviceConfig.useWiFi && !DeviceConfig.useGSM))
+    {
+        if (DeviceConfig.wifi_sta_ssid[0] == '\0')
+        {
+            Serial.println("DeviceConfig wifi ssid empty!");
+        }
+        else
+        {
+            DeviceConfigState.state = ConfigurationState::CONFIG_WIFI;
+            DeviceConfigState.wifiConnected = wifiConnect(DeviceConfig.wifi_sta_ssid, DeviceConfig.wifi_sta_pwd);
+
+            // wifiConnect already checks for internet; record it for diagnostics
+            DeviceConfigState.wifiInternetAvailable = DeviceConfigState.wifiConnected;
+            DeviceConfigState.internetAvailable = DeviceConfigState.wifiInternetAvailable;
+
+            if (DeviceConfigState.wifiConnected)
+            {
+                CommsManagerState.allCommsUnavailable = false;
+                CommsManagerState.wifiOnline = true;
+                configDeviceFromWiFiConn();
+
+                // init MQTT connection
+                if (DeviceConfigState.isMQTTConfigured && !CommsManagerState.mqttConnectionInitialized)
+                {
+                    CommsManagerState.mqttConnectionInitialized = wifiMQTTConnect(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+                    if (CommsManagerState.mqttConnectionInitialized)
+                    {
+                        Serial.println("Attempting to subscribe to MQTT topic: " + String(MQTT_SUBSCRIBE_TOPIC));
+                        mqttClient.setCallback(wifiMQTTCallback);
+                        if (!mqttClient.subscribe(MQTT_SUBSCRIBE_TOPIC))
+                        {
+                            Serial.println("Failed to subscribe to MQTT topic");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0 || (DeviceConfig.useGSM && !DeviceConfig.useWiFi))
+    {
+        initializeAndConfigGSM();
+    }
+}
+
+void listenSerial()
+{
+    if (Serial.available() > 0)
+    {
+        String command = Serial.readStringUntil('\n');
+        command.trim();
+
+        if (command == "restart")
+        {
+            Serial.println("Restarting device...");
+            ESP.restart();
+        }
+        else if (command == "sendNow")
+        {
+            Serial.println("Triggering data send...");
+            send_now = true;
+        }
+        else if (command == "clearConfig")
+        {
+            Serial.println("Clearing device config...");
+            deleteFile(LittleFS, "/config.json");
+        }
+        else
+        {
+            Serial.println("Unknown command: " + command);
+        }
+    }
+}
+
+/// @brief Build MQTT telemetry JSON payload with device, GSM, WiFi, and sensor information
+/// @param mqtt_payload Buffer to store the JSON payload
+/// @param payload_size Size of the payload buffer
+/// @return true if payload built successfully, false otherwise
+bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size)
+{
+    try
+    {
+        JsonDocument telemetry_doc;
+
+        // Timestamp
+        String datetime = getRTCdatetimetz(ISO_time_format, esp_datetime_tz.timezone);
+        telemetry_doc["timestamp"] = datetime;
+
+        telemetry_doc["device_id"] = esp_chipid;
+
+        // GSM Information
+        if (gsm_capable && DeviceConfigState.gsmConnected)
+        {
+            JsonObject gsm = telemetry_doc["gsm"].to<JsonObject>();
+            gsm["connected"] = GPRS_CONNECTED;
+            gsm["network_name"] = GSMRuntimeInfo.operator_name;
+            gsm["signal_strength"] = GSMRuntimeInfo.signal_strength;
+            gsm["imei"] = GSMRuntimeInfo.imei;
+            gsm["model"] = GSMRuntimeInfo.model_id;
+            gsm["firmware"] = GSMRuntimeInfo.firmware_version;
+            gsm["sim_ccid"] = GSMRuntimeInfo.sim_ccid;
+            gsm["battery_status"] = getBatteryStatus();
+        }
+
+        // WiFi Information
+        if (DeviceConfigState.wifiConnected)
+        {
+            JsonObject wifi = telemetry_doc["wifi"].to<JsonObject>();
+            wifi["connected"] = true;
+            wifi["ssid"] = wifi_info["SSID"];
+            wifi["signal_strength"] = wifi_info["Signal Strength"];
+            wifi["ip_address"] = wifi_info["IP Address"];
+        }
+        else
+        {
+            JsonObject wifi = telemetry_doc["wifi"].to<JsonObject>();
+            wifi["connected"] = false;
+        }
+
+        // Device Configuration
+        JsonObject config = telemetry_doc["config"].to<JsonObject>();
+        config["power_saving_mode"] = DeviceConfig.power_saving_mode;
+        config["wifi_enabled"] = DeviceConfig.useWiFi;
+        config["gsm_enabled"] = DeviceConfig.useGSM;
+        config["sampling_interval_ms"] = sampling_interval;
+        config["sending_interval_ms"] = sending_intervall_ms;
+
+        // Communication Status
+        JsonObject comms = telemetry_doc["communications"].to<JsonObject>();
+        comms["wifi_available"] = CommsManagerState.wifiOnline;
+        comms["gsm_available"] = CommsManagerState.gsmOnline;
+        comms["internet_available"] = DeviceConfigState.internetAvailable;
+        comms["preferred"] = (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::WIFI) ? "WiFi" : (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::GSM) ? "GSM"
+                                                                                                                                                                                             : "None";
+
+        // System Status
+        JsonObject system = telemetry_doc["system"].to<JsonObject>();
+        system["uptime_ms"] = millis();
+        system["free_heap"] = ESP.getFreeHeap();
+        system["data_sends_count"] = count_sends;
+        system["data_points_logged"] = JSON_PAYLOAD_LOGGER.log_count;
+
+        // Serialize to buffer
+        if (serializeJson(telemetry_doc, mqtt_payload, payload_size) == 0)
+        {
+            Serial.println("buildMQTTTelemetryPayload: Failed to serialize JSON - buffer too small");
+            return false;
+        }
+
+        return true;
+    }
+    catch (...)
+    {
+        Serial.println("buildMQTTTelemetryPayload: Exception occurred while building payload");
+        return false;
+    }
+}
+
+/// @brief Send telemetry data to MQTT broker
+/// @param broker MQTT broker hostname/IP address
+/// @param port MQTT broker port (default 1883)
+/// @param client_id MQTT client ID (0-5)
+/// @param topic MQTT topic to publish to
+/// @param username MQTT username (optional)
+/// @param password MQTT password (optional)
+/// @return true if telemetry sent successfully, false otherwise
+bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, const char *topic,
+                          const char *username = nullptr, const char *password = nullptr)
+{
+    // Check if GPRS is available (required for MQTT over GSM)
+    if (!CommsManagerState.gsmOnline)
+    {
+        Serial.println("sendMQTTTelemetry: GPRS not connected - cannot send telemetry");
+        return false;
+    }
+    bool isBrokerConnected = MQTT_isBrokerConnected(client_id);
+    bool isClientConneted = MQTT_isClientConnected(client_id);
+    // Open broker connection
+    if (!isBrokerConnected)
+    {
+        Serial.println("sendMQTTTelemetry: Opening MQTT broker connection...");
+        if (!MQTT_open(client_id, broker, port))
+        {
+            Serial.print("sendMQTTTelemetry: Failed to open MQTT broker - Error: ");
+            Serial.println(MQTT_INIT_ERROR);
+            return false;
+        }
+        MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+        MQTT_isBrokerConnected(client_id);
+    }
+    else if (!isClientConneted)
+    {
+        Serial.println("sendMQTTTelemetry: Connecting MQTT client...");
+        if (!MQTT_connect(client_id, esp_chipid, username, password))
+        {
+            Serial.print("sendMQTTTelemetry: Failed to connect MQTT client - Error: ");
+            Serial.println(MQTT_INIT_ERROR);
+            return false;
+        }
+    }
+
+    // Build telemetry payload
+    char mqtt_payload[2048] = {}; // Large buffer for comprehensive telemetry
+    if (!buildMQTTTelemetryPayload(mqtt_payload, sizeof(mqtt_payload)))
+    {
+        Serial.println("sendMQTTTelemetry: Failed to build telemetry payload");
+        return false;
+    }
+
+    Serial.print("sendMQTTTelemetry: Payload size: ");
+    Serial.print(strlen(mqtt_payload));
+    Serial.println(" bytes");
+
+    // Publish telemetry
+    Serial.print("sendMQTTTelemetry: Publishing to topic: ");
+    Serial.println(topic);
+
+    if (!MQTT_publish(client_id, 1, topic, mqtt_payload, 1, 0))
+    {
+        Serial.println("sendMQTTTelemetry: Failed to publish telemetry");
+        return false;
+    }
+
+    Serial.println("sendMQTTTelemetry: Telemetry published successfully");
+    count_sends++;
+    return true;
+}
+
+/// @brief Initialize MQTT and send telemetry, with automatic cleanup
+/// @param broker MQTT broker hostname/IP
+/// @param port MQTT broker port
+/// @param topic MQTT topic for telemetry
+/// @param client_id MQTT client ID
+/// @param username MQTT username (optional)
+/// @param password MQTT password (optional)
+/// @param disconnect_after If true, disconnect and close broker after sending
+/// @return true if successful, false otherwise
+bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *topic, uint8_t client_id = 0,
+                              const char *username = nullptr, const char *password = nullptr,
+                              bool disconnect_after = true)
+{
+    bool result = sendGsmMQTTTelemetry(broker, port, client_id, topic, username, password);
+
+    if (disconnect_after && MQTT_isBrokerConnected(client_id))
+    {
+        delay(500);
+        Serial.println("initAndSendMQTTTelemetry: Disconnecting MQTT...");
+        MQTT_disconnect(client_id);
+    }
+
+    return result;
+}
+
+/// @brief Send telemetry data to MQTT broker via WiFi (PubSubClient)
+/// @param broker MQTT broker hostname/IP address
+/// @param port MQTT broker port (default 1883)
+/// @param client_id MQTT client ID
+/// @param topic MQTT topic to publish to
+/// @param username MQTT username (optional)
+/// @param password MQTT password (optional)
+/// @return true if telemetry sent successfully, false otherwise
+bool sendWiFiMQTTTelemetry(const char *broker, uint16_t port, const char *client_id, const char *topic,
+                           const char *username = nullptr, const char *password = nullptr)
+{
+    // Check if WiFi is connected
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("sendWiFiMQTTTelemetry: WiFi not connected - cannot send telemetry");
+        return false;
+    }
+
+    Serial.println("sendWiFiMQTTTelemetry: WiFi connected, proceeding with MQTT publish");
+
+    // Build telemetry payload
+    char mqtt_payload[2048] = {}; // Large buffer for comprehensive telemetry
+    if (!buildMQTTTelemetryPayload(mqtt_payload, sizeof(mqtt_payload)))
+    {
+        Serial.println("sendWiFiMQTTTelemetry: Failed to build telemetry payload");
+        return false;
+    }
+
+    Serial.print("sendWiFiMQTTTelemetry: Payload size: ");
+    Serial.print(strlen(mqtt_payload));
+    Serial.println(" bytes");
+
+    // Send telemetry via WiFi MQTT
+    bool result = wifiMQTTSendTelemetry(broker, port, topic, client_id, mqtt_payload, username, password, false);
+
+    if (result)
+    {
+        Serial.println("sendWiFiMQTTTelemetry: Telemetry sent successfully via WiFi");
+        count_sends++;
+    }
+    else
+    {
+        Serial.println("sendWiFiMQTTTelemetry: Failed to send telemetry via WiFi");
+    }
+
+    return result;
+}
+
+void buildDeviceInfoJSON()
+{
+    try
+    {
+        // Clear previous data
+        device_info.clear();
+
+        // Add GSM configuration if GSM is capable and has valid data
+        if (gsm_capable && (GSMRuntimeInfo.operator_name.length() > 0 ||
+                            GSMRuntimeInfo.imei.length() > 0 ||
+                            GSMRuntimeInfo.sim_ccid[0] != '\0'))
+        {
+            JsonObject gsm = device_info["GSM"].to<JsonObject>();
+
+            if (GSMRuntimeInfo.operator_name.length() > 0)
+                gsm["Operator Name"] = GSMRuntimeInfo.operator_name;
+            if (GSMRuntimeInfo.signal_strength > 0)
+                gsm["Signal Strength"] = GSMRuntimeInfo.signal_strength;
+            if (GSMRuntimeInfo.network_technology[0] != '\0')
+                gsm["Network Technology"] = GSMRuntimeInfo.network_technology;
+            if (GSMRuntimeInfo.imei.length() > 0)
+                gsm["IMEI"] = GSMRuntimeInfo.imei;
+            if (GSMRuntimeInfo.model_id.length() > 0)
+                gsm["Model"] = GSMRuntimeInfo.model_id;
+            if (GSMRuntimeInfo.firmware_version.length() > 0)
+                gsm["Firmware"] = GSMRuntimeInfo.firmware_version;
+            if (GSMRuntimeInfo.sim_ccid[0] != '\0')
+                gsm["SIM CCID"] = GSMRuntimeInfo.sim_ccid;
+        }
+
+        // Add WiFi configuration if WiFi is connected and has valid data
+        if (wifi_info["SSID"].as<String>().length() > 0 ||
+            wifi_info["IP Address"].as<String>().length() > 0)
+        {
+            JsonObject wifi = device_info["WIFI"].to<JsonObject>();
+
+            if (wifi_info["SSID"].as<String>().length() > 0)
+                wifi["SSID"] = wifi_info["SSID"];
+            if (wifi_info["BSSID"].as<String>().length() > 0)
+                wifi["BSSID"] = wifi_info["BSSID"];
+            if (wifi_info["Signal Strength"].as<int>() != 0)
+                wifi["Signal Strength"] = wifi_info["Signal Strength"];
+            if (wifi_info["IP Address"].as<String>().length() > 0)
+                wifi["IP Address"] = wifi_info["IP Address"];
+        }
+
+        Serial.println("buildDeviceInfoJSON: Device info JSON built successfully");
+    }
+    catch (...)
+    {
+        Serial.println("buildDeviceInfoJSON: Exception occurred while building device info JSON");
+    }
+}
+
+void checkIncomingMQTTMessages()
+{
+    if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::NONE)
+        return;
+
+    if (CommsManagerState.preferredComm == CommsManagerState.PreferredComm::WIFI && CommsManagerState.wifiOnline && CommsManagerState.mqttConnectionInitialized)
+    {
+        if (!mqttClient.connected())
+        {
+            if (wifiMQTTConnect(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD))
+                mqttClient.subscribe(MQTT_SUBSCRIBE_TOPIC);
+        }
+
+        mqttClient.loop();
+    }
+
+    else if (CommsManagerState.preferredComm == CommsManagerState::GSM && CommsManagerState.gsmOnline)
+    {
+        if (!MQTT_isBrokerConnected(MQTT_CLIENT_ID))
+        {
+            MQTT_configure(MQTT_CLIENT_ID, 1, 1);
+            if (!MQTT_open(MQTT_CLIENT_ID, MQTT_BROKER, MQTT_PORT))
+            {
+                Serial.print("receiveMQTTTelemetry: Failed to open MQTT broker - Error: ");
+                Serial.println(MQTT_INIT_ERROR);
+                return;
+            }
+            MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+            MQTT_subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
+        }
+        else if (!MQTT_isClientConnected(MQTT_CLIENT_ID))
+        {
+            Serial.println("receiveMQTTTelemetry: Connecting MQTT client...");
+            if (!MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD))
+            {
+                Serial.print("receiveMQTTTelemetry: Failed to connect MQTT client - Error: ");
+                Serial.println(MQTT_INIT_ERROR);
+                return;
+            }
+            MQTT_subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
+        }
+
+        if (MQTT_hasBufferedMessage(MQTT_CLIENT_ID))
+        {
+            CommsManagerState.message_received = MQTT_readBufferedMessage(MQTT_CLIENT_ID, incoming_topic_store, sizeof(incoming_topic_store), incoming_message_store, sizeof(incoming_message_store));
+        }
+    }
+}
+
+void wifiMQTTCallback(char *topic, byte *payload, unsigned int length)
+{
+    if (strcmp(topic, MQTT_SUBSCRIBE_TOPIC) == 0)
+    {
+        Serial.println("wifiMQTTCallback: Received configuration update");
+        // ToDO: Process configuration update (e.g., parse JSON and apply settings)
+        CommsManagerState.message_received = true;
+    }
+    int topic_len = strlen(topic);
+    if ((topic_len < sizeof(incoming_topic_store)) && (length < sizeof(incoming_message_store)))
+    {
+        strcpy(incoming_topic_store, topic);
+        incoming_topic_store[topic_len] = '\0';
+        memcpy(incoming_message_store, payload, length);
+        incoming_message_store[length] = '\0';
+    }
+
+    String dbg = "wifiMQTTCallback: Message | topic: " + String(topic) + "| Payload length:" + "| Payload: " + String((char *)payload, length);
+    Serial.println(dbg);
+}
+
+void processIncomingData()
+{
+
+    if (!strstr(incoming_message_store, esp_chipid))
+    {
+        CommsManagerState.message_received = false;
+        return;
+    }
+    JsonDocument doc;
+    if (validateJson(incoming_message_store))
+    {
+        deserializeJson(doc, incoming_message_store);
+    }
+    else
+    {
+        CommsManagerState.message_received = false;
+        return;
+    }
+
+    auto hasString = [&](JsonVariant v)
+    {
+        return !v.isNull() && v.is<const char *>() && v.as<const char *>()[0] != '\0';
+    };
+
+    if (hasString(doc["action"]))
+    {
+        if (doc["action"] == "restart")
+        {
+            Serial.println("Device restarting from remote command...");
+            delay(2000);
+            ESP.restart();
+        }
+    }
+
+    CommsManagerState.message_received = false; //! Very important
 }

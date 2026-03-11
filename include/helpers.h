@@ -1,6 +1,9 @@
+#ifndef HELPERS_H
+#define HELPERS_H
+
 #include <ArduinoJson.h>
 template <typename T>
-void generateCSV_payload(char *res, size_t res_size, const char *timestamp, const char *value_type, T value, const char *unit, const char *sensor_type)
+static void generateCSV_payload(char *res, size_t res_size, const char *timestamp, const char *value_type, T value, const char *unit, const char *sensor_type)
 {
     // Use type traits to check type at compile time
     if constexpr (std::is_integral<T>::value)
@@ -29,22 +32,12 @@ void generateCSV_payload(char *res, size_t res_size, const char *timestamp, cons
     @return : void
 **/
 template <typename T>
-void add_value2JSON_array(JsonArray arr, const char *key, T &value)
+static void add_value2JSON_array(JsonArray arr, const char *key, T &value)
 {
     JsonDocument doc;
     doc["value_type"] = key;
     doc["value"] = value;
     arr.add(doc);
 }
-
-/**
-    @brief Validate JSON data
-    @param input : JSON data to validate
-    @return : true if valid, false otherwise
-    @note : //! This function is not full proof. Raw strings that don't look like incomplete or empty JSON are validated.
-**/
-bool validateJson(const char *input)
-{
-    JsonDocument doc, filter;
-    return deserializeJson(doc, input, DeserializationOption::Filter(filter)) == DeserializationError::Ok;
-}
+bool validateJson(const char *input);
+#endif

@@ -1,8 +1,11 @@
+#ifndef SD_HANDLER_H
+#define SD_HANDLER_H
+
 #include "FS.h"
 #include "SD.h"
 #include "SPI.h"
 
-bool SD_Init(int CS_PIN = -1)
+static bool SD_Init(int CS_PIN = -1)
 {
     bool SD_MOUNT = false;
     int timeout = 10;
@@ -38,7 +41,7 @@ bool SD_Init(int CS_PIN = -1)
     return SD_MOUNT;
 }
 
-void createDir(fs::FS &fs, const char *path)
+static void createDir(fs::FS &fs, const char *path)
 {
     Serial.printf("Creating Dir: %s\n", path);
     if (fs.mkdir(path))
@@ -51,26 +54,26 @@ void createDir(fs::FS &fs, const char *path)
     }
 }
 
-void readFile(fs::FS &fs, const char *path)
+static String readFile(fs::FS &fs, const char *path)
 {
     Serial.printf("Reading file: %s\n", path);
-
+    String file_contents = "";
     File file = fs.open(path);
     if (!file)
     {
         Serial.println("Failed to open file for reading");
-        return;
+        return "";
     }
 
-    Serial.print("Read from file: ");
     while (file.available())
     {
-        Serial.write(file.read());
+        file_contents += (char)file.read();
     }
     file.close();
+    return file_contents;
 }
 
-void writeFile(fs::FS &fs, const char *path, const char *message)
+static void writeFile(fs::FS &fs, const char *path, const char *message)
 {
     Serial.printf("Writing file: %s\n", path);
 
@@ -91,7 +94,7 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
     file.close();
 }
 
-void appendFile(fs::FS &fs, const char *path, const char *message, bool newline = true)
+static void appendFile(fs::FS &fs, const char *path, const char *message, bool newline = true)
 {
     Serial.print("Appending to file: ");
     Serial.println(path);
@@ -116,7 +119,20 @@ void appendFile(fs::FS &fs, const char *path, const char *message, bool newline 
     file.close();
 }
 
-bool SDattached()
+static void deleteFile(fs::FS &fs, const char *path)
+{
+    Serial.printf("Deleting file: %s\n", path);
+    if (fs.remove(path))
+    {
+        Serial.println("File deleted");
+    }
+    else
+    {
+        Serial.println("Delete failed");
+    }
+}
+
+static bool SDattached()
 {
     if (SD.cardType() == CARD_NONE)
     {
@@ -145,7 +161,7 @@ bool SDattached()
     return true;
 }
 
-String readLine(fs::FS &fs, const char *path, int &next_char, int &from, bool closefile = true)
+static String readLine(fs::FS &fs, const char *path, int &next_char, int &from, bool closefile = true)
 {
     String line = "";
     char c;
@@ -186,15 +202,61 @@ String readLine(fs::FS &fs, const char *path, int &next_char, int &from, bool cl
     return line;
 }
 
-void updateFileContents(fs::FS &fs, const char *file_to_updated, const char *temp_file)
+static void updateFileContents(fs::FS &fs, const char *file_to_updated, const char *temp_file)
 {
 
     fs.remove(file_to_updated);
     fs.rename(temp_file, file_to_updated);
 }
 
-void closeFile(fs::FS &fs, const char *path)
+static void closeFile(fs::FS &fs, const char *path)
 {
     File file = fs.open(path);
     file.close();
 }
+
+static String listFiles(fs::FS &fs, String path = "/")
+{
+    JsonDocument doc;
+
+    std::function<void(const String &, JsonObject &)> listDir;
+    listDir = [&](const String &path, JsonObject &obj)
+    {
+        File dir = fs.open(path);
+        if (!dir || !dir.isDirectory())
+            return;
+        File file = dir.openNextFile();
+        while (file)
+        {
+            String name = file.name();
+            if (file.isDirectory())
+            {
+                JsonObject subdir = obj[name].to<JsonObject>();
+                // Build the full path for recursive call
+                String fullPath = path;
+                if (!path.endsWith("/"))
+                {
+                    fullPath += "/";
+                }
+                fullPath += name;
+                listDir(fullPath, subdir); // Use full path instead of just name
+            }
+            else
+            {
+                obj[name] = "file";
+            }
+            file = dir.openNextFile();
+        }
+    };
+
+    JsonObject root = doc.to<JsonObject>();
+    listDir(path, root);
+    // serializeJsonPretty(doc, Serial); // debug
+
+    String file_list;
+    serializeJsonPretty(doc, file_list);
+    Serial.println(file_list);
+    return file_list;
+}
+
+#endif
