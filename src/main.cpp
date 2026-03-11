@@ -732,7 +732,7 @@ datetimetz extractDateTime(String datetimeStr)
     dtz.datetime = {0, 0, 0, 0, 0, 0, 0};
     dtz.timestamp = 0;
 
-    Serial.println("Received date string: " + datetimeStr); //! format looks like "25/02/24,05:55:53+00" and may include the quotes!
+    // Serial.println("Received date string: " + datetimeStr); //! format looks like "25/02/24,05:55:53+00" and may include the quotes!
 
     // check if received string is empty
     if (datetimeStr == "")
