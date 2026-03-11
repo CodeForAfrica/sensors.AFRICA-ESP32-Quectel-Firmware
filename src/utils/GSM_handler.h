@@ -1087,7 +1087,72 @@ bool pingIP(const char *host, uint8_t contextID)
     char urc[64];
     if (!waitForURC("+QPING:", urc, sizeof(urc), 5000))
     {
-        return false;
+        NETWORK_NAME = String(NetworkName);
+        return NETWORK_NAME;
+    };
+
+    NETWORK_NAME = "";
+    return NETWORK_NAME;
+}
+/// @brief Query signal strength from network
+/// @return RSSI value or 99 on error //! Integer indicator. Not actual RSSI signal strength in dBm
+int8_t getSignalStrength()
+{
+    String AT_response = "";
+    const char AT_cmd[] = "AT+CSQ";
+    char rssi[4];
+
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return 99;
+
+    if (extractText((char *)AT_response.c_str(), "+CSQ: ", rssi, sizeof(rssi), ','))
+        return atoi(rssi);
+
+    return 99;
+}
+
+/// @brief Query active network band information
+/// @return Band name string
+String getNetworkBand()
+{
+    const char AT_cmd[] = "AT+QNWINFO";
+    char band[64];
+    String AT_response = "";
+
+    if (!sendAndCheck(AT_cmd, "OK", AT_response, 300))
+        return "";
+
+    // Extract network band from response
+    // Expected format: +QNWINFO: "FDD LTE","63902","LTE BAND 3",1650
+    // Extract text between second and third comma
+    if (extractText((char *)AT_response.c_str(), "+QNWINFO: \"", band, sizeof(band), '\n'))
+    {
+        // ToDo: Extract Access Technology: Particulary interested in "NO SERVICE" as part of response
+        // Find the second occurrence of comma and extract from there
+        const char *start = strchr((char *)AT_response.c_str(), ',');
+        if (start != nullptr)
+        {
+            start = strchr(start + 1, ',');
+            if (start != nullptr)
+            {
+                start++; // Move past the comma
+                // Skip leading quote if present
+                if (*start == '"')
+                    start++;
+
+                const char *end = strchr(start, '"');
+                if (end != nullptr)
+                {
+                    size_t length = end - start;
+                    if (length < sizeof(band))
+                    {
+                        strncpy(band, start, length);
+                        band[length] = '\0';
+                        return String(band);
+                    }
+                }
+            }
+        }
     }
 
     char expected[32];
