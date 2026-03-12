@@ -1,0 +1,4 @@
+[submodule "data"]
+	path = data
+	url = https://github.com/CodeForAfrica/sensors.AFRICA-ESP32-webserver-ui.git
+	branch = main
