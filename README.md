@@ -23,6 +23,8 @@ The firmware is built and tested for a board running on **ESP32-S3 N16R8** micro
 Files that need uploading to the flash file system section of the module are stored in the `data` folder of the project's root directory.
 To upload the files, use PlatformIO to build and flash the file system image to the correct device port.
 
+**P.S.** Before building the flash image, always run `git pull --recurse-submodules` or `git submodule update --init data` to get the latest submodule updates.
+
 ## Firmware upload
 PlatformIO IDE was used to develop this firmware. For users familiar with Visual Studio Code, install the PlatformIO extension. 
 Open the project using PlatformIO and wait for PlatformIO to configure the environment, and install the necessary libraries. Select the port the device is connected to and then upload the firmware. Both the JTAG and UART inferfaces can be used to program the device.
