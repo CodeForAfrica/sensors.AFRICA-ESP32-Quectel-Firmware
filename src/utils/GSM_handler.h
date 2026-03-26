@@ -311,29 +311,17 @@ bool register_to_network()
         if (status == NetRegStatus::REGISTERED_TO_HOME_NETWORK || status == NetRegStatus::REGISTERED_ROAMING)
         {
             registered_to_network = true;
+            Serial.printf("%s: %s\n", NET_STATUS_VERBOSE[status], getNetworkName());
             return registered_to_network;
         }
         else
         {
             Serial.println(NET_STATUS_VERBOSE[status]);
         }
-    } while (!registered_to_network && retry_count < 20);
-    {
-        status = getNumber("AT+CREG?\0", "+CREG: ", 2, 1);
-
-        if (status == NetRegStatus::REGISTERED_TO_HOME_NETWORK || status == NetRegStatus::REGISTERED_ROAMING)
-        {
-            registered_to_network = true;
-        }
-
-        else
-        {
-            Serial.print(".");
-        }
-
         retry_count++;
         delay(3000);
-    }
+
+    } while (!registered_to_network && retry_count < 20);
 
     return registered_to_network;
 }
