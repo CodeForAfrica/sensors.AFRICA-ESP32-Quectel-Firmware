@@ -25,13 +25,13 @@ void setup_webserver()
             { request->send(LittleFS, "/style.css"); });
   server.on("/style.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/style.min.css"); });
-  server.on("/scripts.min.js", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(LittleFS, "/scripts.min.js"); });
+  server.on("/script.min.js", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/script.min.js"); });
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/index.html"); });
   server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
             { if(request->hasParam("skip")){DeviceConfigState.captivePortalAccessed=true;} //? we don't care about the value of skip, so no need to parse it
-               else{request->send(LittleFS, "/config.html"); } });
+              else{request->send(LittleFS, "/config.html"); } });
   server.on("/device-details.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/device-details.html"); });
   server.on("/ota.html", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -40,8 +40,10 @@ void setup_webserver()
             { request->send(LittleFS, "/file-system.html"); });
   server.on("/advanced-settings.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/advanced-settings.html"); });
-  server.on("/sensors_logo.png", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(200, "image/png", SENSORSAFRICA_LOGO, SENSORSAFRICA_LOGO_PNG_SIZE); });
+  // server.on("/sensors_logo.png", HTTP_GET, [](AsyncWebServerRequest *request)
+  // { request->send(200, "image/png", SENSORSAFRICA_LOGO, SENSORSAFRICA_LOGO_PNG_SIZE); });
+  server.on("/images/sensor_logo.png", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/images/sensor_logo.png", "image/png"); });
   server.on("/icons/wifi.svg", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/icons/wifi.svg", "image/svg+xml"); });
   server.on("/icons/simcard.svg", HTTP_GET, [](AsyncWebServerRequest *request)
