@@ -1,7 +1,7 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 #include "LittleFS.h"
-#include "sensors-africa-logo.h"
+// #include "sensors-africa-logo.h"
 #include "asyncserver.h"
 #include <ArduinoJson.h>
 #include "../utils/deviceconfig.h"
