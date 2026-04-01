@@ -12,7 +12,7 @@ bool validateJson(const char *input)
     return deserializeJson(doc, input, DeserializationOption::Filter(filter)) == DeserializationError::Ok;
 }
 
-static String urlDecode(const String &input)
+String urlDecode(const String &input)
 {
     String output;
     unsigned int input_length = input.length(); // Worst case: no encoding, so length is the same
@@ -47,7 +47,7 @@ static String urlDecode(const String &input)
     return output;
 }
 
-static String normalizePath(String p)
+String normalizePath(String p)
 {
     while (p.indexOf("//") >= 0)
         p.replace("//", "/");
@@ -56,7 +56,7 @@ static String normalizePath(String p)
     return p;
 }
 
-static bool isPathTraversal(const String &p)
+bool isPathTraversal(const String &p)
 {
     return p.indexOf("..") >= 0;
 }

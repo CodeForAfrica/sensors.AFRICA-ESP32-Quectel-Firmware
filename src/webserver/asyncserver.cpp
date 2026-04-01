@@ -6,12 +6,13 @@
 #include <ArduinoJson.h>
 #include "../utils/deviceconfig.h"
 #include "../utils/wifi.h"
+#include "../utils/SD_handler.h"
+#include "../../include/helpers.h"
 
 AsyncWebServer server(80);
 extern struct_wifiInfo *wifiInfo;
 extern uint8_t count_wifiInfo;
 extern JsonDocument getCurrentSensorData();
-extern String listFiles(fs::FS &fs, String path);
 extern char ROOT_DIR[24];
 extern char AP_SSID[64];
 String pendingFileList = "{}";
@@ -184,35 +185,36 @@ void setup_webserver()
 
   server.on("/download", HTTP_GET, [](AsyncWebServerRequest *request)
             {
-    // Check for the "file" query parameter
-    if (!request->hasParam("file")) {
-      request->send(400, "text/plain", "Missing 'file' parameter");
-      return;
+    if (!request->hasParam("file"))
+    {
+        request->send(400, "text/plain", "Missing 'file' parameter");
+        return;
     }
 
-    // Retrieve and sanitize the file path
-    String filePath = request->getParam("file")->value();
-    if (!filePath.startsWith("/")) {
-      filePath = "/" + filePath;
+    String filePath = urlDecode(request->getParam("file")->value());
+    filePath = normalizePath(filePath);
+
+    if (isPathTraversal(filePath))
+    {
+        request->send(400, "text/plain", "Invalid file path");
+        return;
     }
 
-    // Verify file exists
-    if (!LittleFS.exists(filePath)) {
-      request->send(404, "text/plain", "File not found");
-      return;
+    String resolvedPath;
+    if (!resolvePath(SD,filePath, resolvedPath, String(ROOT_DIR)))
+    {
+        Serial.printf("[download] Not found. raw=%s, decoded=%s, root=%s\n",
+                      request->getParam("file")->value(), filePath.c_str(), ROOT_DIR);
+        request->send(404, "text/plain", "File not found");
+        return;
     }
 
-    // Derive a filename for the Content-Disposition header
-    String filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+    Serial.printf("[download] Serving: %s\n", resolvedPath.c_str());
+    String filename = resolvedPath.substring(resolvedPath.lastIndexOf('/') + 1);
 
-    // Create response and force download
     AsyncWebServerResponse *response =
-      request->beginResponse(LittleFS, filePath, "application/octet-stream");
-    response->addHeader(
-      "Content-Disposition",
-      "attachment; filename=\"" + filename + "\""
-    );
-
+        request->beginResponse(SD, resolvedPath, "application/octet-stream");
+    response->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
     request->send(response); });
 
   server.on("/device-details", HTTP_GET, [](AsyncWebServerRequest *request)
