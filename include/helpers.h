@@ -40,4 +40,10 @@ static void add_value2JSON_array(JsonArray arr, const char *key, T &value)
     arr.add(doc);
 }
 bool validateJson(const char *input);
+
+// Helper functions for URL decoding and path normalization
+String urlDecode(const String &input);
+String normalizePath(String p);
+bool isPathTraversal(const String &p);
+//
 #endif

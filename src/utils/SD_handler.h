@@ -259,4 +259,40 @@ static String listFiles(fs::FS &fs, String path = "/")
     return file_list;
 }
 
+static bool resolvePath(fs::FS &fs, const String &userPath, String &outResolved, const String &rootPath = "")
+{
+    if (rootPath.length() > 0)
+    {
+        String root = rootPath;
+        if (!root.endsWith("/"))
+            root += "/";
+
+        String candidate = root + (userPath.startsWith("/") ? userPath.substring(1) : userPath);
+
+        if (fs.exists(candidate))
+        {
+            outResolved = candidate;
+            return true;
+        }
+    }
+
+    if (fs.exists(userPath))
+    {
+        outResolved = userPath;
+        return true;
+    }
+
+    // if absolute, try without leading slash
+    if (userPath.startsWith("/"))
+    {
+        String withoutSlash = userPath.substring(1);
+        if (fs.exists(withoutSlash))
+        {
+            outResolved = withoutSlash;
+            return true;
+        }
+    }
+
+    return false;
+}
 #endif

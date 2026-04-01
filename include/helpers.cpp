@@ -11,3 +11,52 @@ bool validateJson(const char *input)
     JsonDocument doc, filter;
     return deserializeJson(doc, input, DeserializationOption::Filter(filter)) == DeserializationError::Ok;
 }
+
+String urlDecode(const String &input)
+{
+    String output;
+    unsigned int input_length = input.length(); // Worst case: no encoding, so length is the same
+    output.reserve(input_length);
+    for (size_t i = 0; i < input_length; i++)
+    {
+        char c = input.charAt(i);
+        if (c == '+')
+        {
+            output += ' ';
+        }
+        else if (c == '%' && i + 2 < input_length)
+        {
+            char hex[3] = {input.charAt(i + 1), input.charAt(i + 2), '\0'};
+            char *end = nullptr;
+            long decoded = strtol(hex, &end, 16);
+            if (end != hex)
+            {
+                output += (char)decoded;
+                i += 2;
+            }
+            else
+            {
+                output += c;
+            }
+        }
+        else
+        {
+            output += c;
+        }
+    }
+    return output;
+}
+
+String normalizePath(String p)
+{
+    while (p.indexOf("//") >= 0)
+        p.replace("//", "/");
+    if (!p.startsWith("/"))
+        p = "/" + p;
+    return p;
+}
+
+bool isPathTraversal(const String &p)
+{
+    return p.indexOf("..") >= 0;
+}

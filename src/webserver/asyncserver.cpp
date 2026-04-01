@@ -1,17 +1,18 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 #include "LittleFS.h"
-#include "sensors-africa-logo.h"
+// #include "sensors-africa-logo.h"
 #include "asyncserver.h"
 #include <ArduinoJson.h>
 #include "../utils/deviceconfig.h"
 #include "../utils/wifi.h"
+#include "../utils/SD_handler.h"
+#include "../../include/helpers.h"
 
 AsyncWebServer server(80);
 extern struct_wifiInfo *wifiInfo;
 extern uint8_t count_wifiInfo;
 extern JsonDocument getCurrentSensorData();
-extern String listFiles(fs::FS &fs, String path);
 extern char ROOT_DIR[24];
 extern char AP_SSID[64];
 String pendingFileList = "{}";
@@ -25,13 +26,13 @@ void setup_webserver()
             { request->send(LittleFS, "/style.css"); });
   server.on("/style.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/style.min.css"); });
-  server.on("/scripts.min.js", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(LittleFS, "/scripts.min.js"); });
+  server.on("/script.min.js", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/script.min.js"); });
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/index.html"); });
   server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
             { if(request->hasParam("skip")){DeviceConfigState.captivePortalAccessed=true;} //? we don't care about the value of skip, so no need to parse it
-               else{request->send(LittleFS, "/config.html"); } });
+              else{request->send(LittleFS, "/config.html"); } });
   server.on("/device-details.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/device-details.html"); });
   server.on("/ota.html", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -40,8 +41,10 @@ void setup_webserver()
             { request->send(LittleFS, "/file-system.html"); });
   server.on("/advanced-settings.html", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/advanced-settings.html"); });
-  server.on("/sensors_logo.png", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(200, "image/png", SENSORSAFRICA_LOGO, SENSORSAFRICA_LOGO_PNG_SIZE); });
+  // server.on("/sensors_logo.png", HTTP_GET, [](AsyncWebServerRequest *request)
+  // { request->send(200, "image/png", SENSORSAFRICA_LOGO, SENSORSAFRICA_LOGO_PNG_SIZE); });
+  server.on("/images/sensor_logo.png", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(LittleFS, "/images/sensor_logo.png", "image/png"); });
   server.on("/icons/wifi.svg", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(LittleFS, "/icons/wifi.svg", "image/svg+xml"); });
   server.on("/icons/simcard.svg", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -182,35 +185,36 @@ void setup_webserver()
 
   server.on("/download", HTTP_GET, [](AsyncWebServerRequest *request)
             {
-    // Check for the "file" query parameter
-    if (!request->hasParam("file")) {
-      request->send(400, "text/plain", "Missing 'file' parameter");
-      return;
+    if (!request->hasParam("file"))
+    {
+        request->send(400, "text/plain", "Missing 'file' parameter");
+        return;
     }
 
-    // Retrieve and sanitize the file path
-    String filePath = request->getParam("file")->value();
-    if (!filePath.startsWith("/")) {
-      filePath = "/" + filePath;
+    String filePath = urlDecode(request->getParam("file")->value());
+    filePath = normalizePath(filePath);
+
+    if (isPathTraversal(filePath))
+    {
+        request->send(400, "text/plain", "Invalid file path");
+        return;
     }
 
-    // Verify file exists
-    if (!LittleFS.exists(filePath)) {
-      request->send(404, "text/plain", "File not found");
-      return;
+    String resolvedPath;
+    if (!resolvePath(SD,filePath, resolvedPath, String(ROOT_DIR)))
+    {
+        Serial.printf("[download] Not found. raw=%s, decoded=%s, root=%s\n",
+                      request->getParam("file")->value(), filePath.c_str(), ROOT_DIR);
+        request->send(404, "text/plain", "File not found");
+        return;
     }
 
-    // Derive a filename for the Content-Disposition header
-    String filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+    Serial.printf("[download] Serving: %s\n", resolvedPath.c_str());
+    String filename = resolvedPath.substring(resolvedPath.lastIndexOf('/') + 1);
 
-    // Create response and force download
     AsyncWebServerResponse *response =
-      request->beginResponse(LittleFS, filePath, "application/octet-stream");
-    response->addHeader(
-      "Content-Disposition",
-      "attachment; filename=\"" + filename + "\""
-    );
-
+        request->beginResponse(SD, resolvedPath, "application/octet-stream");
+    response->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
     request->send(response); });
 
   server.on("/device-details", HTTP_GET, [](AsyncWebServerRequest *request)
