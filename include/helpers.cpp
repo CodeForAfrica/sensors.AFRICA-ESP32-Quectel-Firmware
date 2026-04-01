@@ -46,3 +46,17 @@ static String urlDecode(const String &input)
     }
     return output;
 }
+
+static String normalizePath(String p)
+{
+    while (p.indexOf("//") >= 0)
+        p.replace("//", "/");
+    if (!p.startsWith("/"))
+        p = "/" + p;
+    return p;
+}
+
+static bool isPathTraversal(const String &p)
+{
+    return p.indexOf("..") >= 0;
+}
