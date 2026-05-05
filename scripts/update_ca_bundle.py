@@ -1,5 +1,3 @@
-Import("env")
-
 from pathlib import Path
 import urllib.request
 
@@ -9,6 +7,18 @@ OUT = Path("src/utils/mozilla_ca_bundle.h")
 VAR_NAME = "MOZILLA_CA_BUNDLE"
 FILENAME_VAR = "MOZILLA_PEM_FILENAME"
 PEM_FILENAME = "mozillaca.pem"
+TEMPLATE = Path("ca_bundle_template.h")
+
+
+def write_template_fallback(reason: Exception):
+    print(f"CA bundle download failed: {reason}")
+    print(f"Using fallback template: {TEMPLATE}")
+
+    if not TEMPLATE.exists():
+        raise FileNotFoundError(f"Fallback template not found: {TEMPLATE}")
+
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def cpp_raw_string(text: str) -> str:
@@ -16,27 +26,31 @@ def cpp_raw_string(text: str) -> str:
     return f'R"CA_BUNDLE({text})CA_BUNDLE"'
 
 
-def update_ca_bundle(source, target, env):
-    print(f"Downloading CA bundle from {URL}")
+def update_ca_bundle():
+    try:
+        print(f"Downloading CA bundle from {URL}")
 
-    with urllib.request.urlopen(URL, timeout=30) as response:
-        pem = response.read().decode("utf-8")
+        with urllib.request.urlopen(URL, timeout=30) as response:
+            pem = response.read().decode("utf-8")
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
+        OUT.parent.mkdir(parents=True, exist_ok=True)
 
-    header = f"""#pragma once
+        header = f"""#pragma once
 
-#include <Arduino.h>
+    #include <Arduino.h>
 
-const char {FILENAME_VAR}[] PROGMEM = "{PEM_FILENAME}";
+    const char {FILENAME_VAR}[] PROGMEM = "{PEM_FILENAME}";
 
-const char {VAR_NAME}[] PROGMEM = {cpp_raw_string(pem)};
+    const char {VAR_NAME}[] PROGMEM = {cpp_raw_string(pem)};
 
-const unsigned int MOZILLA_CA_BUNDLE_LEN = sizeof({VAR_NAME}) - 1;
-"""
+    const unsigned int MOZILLA_CA_BUNDLE_LEN = sizeof({VAR_NAME}) - 1;
+    """
 
-    OUT.write_text(header, encoding="utf-8")
-    print(f"Wrote {OUT}")
+        OUT.write_text(header, encoding="utf-8")
+        print(f"Wrote {OUT}")
+
+    except Exception as exc:
+        write_template_fallback(exc)
 
 
-env.AddPreAction("buildprog", update_ca_bundle)
+update_ca_bundle()
