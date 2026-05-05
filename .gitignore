@@ -7,3 +7,6 @@
 .DS_Store
 
 test
+
+#  Ignore the generated CA bundle header file
+src/utils/*ca_bundle.h
