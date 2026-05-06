@@ -60,3 +60,64 @@ bool isPathTraversal(const String &p)
 {
     return p.indexOf("..") >= 0;
 }
+
+bool parseURL(const char *url, char *host, size_t hostLen,
+              uint16_t &port, char *path, size_t pathLen,
+              bool &useSSL)
+{
+    useSSL = false;
+    port = 80;
+
+    const char *urlPtr = url;
+
+    // Check for protocol
+    if (strncmp(urlPtr, "http://", 7) == 0)
+    {
+        urlPtr += 7;
+        port = 80;
+    }
+    else if (strncmp(urlPtr, "https://", 8) == 0)
+    {
+        urlPtr += 8;
+        port = 443;
+        useSSL = true;
+    }
+
+    // Find host end (either ':', '/', or end of string)
+    const char *hostEnd = urlPtr;
+    while (*hostEnd && *hostEnd != ':' && *hostEnd != '/')
+    {
+        hostEnd++;
+    }
+
+    // Copy host
+    size_t hostLength = hostEnd - urlPtr;
+    if (hostLength >= hostLen)
+        hostLength = hostLen - 1;
+    strncpy(host, urlPtr, hostLength);
+    host[hostLength] = '\0';
+
+    urlPtr = hostEnd;
+
+    // Check for port
+    if (*urlPtr == ':')
+    {
+        urlPtr++;
+        port = atoi(urlPtr);
+        while (*urlPtr && *urlPtr != '/')
+            urlPtr++;
+    }
+
+    // Get path
+    if (*urlPtr == '\0' || *urlPtr != '/')
+    {
+        strcpy(path, "/");
+    }
+    else
+    {
+        strncpy(path, urlPtr, pathLen - 1);
+        path[pathLen - 1] = '\0';
+    }
+
+    return true;
+}

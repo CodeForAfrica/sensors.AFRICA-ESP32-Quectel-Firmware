@@ -45,5 +45,10 @@ bool validateJson(const char *input);
 String urlDecode(const String &input);
 String normalizePath(String p);
 bool isPathTraversal(const String &p);
+
+// URL parser
+bool parseURL(const char *url, char *host, size_t hostLen,
+              uint16_t &port, char *path, size_t pathLen,
+              bool &useSSL);
 //
 #endif
