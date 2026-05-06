@@ -516,6 +516,16 @@ void http_preconfig()
     sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK");
 }
 
+/// @brief Preconfigure HTTPS settings for secure connections
+void https_preconfig()
+{
+    sendAndCheck("AT+QSSLCFG=\"sslversion\",1,4", "OK");
+    sendAndCheck("AT+QSSLCFG=\"ciphersuite\",1,0XFFFF", "OK"); // Enable all ciphersuites; can be configured to specific ciphersuites if needed
+    sendAndCheck("AT+QSSLCFG=\"seclevel\",1,2", "OK");
+    sendAndCheck("AT+QSSLCFG=\"ignorelocaltime\",1,1", "OK");
+    sendAndCheck("AT+QSSLCFG=\"cacert\",1,\"UFS:mozillaca.pem\"", "OK");
+}
+
 /// @brief Send HTTP POST request via Quectel module
 /// @param url Target URL without protocol
 /// @param headers Array of HTTP headers
