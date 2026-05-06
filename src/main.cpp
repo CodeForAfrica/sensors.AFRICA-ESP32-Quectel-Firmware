@@ -1519,6 +1519,10 @@ void initializeAndConfigGSM()
         {
             Serial.println("Failed to write to file");
         }
+        else
+        {
+            setCACert(MOZILLA_PEM_FILENAME);
+        }
     }
 
     // GSM initialization successful

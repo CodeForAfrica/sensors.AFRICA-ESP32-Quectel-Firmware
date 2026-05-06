@@ -594,6 +594,17 @@ bool GsmWriteFile(const char *filename, const char *content)
     return file_written;
 }
 
+bool setCACert(const char *certPath, uint8_t sslCtxID = 1)
+{
+
+    char cmd[64];
+    // AT+QSSLCFG="cacert",1,"UFS:cacert.pem"
+
+    snprintf(cmd, sizeof(cmd), "AT+QSSLCFG=\"cacert\",%d,\"%s\"", sslCtxID, certPath);
+
+    return sendAndCheck(cmd);
+}
+
 /// @brief Preconfigure HTTP settings
 void http_preconfig()
 {
@@ -610,7 +621,6 @@ void https_preconfig()
     sendAndCheck("AT+QSSLCFG=\"ciphersuite\",1,0XFFFF", "OK"); // Enable all ciphersuites; can be configured to specific ciphersuites if needed
     sendAndCheck("AT+QSSLCFG=\"seclevel\",1,2", "OK");
     sendAndCheck("AT+QSSLCFG=\"ignorelocaltime\",1,1", "OK");
-    sendAndCheck("AT+QSSLCFG=\"cacert\",1,\"UFS:mozillaca.pem\"", "OK");
 }
 
 /// @brief Send HTTP POST request via Quectel module
