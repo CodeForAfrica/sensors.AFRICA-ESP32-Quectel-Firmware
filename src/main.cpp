@@ -60,6 +60,7 @@
 #include "utils/deviceconfig.h"
 #include "webserver/asyncserver.h"
 #include "utils/mqtt_wifi.h"
+#include "utils/mozilla_ca_bundle.h"
 
 size_t max_wifi_hotspots_size = sizeof(struct_wifiInfo) * 20;
 struct struct_wifiInfo *wifiInfo = (struct_wifiInfo *)malloc(max_wifi_hotspots_size);
@@ -303,8 +304,8 @@ void setup()
     // Device configuration
 
     if (DeviceConfigState.configurationRequired)
-    { 
-        DeviceConfigState.configurationRequired=false; //? This will be reset by saveConfig()
+    {
+        DeviceConfigState.configurationRequired = false; //? This will be reset by saveConfig()
         // Step 2: Start WiFi AP
         WiFi.softAP(AP_SSID, AP_PWD);
         Serial.print("struct_wifiInfo* wifiInfo size: ");
@@ -1507,6 +1508,18 @@ void initializeAndConfigGSM()
     DeviceConfigState.gsmConnected = GSM_init();
     if (!DeviceConfigState.gsmConnected)
         return;
+
+    // Check if CA certificate is present in the filesytem
+    if (!GsmFileCheck(MOZILLA_PEM_FILENAME))
+    {
+        Serial.print("Writing modem file: ");
+        Serial.println(MOZILLA_PEM_FILENAME);
+
+        if (!GsmWriteFile(MOZILLA_PEM_FILENAME, MOZILLA_CA_BUNDLE))
+        {
+            Serial.println("Failed to write to file");
+        }
+    }
 
     // GSM initialization successful
     GSM_CONNECTED = true; // TODO: Refactor to remove global variable and use state struct instead

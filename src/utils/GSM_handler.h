@@ -507,6 +507,93 @@ void flushSerial()
     }
 }
 
+/// @brief Check if a file exists on the GSM module's filesystem
+/// @param filename Name of the file to check
+bool GsmFileCheck(const char *filename)
+{
+
+    char cmd[64];
+    // AT+QFLST=<name_pattern>
+    snprintf(cmd, sizeof(cmd), "AT+QFLST=\"UFS:%s\"", filename);
+    bool exists = sendAndCheck(cmd, "OK");
+    return exists;
+}
+
+/// @brief Write content to a file on the GSM module's filesystem
+/// @param filename Name of the file to write to
+/// @param content Content to write to the file
+/// @return true if file was successfully written
+bool GsmWriteFile(const char *filename, const char *content)
+{
+    bool file_written = false;
+
+    String file_handle_number = "";
+    char cmd[64];
+    snprintf(cmd, 64, "AT+QFOPEN=\"%s\"", filename);
+    if (!sendAndCheck(cmd, "OK", file_handle_number))
+    {
+        log_e("Could not open file for writing");
+        log_i("QFOPEN response: %s", file_handle_number.c_str());
+        return false;
+    }
+    else
+    {
+
+        file_handle_number = file_handle_number.substring(file_handle_number.indexOf("+QFOPEN:"));
+        file_handle_number = file_handle_number.substring(file_handle_number.indexOf(":") + 1, file_handle_number.indexOf("\r"));
+        log_i("QFOPEN substring:%s", file_handle_number.c_str());
+        file_handle_number = file_handle_number.toInt();
+        log_i("Extracted file handle num: %s", file_handle_number.c_str());
+
+        size_t file_size = strlen(content);
+        Serial.print("File size: ");
+        Serial.println(file_size);
+
+        snprintf(cmd, 64, "AT+QFWRITE=%s,%d", file_handle_number, file_size);
+        if (!sendAndCheck(cmd, "CONNECT"))
+        {
+            log_e("Failed to initiate file write");
+            return false;
+        }
+        else
+        {
+
+            size_t sentbytes = GSMSerial.write(content, file_size);
+
+            if (sentbytes != file_size)
+            {
+                log_e("Failed to write to file bytes %d. Only %d bytes written", file_size, sentbytes);
+            }
+            else
+            {
+                file_written = true;
+            }
+
+            snprintf(cmd, 64, "AT+QFSEEK=%s,0,0", file_handle_number);
+            if (!sendAndCheck(cmd))
+            {
+                log_e("Failed to set seek position");
+            }
+            // Read the file
+            snprintf(cmd, 64, "AT+QFREAD=%s,%d", file_handle_number, file_size);
+            if (sendAndCheck(cmd, "CONNECT"))
+            {
+                String res = GSMSerial.readString();
+                log_i("%s", res.c_str());
+            }
+
+            // close the file
+            snprintf(cmd, 64, "AT+QFCLOSE=%s", file_handle_number);
+            if (!sendAndCheck(cmd))
+            {
+                log_e("Failed to close file: %s", filename);
+            }
+        }
+    }
+
+    return file_written;
+}
+
 /// @brief Preconfigure HTTP settings
 void http_preconfig()
 {
