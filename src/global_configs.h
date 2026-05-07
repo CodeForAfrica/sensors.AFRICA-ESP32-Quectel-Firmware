@@ -2,7 +2,7 @@
 #define GLOBAL_CONFIGS_H
 
 static const char HOST_CFA[] = "staging.api.sensors.africa";
-static const char URL_CFA[] = "/v1/push-sensor-data/";
+static const char PATH_CFA[] = "/v1/push-sensor-data/"; 
 #define PORT_CFA 80
 
 static const char SENSOR_PREFIX[] = "ESP32-";

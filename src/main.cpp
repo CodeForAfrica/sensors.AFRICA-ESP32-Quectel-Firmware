@@ -196,7 +196,7 @@ void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
 void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPI_PIN pin, size_t size);
-bool sendData(const char *data, const int _pin, const char *host, const char *url);
+bool sendData(const char *data, const int _pin, const char *host, const char *path);
 datetimetz extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
 String getRTCdatetimetz(const char *format, char *timezone);
@@ -851,10 +851,10 @@ String getRTCdatetimetz(const char *format, char *timezone)
     @param data : JSON payload to send
     @param _pin : pin number of the sensor as configured in the API
     @param host : host name of the server
-    @param url : url path to send the data
+    @param path : path on the server to send the data
     @return: true if data is sent successfully, false otherwise
 **/
-bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const char *url)
+bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const char *path)
 {
     if (!DeviceConfigState.wifiConnected || !DeviceConfigState.wifiInternetAvailable)
     {
@@ -885,7 +885,7 @@ bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const c
 
     // Build HTTP POST request
     String http_request = "POST ";
-    http_request += url;
+    http_request += path;
     http_request += " HTTP/1.1\r\n";
     http_request += "Host: ";
     http_request += host;
@@ -946,6 +946,11 @@ bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const c
     }
 }
 
+// bool sendDataViaGSM(const char *data, const int _pin, const char *url)
+// {
+//     return sendDataViaGSM(data, _pin, GSM_HOST, url);
+// }
+
 /*****************************************************************
  * send data via GSM                                             *
  *****************************************************************/
@@ -954,10 +959,10 @@ bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const c
     @param data : JSON payload to send
     @param _pin : pin number of the sensor as configured in the API
     @param host : host name of the server
-    @param url : url path to send the data
+    @param path : path on the server to send the data
     @return: true if data is sent successfully, false otherwise
 **/
-bool sendDataViaGSM(const char *data, const int _pin, const char *host, const char *url)
+bool sendDataViaGSM(const char *data, const int _pin, const char *host, const char *path)
 {
     if (!gsm_capable || !GPRS_CONNECTED)
     {
@@ -967,7 +972,7 @@ bool sendDataViaGSM(const char *data, const int _pin, const char *host, const ch
 
     char gprs_url[64] = {};
     strcat(gprs_url, host);
-    strcat(gprs_url, url);
+    strcat(gprs_url, path);
 
     char pin[4];
     itoa(_pin, pin, 10);
@@ -1015,7 +1020,7 @@ bool sendDataViaGSM(const char *data, const int _pin, const char *host, const ch
     @return: true if data is sent successfully via any method, false otherwise
     @note: Respects CommunicationPriority order and attempts fallback method if primary fails
 **/
-bool sendData(const char *data, const int _pin, const char *host, const char *url)
+bool sendData(const char *data, const int _pin, const char *host, const char *path)
 {
     bool send_result = false;
 
@@ -1033,7 +1038,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
         if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
         {
             Serial.println("SendData: Attempting WiFi (preferred)...");
-            send_result = sendDataViaWiFi(data, _pin, host, url);
+            send_result = sendDataViaWiFi(data, _pin, host, path);
 
             if (send_result)
             {
@@ -1046,7 +1051,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
 
             if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
             {
-                send_result = sendDataViaGSM(data, _pin, host, url);
+                send_result = sendDataViaGSM(data, _pin, host, path);
                 if (send_result)
                 {
                     CommsManagerState.wifiFailCount = 0; // Reset on success
@@ -1061,7 +1066,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
         if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
         {
             Serial.println("SendData: Attempting GSM (preferred)...");
-            send_result = sendDataViaGSM(data, _pin, host, url);
+            send_result = sendDataViaGSM(data, _pin, host, path);
 
             if (send_result)
             {
@@ -1074,7 +1079,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
 
             if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
             {
-                send_result = sendDataViaWiFi(data, _pin, host, url);
+                send_result = sendDataViaWiFi(data, _pin, host, path);
                 if (send_result)
                 {
                     CommsManagerState.gsmFailCount = 0; // Reset on success
@@ -1090,7 +1095,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
         if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
         {
             Serial.println("SendData: Attempting WiFi (no preferred)...");
-            send_result = sendDataViaWiFi(data, _pin, host, url);
+            send_result = sendDataViaWiFi(data, _pin, host, path);
             if (send_result)
                 return true;
             CommsManagerState.wifiFailCount++;
@@ -1099,7 +1104,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
         if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
         {
             Serial.println("SendData: Attempting GSM (no preferred)...");
-            send_result = sendDataViaGSM(data, _pin, host, url);
+            send_result = sendDataViaGSM(data, _pin, host, path);
             if (send_result)
                 return true;
             CommsManagerState.gsmFailCount++;
@@ -1291,7 +1296,7 @@ void readSendDelete(const char *datafile)
             }
             // Attempt send payload
             // Serial.println("Attempting to send data from SD card: " + data);
-            if (!sendData(data.c_str(), api_pin, HOST_CFA, URL_CFA))
+            if (!sendData(data.c_str(), api_pin, HOST_CFA, PATH_CFA))
             {
                 // store data in temp file
                 appendFile(SD, tempFile, data.c_str(), true);
@@ -1432,7 +1437,7 @@ void sendFromMemoryLog(LOGGER &logger)
             int api_pin = doc["API_PIN"] | -1;
             if (api_pin != -1)
             {
-                if (!sendData(logger.DATA_STORE[i], api_pin, HOST_CFA, URL_CFA))
+                if (!sendData(logger.DATA_STORE[i], api_pin, HOST_CFA, PATH_CFA))
                 {
                     // Append to file for sending later // ToDo: Check the state of DeviceConfigState.sdCardInitialized before attempting to write to SD card
                     appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
