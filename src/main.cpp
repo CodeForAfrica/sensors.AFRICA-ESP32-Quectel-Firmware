@@ -986,7 +986,7 @@ bool sendDataViaGSM(const char *data, const int _pin, const char *url)
 #ifdef QUECTEL
     uint8_t statuscode = 0;
 
-    char http_headers[3][40] = {};
+    char http_headers[3][256] = {};
     strcat(http_headers[0], "X-PIN: ");
     strcat(http_headers[0], pin);
 
@@ -1531,7 +1531,17 @@ void initializeAndConfigGSM()
         }
         else
         {
-            setCACert(MOZILLA_PEM_FILENAME);
+            if (!setCACert(MOZILLA_PEM_FILENAME))
+            {
+                Serial.println("Failed to set CA certificate for secure connections");
+            }
+        }
+    }
+    else
+    {
+        if (!setCACert(MOZILLA_PEM_FILENAME))
+        {
+            Serial.println("Failed to set CA certificate for secure connections");
         }
     }
 
