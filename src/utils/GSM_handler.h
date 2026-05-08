@@ -976,12 +976,20 @@ void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS)
         Serial.println("HTTP POST QURC not received!");
         return;
     }
-
     if (extractText(qurc, expected_reply, HTTP_RESPONSE_STATUS, 4, ','))
     {
         Serial.print("HTTP status code: ");
         Serial.println(HTTP_RESPONSE_STATUS);
     }
+
+    // Try extracting until new line if comma extraction fails, to account for potential URC format differences
+    // URC repsonse may be +QHTTPPOST: 0,201\r\n without the content length like +QHTTPPOST: 0,201,83 with content length;
+    else if (extractText(qurc, expected_reply, HTTP_RESPONSE_STATUS, 4, '\r'))
+    {
+        Serial.print("HTTP status code: ");
+        Serial.println(HTTP_RESPONSE_STATUS);
+    }
+
     else
     {
         Serial.println("Could not extract HTTP response status code");
