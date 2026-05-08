@@ -646,11 +646,7 @@ void QUECTEL_POST(const char *url, char headers[][256], int header_size, const c
 {
 
     char HTTP_CFG[256] = {};
-    strcpy(HTTP_CFG, "AT+QHTTPCFG=\"url\",\"");
-    strcat(HTTP_CFG, url);
-    strcat(HTTP_CFG, "\"");
-    Serial.print("Quectel URL config: ");
-    Serial.println(HTTP_CFG);
+    snprintf(HTTP_CFG, sizeof(HTTP_CFG), "AT+QHTTPCFG=\"url\",\"%s\"", url);
     sendAndCheck(HTTP_CFG, "OK", 2000);
 
     // Setting request headers
@@ -659,10 +655,7 @@ void QUECTEL_POST(const char *url, char headers[][256], int header_size, const c
 
     for (int i = 0; i < header_size; i++)
     {
-        memset(HTTP_CFG, 0, sizeof(HTTP_CFG));
-        strcpy(HTTP_CFG, "AT+QHTTPCFG=\"header\",\"");
-        strcat(HTTP_CFG, headers[i]);
-        strcat(HTTP_CFG, "\"");
+        snprintf(HTTP_CFG, sizeof(HTTP_CFG), "AT+QHTTPCFG=\"header\",\"%s\"", headers[i]);
         if (sendAndCheck(HTTP_CFG, "OK"))
         {
             Serial.println("Header set successfully");
@@ -976,20 +969,14 @@ void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS)
         Serial.println("HTTP POST QURC not received!");
         return;
     }
-    if (extractText(qurc, expected_reply, HTTP_RESPONSE_STATUS, 4, ','))
+    // Try extracting with comma first, then newline if comma fails
+    // URC response may be +QHTTPPOST: 0,201\r\n (no length) or +QHTTPPOST: 0,201,83 (with length)
+    if (extractText(qurc, expected_reply, HTTP_RESPONSE_STATUS, 4, ',') ||
+        extractText(qurc, expected_reply, HTTP_RESPONSE_STATUS, 4, '\r'))
     {
-        Serial.print("HTTP status code: ");
+        Serial.print("HTTP(S) responsestatus code: ");
         Serial.println(HTTP_RESPONSE_STATUS);
     }
-
-    // Try extracting until new line if comma extraction fails, to account for potential URC format differences
-    // URC repsonse may be +QHTTPPOST: 0,201\r\n without the content length like +QHTTPPOST: 0,201,83 with content length;
-    else if (extractText(qurc, expected_reply, HTTP_RESPONSE_STATUS, 4, '\r'))
-    {
-        Serial.print("HTTP status code: ");
-        Serial.println(HTTP_RESPONSE_STATUS);
-    }
-
     else
     {
         Serial.println("Could not extract HTTP response status code");
