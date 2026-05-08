@@ -107,6 +107,7 @@ bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
 void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
 void http_preconfig();
+void https_preconfig();
 void GSM_sleep();
 void troubleshoot_GSM();
 String getNetworkName();
@@ -463,6 +464,7 @@ bool GPRS_init()
     {
         Serial.println("GPRS initialized!");
         http_preconfig();
+        https_preconfig();
     }
     return GPRS_CONNECTED;
 }
@@ -515,8 +517,7 @@ bool GsmFileCheck(const char *filename)
     char cmd[64];
     // AT+QFLST=<name_pattern>
     snprintf(cmd, sizeof(cmd), "AT+QFLST=\"UFS:%s\"", filename);
-    bool exists = sendAndCheck(cmd, "OK");
-    return exists;
+    return sendAndCheck(cmd, filename);
 }
 
 /// @brief Write content to a file on the GSM module's filesystem
@@ -532,8 +533,8 @@ bool GsmWriteFile(const char *filename, const char *content)
     snprintf(cmd, 64, "AT+QFOPEN=\"%s\"", filename);
     if (!sendAndCheck(cmd, "OK", file_handle_number))
     {
-        log_e("Could not open file for writing");
-        log_i("QFOPEN response: %s", file_handle_number.c_str());
+        Serial.println("Could not open file for writing");
+        Serial.printf("QFOPEN response: %s\n", file_handle_number.c_str());
         return false;
     }
     else
@@ -541,9 +542,9 @@ bool GsmWriteFile(const char *filename, const char *content)
 
         file_handle_number = file_handle_number.substring(file_handle_number.indexOf("+QFOPEN:"));
         file_handle_number = file_handle_number.substring(file_handle_number.indexOf(":") + 1, file_handle_number.indexOf("\r"));
-        log_i("QFOPEN substring:%s", file_handle_number.c_str());
+        Serial.printf("QFOPEN substring:%s", file_handle_number.c_str());
         file_handle_number = file_handle_number.toInt();
-        log_i("Extracted file handle num: %s", file_handle_number.c_str());
+        Serial.printf("Extracted file handle num: %s", file_handle_number.c_str());
 
         size_t file_size = strlen(content);
         Serial.print("File size: ");
@@ -552,7 +553,7 @@ bool GsmWriteFile(const char *filename, const char *content)
         snprintf(cmd, 64, "AT+QFWRITE=%s,%d", file_handle_number, file_size);
         if (!sendAndCheck(cmd, "CONNECT"))
         {
-            log_e("Failed to initiate file write");
+            Serial.println("Failed to initiate file write");
             return false;
         }
         else
@@ -562,7 +563,7 @@ bool GsmWriteFile(const char *filename, const char *content)
 
             if (sentbytes != file_size)
             {
-                log_e("Failed to write to file bytes %d. Only %d bytes written", file_size, sentbytes);
+                Serial.printf("Failed to write to file bytes %d. Only %d bytes written", file_size, sentbytes);
             }
             else
             {
@@ -572,21 +573,21 @@ bool GsmWriteFile(const char *filename, const char *content)
             snprintf(cmd, 64, "AT+QFSEEK=%s,0,0", file_handle_number);
             if (!sendAndCheck(cmd))
             {
-                log_e("Failed to set seek position");
+                Serial.println("Failed to set seek position");
             }
             // Read the file
             snprintf(cmd, 64, "AT+QFREAD=%s,%d", file_handle_number, file_size);
             if (sendAndCheck(cmd, "CONNECT"))
             {
                 String res = GSMSerial.readString();
-                log_i("%s", res.c_str());
+                Serial.printf("QFREAD response: %s\n", res.c_str());
             }
 
             // close the file
             snprintf(cmd, 64, "AT+QFCLOSE=%s", file_handle_number);
             if (!sendAndCheck(cmd))
             {
-                log_e("Failed to close file: %s", filename);
+                Serial.printf("Failed to close file: %s\n", filename);
             }
         }
     }
@@ -600,7 +601,7 @@ bool setCACert(const char *certPath, uint8_t sslCtxID = 1)
     char cmd[64];
     // AT+QSSLCFG="cacert",1,"UFS:cacert.pem"
 
-    snprintf(cmd, sizeof(cmd), "AT+QSSLCFG=\"cacert\",%d,\"%s\"", sslCtxID, certPath);
+    snprintf(cmd, sizeof(cmd), "AT+QSSLCFG=\"cacert\",%d,\"UFS:%s\"", sslCtxID, certPath);
 
     return sendAndCheck(cmd);
 }
@@ -612,15 +613,26 @@ void http_preconfig()
     sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK");
     sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK");
     sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK");
+    sendAndCheck("AT+QHTTPCFG=\"sslctxid\",1", "OK");
 }
 
 /// @brief Preconfigure HTTPS settings for secure connections
 void https_preconfig()
 {
-    sendAndCheck("AT+QSSLCFG=\"sslversion\",1,4", "OK");
+    sendAndCheck("AT+QSSLCFG=\"sslversion\",1,3", "OK");
     sendAndCheck("AT+QSSLCFG=\"ciphersuite\",1,0XFFFF", "OK"); // Enable all ciphersuites; can be configured to specific ciphersuites if needed
-    sendAndCheck("AT+QSSLCFG=\"seclevel\",1,2", "OK");
+    sendAndCheck("AT+QSSLCFG=\"seclevel\",1,1", "OK");
     sendAndCheck("AT+QSSLCFG=\"ignorelocaltime\",1,1", "OK");
+    sendAndCheck("AT+QSSLCFG=\"sni\",1,1", "OK");
+    // check current Certificate configuration
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "AT+QSSLCFG=\"cacert\",1"); // Query current CA cert config for SSL context ID 1
+
+    String res;
+    if (sendAndCheck(cmd, "OK", res))
+    {
+        Serial.printf("Current CA cert config: %s\n", res.c_str());
+    }
 }
 
 /// @brief Send HTTP POST request via Quectel module
@@ -630,20 +642,20 @@ void https_preconfig()
 /// @param data Request body data
 /// @param data_length Length of request body
 /// @param response_status HTTP response status code
-void QUECTEL_POST(const char *url, char headers[][40], int header_size, const char *data, size_t data_length, uint8_t &response_status)
+void QUECTEL_POST(const char *url, char headers[][256], int header_size, const char *data, size_t data_length, uint8_t &response_status)
 {
-    // Setting request headers
-    // Headers sent in format 0: headers are sent before post body
-    // (Format 1 would send headers as part of the body)
 
-    char HTTP_CFG[128] = {};
-    strcpy(HTTP_CFG, "AT+QHTTPCFG=\"url\",\"http://"); // protocol must be set before URL
+    char HTTP_CFG[256] = {};
+    strcpy(HTTP_CFG, "AT+QHTTPCFG=\"url\",\"");
     strcat(HTTP_CFG, url);
     strcat(HTTP_CFG, "\"");
     Serial.print("Quectel URL config: ");
     Serial.println(HTTP_CFG);
-
     sendAndCheck(HTTP_CFG, "OK", 2000);
+
+    // Setting request headers
+    // Headers sent in format 0: headers are sent before post body
+    // (Format 1 would send headers as part of the body)
 
     for (int i = 0; i < header_size; i++)
     {
