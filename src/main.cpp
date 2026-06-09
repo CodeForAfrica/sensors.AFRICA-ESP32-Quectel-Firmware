@@ -88,6 +88,7 @@ bool SD_Attached = false;
 
 char ROOT_DIR[24] = {};
 char BASE_SENSORS_DATA_DIR[20] = "/SENSORSDATA";
+const char TESTING_SENSORS_DATA_DIR[] = "/TESTING";
 char CURRENT_SENSORS_DATA_DIR[128] = {};
 char SENSORS_JSON_DATA_PATH[128] = {};
 char SENSORS_CSV_DATA_PATH[128] = {};
@@ -1126,23 +1127,63 @@ void init_memory_loggers()
     CSV_PAYLOAD_LOGGER.type = DATA_LOGGERS::CSV;
 }
 
+static bool activeApiHostEquals(const char *host)
+{
+    return DeviceConfig.active_api_host[0] != '\0' && host[0] != '\0' && strcmp(DeviceConfig.active_api_host, host) == 0;
+}
+
+static bool isActiveProductionHost()
+{
+    return activeApiHostEquals(DeviceConfig.production_host) || activeApiHostEquals(PRODUCTION_HOST_CFA);
+}
+
+static bool isActiveStagingHost()
+{
+    return activeApiHostEquals(DeviceConfig.staging_host) || activeApiHostEquals(STAGING_HOST_CFA);
+}
+
 /// @brief Init directories for logging files
 void init_SD_loggers()
 {
     // Root directory
     createDir(SD, ROOT_DIR);
 
+    char sensors_data_root_dir[128] = {};
+    snprintf(sensors_data_root_dir, sizeof(sensors_data_root_dir), "%s%s", ROOT_DIR, BASE_SENSORS_DATA_DIR);
+    createDir(SD, sensors_data_root_dir); // Create base sensor directory "/ESP_CHIP_ID/SENSORSDATA"
+
+    bool use_testing_data_dir = isActiveStagingHost();
+    char sensors_data_parent_dir[128] = {};
+    strcpy(sensors_data_parent_dir, sensors_data_root_dir);
+
+    if (use_testing_data_dir)
+    {
+        strcat(sensors_data_parent_dir, TESTING_SENSORS_DATA_DIR);
+        createDir(SD, sensors_data_parent_dir); // Create testing directory "/ESP_CHIP_ID/SENSORSDATA/TESTING"
+    }
+
+    bool use_testing_failed_store = !isActiveProductionHost();
+    char failed_send_payloads_parent_dir[128] = {};
+
+    if (use_testing_failed_store)
+    {
+        snprintf(failed_send_payloads_parent_dir, sizeof(failed_send_payloads_parent_dir), "%s%s", sensors_data_root_dir, TESTING_SENSORS_DATA_DIR);
+        createDir(SD, failed_send_payloads_parent_dir);
+    }
+    else
+    {
+        strcpy(failed_send_payloads_parent_dir, sensors_data_root_dir);
+    }
+
+    // Init failed-payload path before the calendar check so retry storage follows the active API host.
+    snprintf(SENSORS_FAILED_DATA_SEND_STORE_PATH, sizeof(SENSORS_FAILED_DATA_SEND_STORE_PATH), "%s/%s",
+             failed_send_payloads_parent_dir, SENSORS_FAILED_DATA_SEND_STORE_FILE);
+
     if (current_year != 0 && current_month != 0)
     {
-        char _year[4] = {};
-        strcpy(CURRENT_SENSORS_DATA_DIR, ROOT_DIR);
-        strcat(CURRENT_SENSORS_DATA_DIR, BASE_SENSORS_DATA_DIR);
-
-        createDir(SD, CURRENT_SENSORS_DATA_DIR); // Create base sensor directory "/ESP_CHIP_ID/SENSORSDATA"
-
-        itoa(current_year, _year, 10);
-        strcat(CURRENT_SENSORS_DATA_DIR, "/");
-        strcat(CURRENT_SENSORS_DATA_DIR, _year);
+        char _year[5] = {};
+        snprintf(_year, sizeof(_year), "%d", current_year);
+        snprintf(CURRENT_SENSORS_DATA_DIR, sizeof(CURRENT_SENSORS_DATA_DIR), "%s/%s", sensors_data_parent_dir, _year);
 
         createDir(SD, CURRENT_SENSORS_DATA_DIR); // Create year directory "/ESP_CHIP_ID/SENSORSDATA/2025"
     }
@@ -1154,20 +1195,15 @@ void init_SD_loggers()
     }
 
     memset(SENSORS_JSON_DATA_PATH, 0, sizeof(SENSORS_JSON_DATA_PATH));
-    char month[3] = {};
+    memset(SENSORS_CSV_DATA_PATH, 0, sizeof(SENSORS_CSV_DATA_PATH));
+    char month[4] = {};
     getMonthName(current_month, month);
 
     // Update sensors JSON data path
-    strcpy(SENSORS_JSON_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
-    strcat(SENSORS_JSON_DATA_PATH, "/");
-    strcat(SENSORS_JSON_DATA_PATH, month);
-    strcat(SENSORS_JSON_DATA_PATH, ".txt");
+    snprintf(SENSORS_JSON_DATA_PATH, sizeof(SENSORS_JSON_DATA_PATH), "%s/%s.txt", CURRENT_SENSORS_DATA_DIR, month);
 
     // Update sensors CSV data path
-    strcpy(SENSORS_CSV_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
-    strcat(SENSORS_CSV_DATA_PATH, "/");
-    strcat(SENSORS_CSV_DATA_PATH, month);
-    strcat(SENSORS_CSV_DATA_PATH, ".csv");
+    snprintf(SENSORS_CSV_DATA_PATH, sizeof(SENSORS_CSV_DATA_PATH), "%s/%s.csv", CURRENT_SENSORS_DATA_DIR, month);
 
     int _from = 0;
     int _to = 0;
@@ -1175,13 +1211,6 @@ void init_SD_loggers()
     {
         appendFile(SD, SENSORS_CSV_DATA_PATH, csv_header);
     }
-
-    // Init logger paths
-    strcpy(SENSORS_FAILED_DATA_SEND_STORE_PATH, ROOT_DIR);
-    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, BASE_SENSORS_DATA_DIR);
-    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, "/");
-    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, SENSORS_FAILED_DATA_SEND_STORE_FILE);
-    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, "\0");
 
     // write files to SD
     // writeFile(SD, SENSORS_JSON_DATA_PATH, "");                   // create file if it does not exist
@@ -1605,20 +1634,22 @@ void loadInitialConfigs()
     }
 #endif
 
+    strcpy(DeviceConfig.production_host, PRODUCTION_HOST_CFA);
+    strcpy(DeviceConfig.staging_host, STAGING_HOST_CFA);
+
 #if defined(IS_LIVE)
     DeviceConfig.isLive = (IS_LIVE != 0);
     if (DeviceConfig.isLive)
     {
-        strcpy(DeviceConfig.production_host, PRODUCTION_HOST_CFA);
         strcpy(DeviceConfig.active_api_host, DeviceConfig.production_host);
     }
     else
     {
-        strcpy(DeviceConfig.staging_host, STAGING_HOST_CFA);
         strcpy(DeviceConfig.active_api_host, DeviceConfig.staging_host);
     }
 #else
     DeviceConfig.isLive = false;
+    strcpy(DeviceConfig.active_api_host, DeviceConfig.staging_host);
 #endif
 
     // if (DeviceConfig.power_saving_mode)
