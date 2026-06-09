@@ -415,6 +415,7 @@ void loop()
     if (send_now && CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE)
     {
 
+        init_SD_loggers(); // Refresh SD paths in case DeviceConfig.isLive changed at runtime.
         // Send data from memory loggers
         sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
         // send payloads from the files that stores data that failed posting previously
@@ -1127,19 +1128,9 @@ void init_memory_loggers()
     CSV_PAYLOAD_LOGGER.type = DATA_LOGGERS::CSV;
 }
 
-static bool activeApiHostEquals(const char *host)
+static bool shouldUseTestingDataDir()
 {
-    return DeviceConfig.active_api_host[0] != '\0' && host[0] != '\0' && strcmp(DeviceConfig.active_api_host, host) == 0;
-}
-
-static bool isActiveProductionHost()
-{
-    return activeApiHostEquals(DeviceConfig.production_host) || activeApiHostEquals(PRODUCTION_HOST_CFA);
-}
-
-static bool isActiveStagingHost()
-{
-    return activeApiHostEquals(DeviceConfig.staging_host) || activeApiHostEquals(STAGING_HOST_CFA);
+    return !DeviceConfig.isLive;
 }
 
 /// @brief Init directories for logging files
@@ -1152,7 +1143,7 @@ void init_SD_loggers()
     snprintf(sensors_data_root_dir, sizeof(sensors_data_root_dir), "%s%s", ROOT_DIR, BASE_SENSORS_DATA_DIR);
     createDir(SD, sensors_data_root_dir); // Create base sensor directory "/ESP_CHIP_ID/SENSORSDATA"
 
-    bool use_testing_data_dir = isActiveStagingHost();
+    bool use_testing_data_dir = shouldUseTestingDataDir();
     char sensors_data_parent_dir[128] = {};
     strcpy(sensors_data_parent_dir, sensors_data_root_dir);
 
@@ -1162,7 +1153,7 @@ void init_SD_loggers()
         createDir(SD, sensors_data_parent_dir); // Create testing directory "/ESP_CHIP_ID/SENSORSDATA/TESTING"
     }
 
-    bool use_testing_failed_store = !isActiveProductionHost();
+    bool use_testing_failed_store = shouldUseTestingDataDir();
     char failed_send_payloads_parent_dir[128] = {};
 
     if (use_testing_failed_store)
@@ -1175,7 +1166,7 @@ void init_SD_loggers()
         strcpy(failed_send_payloads_parent_dir, sensors_data_root_dir);
     }
 
-    // Init failed-payload path before the calendar check so retry storage follows the active API host.
+    // Init failed-payload path before the calendar check so retry storage follows the runtime live/testing state.
     snprintf(SENSORS_FAILED_DATA_SEND_STORE_PATH, sizeof(SENSORS_FAILED_DATA_SEND_STORE_PATH), "%s/%s",
              failed_send_payloads_parent_dir, SENSORS_FAILED_DATA_SEND_STORE_FILE);
 
@@ -1217,6 +1208,25 @@ void init_SD_loggers()
     // writeFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, ""); // create file if it does not exist
 
     // Debug runtime logger;
+}
+
+static void updateLoggerPath(LOGGER &logger)
+{
+    switch (logger.type)
+    {
+    case DATA_LOGGERS::JSON:
+        logger.path = SENSORS_JSON_DATA_PATH;
+        break;
+    case DATA_LOGGERS::CSV:
+        logger.path = SENSORS_CSV_DATA_PATH;
+        break;
+    }
+}
+
+static void refreshLoggerPath(LOGGER &logger)
+{
+    init_SD_loggers();
+    updateLoggerPath(logger);
 }
 
 /**
@@ -1421,6 +1431,7 @@ void memoryDataLog(LOGGER &logger, const char *data)
 **/
 void fileDataLog(LOGGER &logger)
 {
+    refreshLoggerPath(logger);
     Serial.println("Logging data to file: " + String(logger.path));
     for (int i = 0; i < logger.MAX_ENTRIES; i++)
     {
