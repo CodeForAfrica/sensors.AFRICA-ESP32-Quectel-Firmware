@@ -55,7 +55,9 @@ struct DeviceConfig
     bool useWiFi;
     bool useGSM;
     bool isLive;
-    char api_host[64] = {};
+    char active_api_host[64] = {};
+    char staging_host[64] = {};
+    char production_host[64] = {};
 };
 
 extern struct DeviceConfig DeviceConfig;
@@ -216,10 +218,26 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
         useWiFiUpdated = (DeviceConfig.useWiFi != val);
         DeviceConfig.useWiFi = val;
     }
+    if (hasString(config["stagingHost"]))
+    {
+        strcpy(DeviceConfig.staging_host, STAGING_HOST_CFA);
+    }
+    if (hasString(config["productionHost"]))
+    {
+        strcpy(DeviceConfig.production_host, PRODUCTION_HOST_CFA);
+    }
     if (hasString(config["isLive"]))
     {
         bool val = (config["isLive"] == "true");
         DeviceConfig.isLive = val;
+        if (val)
+        {
+            strcpy(DeviceConfig.active_api_host, PRODUCTION_HOST_CFA);
+        }
+        else
+        {
+            strcpy(DeviceConfig.active_api_host, STAGING_HOST_CFA);
+        }
     }
 
     gsmUpdated = apnPwdUpdated || apnPwdUpdated || pinUpdated;
