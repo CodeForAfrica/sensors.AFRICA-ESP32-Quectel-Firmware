@@ -55,7 +55,7 @@ void setup_webserver()
             { request->send(LittleFS, "/icons/cell_tower.svg", "image/svg+xml"); });
   server.on("/device-id", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(200, "text/plain", AP_SSID); });
-  server.on("/device-info.json", [](AsyncWebServerRequest *request)
+  server.on("/device-config.json", [](AsyncWebServerRequest *request)
             {
         JsonDocument data=getDeviceConfig();
         String data_str;
