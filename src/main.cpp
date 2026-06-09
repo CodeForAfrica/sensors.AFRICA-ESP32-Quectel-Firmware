@@ -303,8 +303,8 @@ void setup()
     // Device configuration
 
     if (DeviceConfigState.configurationRequired)
-    { 
-        DeviceConfigState.configurationRequired=false; //? This will be reset by saveConfig()
+    {
+        DeviceConfigState.configurationRequired = false; //? This will be reset by saveConfig()
         // Step 2: Start WiFi AP
         WiFi.softAP(AP_SSID, AP_PWD);
         Serial.print("struct_wifiInfo* wifiInfo size: ");
@@ -1290,7 +1290,7 @@ void readSendDelete(const char *datafile)
             }
             // Attempt send payload
             // Serial.println("Attempting to send data from SD card: " + data);
-            if (!sendData(data.c_str(), api_pin, HOST_CFA, URL_CFA))
+            if (!sendData(data.c_str(), api_pin, DeviceConfig.api_host, URL_CFA))
             {
                 // store data in temp file
                 appendFile(SD, tempFile, data.c_str(), true);
@@ -1431,7 +1431,7 @@ void sendFromMemoryLog(LOGGER &logger)
             int api_pin = doc["API_PIN"] | -1;
             if (api_pin != -1)
             {
-                if (!sendData(logger.DATA_STORE[i], api_pin, HOST_CFA, URL_CFA))
+                if (!sendData(logger.DATA_STORE[i], api_pin, DeviceConfig.api_host, URL_CFA))
                 {
                     // Append to file for sending later // ToDo: Check the state of DeviceConfigState.sdCardInitialized before attempting to write to SD card
                     appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
@@ -1603,6 +1603,20 @@ void loadInitialConfigs()
 
         DeviceConfigState.isMQTTConfigured = true;
     }
+#endif
+
+#if defined(IS_LIVE)
+    DeviceConfig.isLive = (IS_LIVE != 0);
+    if (DeviceConfig.isLive)
+    {
+        strcpy(DeviceConfig.api_host, PRODUCTION_HOST_CFA);
+    }
+    else
+    {
+        strcpy(DeviceConfig.api_host, STAGING_HOST_CFA);
+    }
+#else
+    DeviceConfig.isLive = false;
 #endif
 
     // if (DeviceConfig.power_saving_mode)

@@ -54,6 +54,8 @@ struct DeviceConfig
     bool power_saving_mode = false;
     bool useWiFi;
     bool useGSM;
+    bool isLive;
+    char api_host[64] = {};
 };
 
 extern struct DeviceConfig DeviceConfig;
@@ -213,6 +215,11 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
         bool val = (config["useWifFi"] == "true");
         useWiFiUpdated = (DeviceConfig.useWiFi != val);
         DeviceConfig.useWiFi = val;
+    }
+    if (hasString(config["isLive"]))
+    {
+        bool val = (config["isLive"] == "true");
+        DeviceConfig.isLive = val;
     }
 
     gsmUpdated = apnPwdUpdated || apnPwdUpdated || pinUpdated;
