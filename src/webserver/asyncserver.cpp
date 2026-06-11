@@ -57,7 +57,7 @@ void setup_webserver()
             { request->send(200, "text/plain", AP_SSID); });
   server.on("/device-config.json", [](AsyncWebServerRequest *request)
             {
-        JsonDocument data=getDeviceConfig();
+        JsonDocument data=getRuntimeDeviceConfig();
         String data_str;
         serializeJson(data,data_str);
         request->send(200,"application/json",data_str); });

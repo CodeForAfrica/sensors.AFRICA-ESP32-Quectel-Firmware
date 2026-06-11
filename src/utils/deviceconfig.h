@@ -9,6 +9,7 @@
 #include "../global_configs.h"
 
 static JsonDocument getDeviceConfig();
+static JsonDocument getRuntimeDeviceConfig();
 static void updateDeviceConfig();
 static void saveConfig(JsonDocument &doc);
 static void loadSavedDeviceConfigs(bool setConfigStates = true);
@@ -72,6 +73,20 @@ static JsonDocument getDeviceConfig()
         return doc;
     }
 
+    return doc;
+}
+
+static JsonDocument getRuntimeDeviceConfig()
+{
+    JsonDocument doc;
+    doc["ssid"] = DeviceConfig.wifi_sta_ssid;
+    doc["wifiPwd"] = DeviceConfig.wifi_sta_pwd;
+    doc["apn"] = DeviceConfig.gsm_apn;
+    doc["apnPwd"] = DeviceConfig.gsm_apn_pwd;
+    doc["powerSaver"] = DeviceConfig.power_saving_mode ? "on" : "off";
+    doc["stagingHost"] = DeviceConfig.staging_host;
+    doc["productionHost"] = DeviceConfig.production_host;
+    doc["isLive"] = DeviceConfig.isLive;
     return doc;
 }
 
