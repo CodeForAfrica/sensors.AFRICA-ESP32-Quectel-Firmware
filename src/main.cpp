@@ -1614,19 +1614,24 @@ void loadInitialConfigs()
     DeviceConfig.power_saving_mode = POWER_SAVING_MODE;
 #endif
 #if defined(GSM_APN)
-    DeviceConfig.gsm_apn = GSM_APN;
+    strncpy(DeviceConfig.gsm_apn, GSM_APN, sizeof(DeviceConfig.gsm_apn) - 1);
+    DeviceConfig.gsm_apn[sizeof(DeviceConfig.gsm_apn) - 1] = '\0';
 #endif
 #if defined(GSM_APN_PWD)
-    DeviceConfig.gsm_apn_pwd = GSM_APN_PWD;
+    strncpy(DeviceConfig.gsm_apn_pwd, GSM_APN_PWD, sizeof(DeviceConfig.gsm_apn_pwd) - 1);
+    DeviceConfig.gsm_apn_pwd[sizeof(DeviceConfig.gsm_apn_pwd) - 1] = '\0';
 #endif
 #if defined(WIFI_STA_SSID)
-    DeviceConfig.wifi_sta_ssid = WIFI_STA_SSID;
+    strncpy(DeviceConfig.wifi_sta_ssid, WIFI_STA_SSID, sizeof(DeviceConfig.wifi_sta_ssid) - 1);
+    DeviceConfig.wifi_sta_ssid[sizeof(DeviceConfig.wifi_sta_ssid) - 1] = '\0';
 #endif
 #if defined(WIFI_STA_PWD)
-    DeviceConfig.wifi_sta_pwd = WIFI_STA_PWD;
+    strncpy(DeviceConfig.wifi_sta_pwd, WIFI_STA_PWD, sizeof(DeviceConfig.wifi_sta_pwd) - 1);
+    DeviceConfig.wifi_sta_pwd[sizeof(DeviceConfig.wifi_sta_pwd) - 1] = '\0';
 #endif
 #if defined(SIM_PIN)
-    DeviceConfig.sim_pin = SIM_PIN;
+    strncpy(DeviceConfig.sim_pin, SIM_PIN, sizeof(DeviceConfig.sim_pin) - 1);
+    DeviceConfig.sim_pin[sizeof(DeviceConfig.sim_pin) - 1] = '\0';
 #endif
 
     if (gsm_capable)
@@ -1640,7 +1645,6 @@ void loadInitialConfigs()
 #if defined(MQTT_BROKER) && defined(MQTT_USERNAME) && defined(MQTT_PASSWORD)
     if (MQTT_BROKER[0] != '\0' && MQTT_USERNAME[0] != '\0' && MQTT_PASSWORD[0] != '\0')
     {
-
         DeviceConfigState.isMQTTConfigured = true;
     }
 #endif
@@ -1662,6 +1666,32 @@ void loadInitialConfigs()
     DeviceConfig.isLive = false;
     strcpy(DeviceConfig.active_api_host, DeviceConfig.staging_host);
 #endif
+
+    Serial.println("DeviceConfig loaded:");
+    Serial.print("  wifi_sta_ssid: ");
+    Serial.println(DeviceConfig.wifi_sta_ssid);
+    Serial.print("  wifi_sta_pwd: ");
+    Serial.println(DeviceConfig.wifi_sta_pwd);
+    Serial.print("  gsm_apn: ");
+    Serial.println(DeviceConfig.gsm_apn);
+    Serial.print("  gsm_apn_pwd: ");
+    Serial.println(DeviceConfig.gsm_apn_pwd);
+    Serial.print("  sim_pin: ");
+    Serial.println(DeviceConfig.sim_pin);
+    Serial.print("  power_saving_mode: ");
+    Serial.println(DeviceConfig.power_saving_mode ? "true" : "false");
+    Serial.print("  useWiFi: ");
+    Serial.println(DeviceConfig.useWiFi ? "true" : "false");
+    Serial.print("  useGSM: ");
+    Serial.println(DeviceConfig.useGSM ? "true" : "false");
+    Serial.print("  isLive: ");
+    Serial.println(DeviceConfig.isLive ? "true" : "false");
+    Serial.print("  active_api_host: ");
+    Serial.println(DeviceConfig.active_api_host);
+    Serial.print("  staging_host: ");
+    Serial.println(DeviceConfig.staging_host);
+    Serial.print("  production_host: ");
+    Serial.println(DeviceConfig.production_host);
 
     // if (DeviceConfig.power_saving_mode)
     //     {
