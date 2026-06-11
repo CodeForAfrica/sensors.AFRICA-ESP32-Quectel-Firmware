@@ -1808,7 +1808,7 @@ void updateCommsPreference()
     unsigned long now = millis();
 
     // Determine if we should attempt to reconnect to failed comms
-    bool attemptWiFi = DeviceConfig.useWiFi &&
+    bool attemptWiFi = (DeviceConfig.wifi_sta_ssid[0] != '\0') && DeviceConfig.useWiFi &&
                        (CommsManagerState.wifiFailCount < CommsManagerState.MAX_RETRY_ATTEMPTS) &&
                        (now - CommsManagerState.lastWiFiAttempt > CommsManagerState.reconnectInterval);
 
@@ -2017,6 +2017,10 @@ void initComms()
         if (DeviceConfig.wifi_sta_ssid[0] == '\0')
         {
             Serial.println("DeviceConfig wifi ssid empty!");
+            if (DeviceConfig.useGSM)
+            {
+                CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+            }
         }
         else
         {
@@ -2051,7 +2055,7 @@ void initComms()
         }
     }
 
-    if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0 || (DeviceConfig.useGSM && !DeviceConfig.useWiFi))
+    if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0 || (DeviceConfig.useGSM && !DeviceConfig.useWiFi) || DeviceConfig.useGSM && CommsManagerState.preferredComm == CommsManagerState.PreferredComm::GSM)
     {
         initializeAndConfigGSM();
     }
