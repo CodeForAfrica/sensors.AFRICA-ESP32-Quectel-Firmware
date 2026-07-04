@@ -25,7 +25,7 @@ PlatformIO IDE was used to develop this firmware. For users familiar with Visual
 Files that need uploading to the flash file system section of the module are stored in the `data` folder of the project's root directory.
 To upload the files, use PlatformIO to build and flash the file system image to the correct device port.
 
-**P.S.** Before building the flash image, always run `git pull --recurse-submodules` or `git submodule update --init data` to get the latest submodule updates.
+**P.S.** Before building the flash image, always run `git pull --recurse-submodules` followed by `git submodule update --init --remote data` to get the latest files from the webserver UI `build` branch.
 
 ## SSL/TLS support - CA bundle update
 PlatformIO will download the latest CA bundle from Mozilla and generate a header file `src/utils.mozilla_ca_bundle.h` with the file name and contents of the CA bundle. This file will be updated to the Quectel's EC200U file system; `UFS` is default storage. This file is not tracked and the [template](/ca_bundle_template.h) is a guide and a fallback if there is no internet access. 
@@ -51,4 +51,3 @@ Debugging is available via the USB-UART interface. To enable debugging, uncommen
   - Ensure that the upload port is not being used by another service e.g serial monitor
   - If the JTAG port fails to upload, select the UART port instead.
   
-
