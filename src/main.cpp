@@ -60,6 +60,7 @@
 #include "utils/deviceconfig.h"
 #include "webserver/asyncserver.h"
 #include "utils/mqtt_wifi.h"
+#include "utils/mozilla_ca_bundle.h"
 
 size_t max_wifi_hotspots_size = sizeof(struct_wifiInfo) * 20;
 struct struct_wifiInfo *wifiInfo = (struct_wifiInfo *)malloc(max_wifi_hotspots_size);
@@ -195,7 +196,7 @@ void getPMSREADINGS();
 void printPM_values();
 void printPM_Error();
 void generateJSON_payload(char *res, JsonDocument &data, const char *timestamp, SensorAPI_PIN pin, size_t size);
-bool sendData(const char *data, const int _pin, const char *host, const char *url);
+bool sendData(const char *data, const int _pin, const char *url);
 datetimetz extractDateTime(String datetimeStr);
 String formatDateTime(time_t t, String timezone);
 String getRTCdatetimetz(const char *format, char *timezone);
@@ -303,8 +304,8 @@ void setup()
     // Device configuration
 
     if (DeviceConfigState.configurationRequired)
-    { 
-        DeviceConfigState.configurationRequired=false; //? This will be reset by saveConfig()
+    {
+        DeviceConfigState.configurationRequired = false; //? This will be reset by saveConfig()
         // Step 2: Start WiFi AP
         WiFi.softAP(AP_SSID, AP_PWD);
         Serial.print("struct_wifiInfo* wifiInfo size: ");
@@ -849,17 +850,28 @@ String getRTCdatetimetz(const char *format, char *timezone)
     @brief: Send data to the server via WiFi
     @param data : JSON payload to send
     @param _pin : pin number of the sensor as configured in the API
-    @param host : host name of the server
-    @param url : url path to send the data
+    @param url : full URL of the server endpoint
     @return: true if data is sent successfully, false otherwise
 **/
-bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const char *url)
+bool sendDataViaWiFi(const char *data, const int _pin, const char *url)
 {
     if (!DeviceConfigState.wifiConnected || !DeviceConfigState.wifiInternetAvailable)
     {
         Serial.println("WiFi not connected or no internet available");
         return false;
     }
+
+    char host[128];
+    char path[256];
+    uint16_t port;
+    bool useWiFiSecure;
+
+    if (!parseURL(url, host, sizeof(host), port, path, sizeof(path), useWiFiSecure))
+    {
+        log_e("URL parsing failed");
+        return false;
+    }
+    // ToDo: Refactor to use WiFiClientSecure if useWiFiSecure is true. This will require additional handling for certificates and may increase memory usage significantly, so it should be implemented with care.
 
     WiFiClient client;
     char pin[4];
@@ -884,7 +896,7 @@ bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const c
 
     // Build HTTP POST request
     String http_request = "POST ";
-    http_request += url;
+    http_request += path;
     http_request += " HTTP/1.1\r\n";
     http_request += "Host: ";
     http_request += host;
@@ -945,6 +957,11 @@ bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const c
     }
 }
 
+// bool sendDataViaGSM(const char *data, const int _pin, const char *url)
+// {
+//     return sendDataViaGSM(data, _pin, GSM_HOST, url);
+// }
+
 /*****************************************************************
  * send data via GSM                                             *
  *****************************************************************/
@@ -952,11 +969,10 @@ bool sendDataViaWiFi(const char *data, const int _pin, const char *host, const c
     @brief: Send data to the server via GSM/GPRS
     @param data : JSON payload to send
     @param _pin : pin number of the sensor as configured in the API
-    @param host : host name of the server
-    @param url : url path to send the data
+    @param url : full URL of the server endpoint
     @return: true if data is sent successfully, false otherwise
 **/
-bool sendDataViaGSM(const char *data, const int _pin, const char *host, const char *url)
+bool sendDataViaGSM(const char *data, const int _pin, const char *url)
 {
     if (!gsm_capable || !GPRS_CONNECTED)
     {
@@ -964,17 +980,13 @@ bool sendDataViaGSM(const char *data, const int _pin, const char *host, const ch
         return false;
     }
 
-    char gprs_url[64] = {};
-    strcat(gprs_url, host);
-    strcat(gprs_url, url);
-
     char pin[4];
     itoa(_pin, pin, 10);
 
 #ifdef QUECTEL
     uint8_t statuscode = 0;
 
-    char http_headers[3][40] = {};
+    char http_headers[3][256] = {};
     strcat(http_headers[0], "X-PIN: ");
     strcat(http_headers[0], pin);
 
@@ -983,7 +995,7 @@ bool sendDataViaGSM(const char *data, const int _pin, const char *host, const ch
     strcat(http_headers[1], esp_chipid);
     strcat(http_headers[2], "Content-Type: application/json");
 
-    QUECTEL_POST(gprs_url, http_headers, 3, data, strlen(data), statuscode);
+    QUECTEL_POST(url, http_headers, 3, data, strlen(data), statuscode);
 
     if (statuscode == 200 || statuscode == 201)
     {
@@ -1009,12 +1021,11 @@ bool sendDataViaGSM(const char *data, const int _pin, const char *host, const ch
     @brief: Send data to the server with communication priority and fallback
     @param data : JSON payload to send
     @param _pin : pin number of the sensor as configured in the API
-    @param host : host name of the server
     @param url : url path to send the data
     @return: true if data is sent successfully via any method, false otherwise
     @note: Respects CommunicationPriority order and attempts fallback method if primary fails
 **/
-bool sendData(const char *data, const int _pin, const char *host, const char *url)
+bool sendData(const char *data, const int _pin, const char *url)
 {
     bool send_result = false;
 
@@ -1032,7 +1043,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
         if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
         {
             Serial.println("SendData: Attempting WiFi (preferred)...");
-            send_result = sendDataViaWiFi(data, _pin, host, url);
+            send_result = sendDataViaWiFi(data, _pin, url);
 
             if (send_result)
             {
@@ -1045,7 +1056,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
 
             if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
             {
-                send_result = sendDataViaGSM(data, _pin, host, url);
+                send_result = sendDataViaGSM(data, _pin, url);
                 if (send_result)
                 {
                     CommsManagerState.wifiFailCount = 0; // Reset on success
@@ -1060,7 +1071,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
         if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
         {
             Serial.println("SendData: Attempting GSM (preferred)...");
-            send_result = sendDataViaGSM(data, _pin, host, url);
+            send_result = sendDataViaGSM(data, _pin, url);
 
             if (send_result)
             {
@@ -1073,7 +1084,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
 
             if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
             {
-                send_result = sendDataViaWiFi(data, _pin, host, url);
+                send_result = sendDataViaWiFi(data, _pin, url);
                 if (send_result)
                 {
                     CommsManagerState.gsmFailCount = 0; // Reset on success
@@ -1089,7 +1100,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
         if (DeviceConfig.useWiFi && CommsManagerState.wifiOnline)
         {
             Serial.println("SendData: Attempting WiFi (no preferred)...");
-            send_result = sendDataViaWiFi(data, _pin, host, url);
+            send_result = sendDataViaWiFi(data, _pin, url);
             if (send_result)
                 return true;
             CommsManagerState.wifiFailCount++;
@@ -1098,7 +1109,7 @@ bool sendData(const char *data, const int _pin, const char *host, const char *ur
         if (DeviceConfig.useGSM && CommsManagerState.gsmOnline)
         {
             Serial.println("SendData: Attempting GSM (no preferred)...");
-            send_result = sendDataViaGSM(data, _pin, host, url);
+            send_result = sendDataViaGSM(data, _pin, url);
             if (send_result)
                 return true;
             CommsManagerState.gsmFailCount++;
@@ -1290,7 +1301,7 @@ void readSendDelete(const char *datafile)
             }
             // Attempt send payload
             // Serial.println("Attempting to send data from SD card: " + data);
-            if (!sendData(data.c_str(), api_pin, HOST_CFA, URL_CFA))
+            if (!sendData(data.c_str(), api_pin, CFA_URL))
             {
                 // store data in temp file
                 appendFile(SD, tempFile, data.c_str(), true);
@@ -1431,7 +1442,7 @@ void sendFromMemoryLog(LOGGER &logger)
             int api_pin = doc["API_PIN"] | -1;
             if (api_pin != -1)
             {
-                if (!sendData(logger.DATA_STORE[i], api_pin, HOST_CFA, URL_CFA))
+                if (!sendData(logger.DATA_STORE[i], api_pin, CFA_URL))
                 {
                     // Append to file for sending later // ToDo: Check the state of DeviceConfigState.sdCardInitialized before attempting to write to SD card
                     appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
@@ -1507,6 +1518,32 @@ void initializeAndConfigGSM()
     DeviceConfigState.gsmConnected = GSM_init();
     if (!DeviceConfigState.gsmConnected)
         return;
+
+    // Check if CA certificate is present in the filesytem
+    if (!GsmFileCheck(MOZILLA_PEM_FILENAME))
+    {
+        Serial.print("Writing modem file: ");
+        Serial.println(MOZILLA_PEM_FILENAME);
+
+        if (!GsmWriteFile(MOZILLA_PEM_FILENAME, MOZILLA_CA_BUNDLE))
+        {
+            Serial.println("Failed to write to file");
+        }
+        else
+        {
+            if (!setCACert(MOZILLA_PEM_FILENAME))
+            {
+                Serial.println("Failed to set CA certificate for secure connections");
+            }
+        }
+    }
+    else
+    {
+        if (!setCACert(MOZILLA_PEM_FILENAME))
+        {
+            Serial.println("Failed to set CA certificate for secure connections");
+        }
+    }
 
     // GSM initialization successful
     GSM_CONNECTED = true; // TODO: Refactor to remove global variable and use state struct instead
