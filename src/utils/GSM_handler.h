@@ -93,7 +93,7 @@ bool deactivateGPRS();
 int8_t GPRS_status();
 void flushSerial();
 void SerialFlush();
-void QUECTEL_POST(const char *url, char headers[][40], int header_size, const char *data, size_t data_length, uint8_t &response_status);
+void QUECTEL_POST(const char *url, char headers[][256], int header_size, const char *data, size_t data_length, int &response_status);
 bool extractText(char *input, const char *target, char *output, uint8_t output_size, char _until);
 void get_raw_response(const char *cmd, char *res_buff, size_t buff_size, bool wait_timeout = false, unsigned long timeout = 3000);
 int16_t getNumber(const char *AT_cmd, const char *expected_reply, uint8_t index_from, uint8_t length);
@@ -106,8 +106,9 @@ bool waitForURC(const char *urcPrefix, char *response, size_t responseLen, unsig
 bool GSM_Serial_begin();
 bool getNetworkTime(char *time);
 void GSMreset(RST_SEQ seq, uint8_t timing_delay = 120);
-void http_preconfig();
-void https_preconfig();
+bool reset_http_config();
+bool http_preconfig();
+bool https_preconfig();
 void GSM_sleep();
 void troubleshoot_GSM();
 String getNetworkName();
@@ -119,6 +120,8 @@ String getFirwmareVersion();
 String getModelID();
 String getProductInfo();
 bool pingIP(const char *host, uint8_t contextID = 1);
+bool setCACert(const char *certPath, uint8_t sslCtxID = 1);
+bool GsmFileCheck(const char *filename);
 String getBatteryStatus();
 
 // MQTT Functions
@@ -463,8 +466,6 @@ bool GPRS_init()
     else
     {
         Serial.println("GPRS initialized!");
-        http_preconfig();
-        https_preconfig();
     }
     return GPRS_CONNECTED;
 }
@@ -595,59 +596,137 @@ bool GsmWriteFile(const char *filename, const char *content)
     return file_written;
 }
 
-bool setCACert(const char *certPath, uint8_t sslCtxID = 1)
+bool setCACert(const char *certPath, uint8_t sslCtxID)
 {
-
-    char cmd[64];
-    // AT+QSSLCFG="cacert",1,"UFS:cacert.pem"
-
+    char cmd[64]; // e.g. AT+QSSLCFG="cacert",1,"UFS:cacert.pem"
     snprintf(cmd, sizeof(cmd), "AT+QSSLCFG=\"cacert\",%d,\"UFS:%s\"", sslCtxID, certPath);
-
     return sendAndCheck(cmd);
 }
 
 /// @brief Preconfigure HTTP settings
-void http_preconfig()
+bool reset_http_config()
 {
-    sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK");
-    sendAndCheck("AT+QHTTPCFG=\"sslctxid\",1", "OK");
+    String resp;
+    if (!sendAndCheck("AT+QHTTPCFG=\"reset\"", "OK", resp, 5000))
+    {
+        Serial.println("Failed to reset HTTP(S) config");
+        Serial.println(resp);
+        return false;
+    }
+    Serial.println(resp);
+    return true;
+}
+
+/// @brief Preconfigure shared HTTP(S) settings
+bool http_preconfig()
+{
+    String resp;
+    bool configured = true;
+
+    configured &= sendAndCheck("AT+QHTTPCFG=\"contextid\",1", "OK", resp);
+    Serial.println(resp);
+    configured &= sendAndCheck("AT+QHTTPCFG=\"requestheader\",0", "OK", resp);
+    Serial.println(resp);
+    configured &= sendAndCheck("AT+QHTTPCFG=\"responseheader\",1", "OK", resp);
+    Serial.println(resp);
+    configured &= sendAndCheck("AT+QHTTPCFG=\"rspout/auto\",0", "OK", resp);
+    Serial.println(resp);
+
+    if (!configured)
+    {
+        Serial.println("Failed to configure shared HTTP(S) settings");
+    }
+
+    return configured;
 }
 
 /// @brief Preconfigure HTTPS settings for secure connections
-void https_preconfig()
+bool https_preconfig()
 {
-    sendAndCheck("AT+QSSLCFG=\"sslversion\",1,3", "OK");
-    sendAndCheck("AT+QSSLCFG=\"ciphersuite\",1,0XFFFF", "OK"); // Enable all ciphersuites; can be configured to specific ciphersuites if needed
-    sendAndCheck("AT+QSSLCFG=\"seclevel\",1,1", "OK");
-    sendAndCheck("AT+QSSLCFG=\"ignorelocaltime\",1,1", "OK");
-    sendAndCheck("AT+QSSLCFG=\"sni\",1,1", "OK");
-    // check current Certificate configuration
-    char cmd[64];
-    snprintf(cmd, sizeof(cmd), "AT+QSSLCFG=\"cacert\",1"); // Query current CA cert config for SSL context ID 1
+    String resp;
+    bool configured = true;
 
-    String res;
-    if (sendAndCheck(cmd, "OK", res))
-    {
-        Serial.printf("Current CA cert config: %s\n", res.c_str());
-    }
+    configured &= sendAndCheck("AT+QHTTPCFG=\"sslctxid\",1", "OK", resp);
+    Serial.println(resp);
+    configured &= sendAndCheck("AT+QSSLCFG=\"sslversion\",1,3", "OK", resp);
+    Serial.println(resp);
+    configured &= sendAndCheck("AT+QSSLCFG=\"ciphersuite\",1,0XFFFF", "OK", resp); // Enable all ciphersuites; can be configured to specific ciphersuites if needed
+    Serial.println(resp);
+    configured &= sendAndCheck("AT+QSSLCFG=\"seclevel\",1,0", "OK", resp);
+    Serial.println(resp);
+    configured &= sendAndCheck("AT+QSSLCFG=\"ignorelocaltime\",1,1", "OK", resp);
+    Serial.println(resp);
+    configured &= sendAndCheck("AT+QSSLCFG=\"sni\",1,1", "OK", resp);
+    Serial.println(resp);
+    // check current Certificate configuration
+    // char cmd[64];
+    // snprintf(cmd, sizeof(cmd), "AT+QSSLCFG=\"cacert\",1"); // Query current CA cert config for SSL context ID 2
+
+    // String res;
+    // if (sendAndCheck(cmd, "OK", res))
+    // {
+    //     Serial.printf("Current CA cert config: %s\n", res.c_str());
+    // }
+
+    if (!configured)
+        Serial.println("Failed to configure HTTPS SSL settings");
+
+    return configured;
 }
 
 /// @brief Send HTTP POST request via Quectel module
-/// @param url Target URL without protocol
+/// @param url Target URL including http:// or https://
 /// @param headers Array of HTTP headers
 /// @param header_size Number of headers
 /// @param data Request body data
 /// @param data_length Length of request body
 /// @param response_status HTTP response status code
-void QUECTEL_POST(const char *url, char headers[][256], int header_size, const char *data, size_t data_length, uint8_t &response_status)
+void QUECTEL_POST(const char *url, char headers[][256], int header_size, const char *data, size_t data_length, int &response_status)
 {
+    response_status = 0;
+    String resp;
+    bool is_https = (strncmp(url, "https://", 8) == 0);
 
-    char HTTP_CFG[256] = {};
-    snprintf(HTTP_CFG, sizeof(HTTP_CFG), "AT+QHTTPCFG=\"url\",\"%s\"", url);
-    sendAndCheck(HTTP_CFG, "OK", 2000);
+    if (!reset_http_config())
+    {
+        HTTPCFG_CONNECT_FAIL += 1;
+        return;
+    }
+
+    if (!http_preconfig())
+    {
+        HTTPCFG_CONNECT_FAIL += 1;
+        return;
+    }
+
+    if (is_https)
+    {
+
+        Serial.println("HTTPS URL detected; SSL context enabled");
+        if (!https_preconfig())
+        {
+            HTTPCFG_CONNECT_FAIL += 1;
+            return;
+        }
+    }
+
+    char HTTP_CFG[384] = {};
+    int cfg_len = snprintf(HTTP_CFG, sizeof(HTTP_CFG), "AT+QHTTPCFG=\"url\",\"%s\"", url);
+    if (cfg_len < 0 || cfg_len >= (int)sizeof(HTTP_CFG))
+    {
+        Serial.println("HTTP URL config command too long");
+        HTTPCFG_CONNECT_FAIL += 1;
+        return;
+    }
+
+    if (!sendAndCheck(HTTP_CFG, "OK", resp, 2000))
+    {
+        Serial.println("Failed to set HTTP(S) URL");
+        Serial.println(resp);
+        HTTPCFG_CONNECT_FAIL += 1;
+        return;
+    }
+    Serial.println(resp);
 
     // Setting request headers
     // Headers sent in format 0: headers are sent before post body
@@ -655,7 +734,15 @@ void QUECTEL_POST(const char *url, char headers[][256], int header_size, const c
 
     for (int i = 0; i < header_size; i++)
     {
-        snprintf(HTTP_CFG, sizeof(HTTP_CFG), "AT+QHTTPCFG=\"header\",\"%s\"", headers[i]);
+        cfg_len = snprintf(HTTP_CFG, sizeof(HTTP_CFG), "AT+QHTTPCFG=\"header\",\"%s\"", headers[i]);
+        if (cfg_len < 0 || cfg_len >= (int)sizeof(HTTP_CFG))
+        {
+            Serial.println("HTTP header config command too long");
+            HTTPCFG_CONNECT_FAIL += 1;
+            return;
+        }
+
+        Serial.println("Setting header: " + String(headers[i]));
         if (sendAndCheck(HTTP_CFG, "OK"))
         {
             Serial.println("Header set successfully");
@@ -667,18 +754,15 @@ void QUECTEL_POST(const char *url, char headers[][256], int header_size, const c
         }
     }
 
-    char HTTP_POST_RESPONSE_STATUS[4];
+    char HTTP_POST_RESPONSE_STATUS[4] = "000";
 
     // Prepare POST request
-    char http_post_prepare[32] = "AT+QHTTPPOST=";
-    char data_len[4];
-    itoa(data_length, data_len, 10);
-    strcat(http_post_prepare, data_len);
-    strcat(http_post_prepare, ",30,60");
+    char http_post_prepare[40] = {};
+    snprintf(http_post_prepare, sizeof(http_post_prepare), "AT+QHTTPPOST=%lu,30,60", (unsigned long)data_length);
 
     Serial.println(http_post_prepare);
     // Allow sufficient time to connect to HTTP(S) server
-    if (sendAndCheck(http_post_prepare, "CONNECT", 10000))
+    if (sendAndCheck(http_post_prepare, "CONNECT", resp, 10000))
     {
         Serial.println("Posting gprs data..");
         get_http_response_status(data, HTTP_POST_RESPONSE_STATUS);
@@ -688,10 +772,11 @@ void QUECTEL_POST(const char *url, char headers[][256], int header_size, const c
     {
         Serial.println("HTTP POST CONNECT FAIL");
         HTTPCFG_CONNECT_FAIL += 1;
+        Serial.println(resp);
         return;
     }
 
-    if (strstr(HTTP_POST_RESPONSE_STATUS, "20"))
+    if (response_status >= 200 && response_status < 300)
     {
         Serial.println("Requested processed successfully with status: " + (String)HTTP_POST_RESPONSE_STATUS);
     }
@@ -954,8 +1039,9 @@ bool waitForURC(const char *urcPrefix, char *response,
 /// @param HTTP_RESPONSE_STATUS Buffer for status code
 void get_http_response_status(String data, char *HTTP_RESPONSE_STATUS)
 {
+    strcpy(HTTP_RESPONSE_STATUS, "000");
     const char *data_copy = data.c_str();
-    char gprs_data[strlen(data_copy)];
+    char gprs_data[strlen(data_copy) + 1];
     strcpy(gprs_data, data_copy);
 
     // Check HTTP RESPONSE status (0 = Operation successful)
@@ -1251,6 +1337,7 @@ bool GSM_Serial_begin()
 
     // Set automatic timezone and update Locate time to RTC
     sendAndCheck("AT+CTZU=3", "OK");
+    sendAndCheck("AT&W", "OK");
 
     return comm_init;
 }
@@ -1547,7 +1634,7 @@ bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const c
 {
     char pub_cmd[256] = "";
     size_t payload_len = strlen(payload);
-
+    String resp = "";
     if (qos > 2)
         qos = 2;
     if (retain > 1)
@@ -1568,6 +1655,7 @@ bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const c
     Serial.println(pub_cmd);
 
     flushSerial();
+    sendAndCheck("AT+QISTATE=0,1", "OK", resp, 5000);
     GSMSerial.println(pub_cmd);
 
     // Wait for ">" prompt to send payload.
@@ -1588,9 +1676,10 @@ bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const c
     {
         Serial.println("MQTT publish failed - no OK response");
         MQTT_PUB_FAIL++;
+        sendAndCheck("AT+QISTATE=0,1", "OK", resp, 5000);
         return false;
     }
-
+    sendAndCheck("AT+QISTATE=0,1", "OK", resp, 5000);
     // Wait for publish URC: +QMTPUBEX: <client_id>,<msg_id>,0
     char urc[32];
     if (!waitForURC("+QMTPUBEX:", urc, sizeof(urc), 5000))
@@ -1605,9 +1694,10 @@ bool MQTT_publish(uint8_t client_id, uint16_t msg_id, const char *topic, const c
         Serial.print("Published to topic: ");
         Serial.println(topic);
         MQTT_PUB_FAIL = 0;
+        sendAndCheck("AT+QISTATE=0,1", "OK", resp, 5000);
         return true;
     }
-
+    sendAndCheck("AT+QISTATE=0,1", "OK", resp, 5000);
     Serial.println("MQTT publish failed");
     MQTT_PUB_FAIL++;
     return false;
@@ -2034,7 +2124,7 @@ bool MQTT_readBufferedMessage(uint8_t client_id, char *topic_out, size_t topic_s
     // Optional safety: if there are extra characters before OK, we ignore them
     // (but in practice there should be none or just \r\n)
 
-    Serial.print("MQTT message received (buffered) → Topic: ");
+    Serial.print("\nMQTT message received (buffered) → Topic: ");
     Serial.print(topic_out);
     Serial.print(" | Length: ");
     Serial.print(payload_len);
