@@ -19,7 +19,7 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gideon Maina
- * @date 2026-03-03
+ * @date 2026-07-05
  * @version 1.4.1
  *
  * @dependencies
@@ -447,50 +447,42 @@ void loop()
 
         if (time_to_send_telemetry && (CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE))
         {
-            // Check if MQTT credentials are set
-            if (MQTT_BROKER[0] == '\0' || MQTT_USERNAME[0] == '\0' || MQTT_PASSWORD[0] == '\0') //! Refactor as this check is repeated.
+            bool telemetry_sent = false;
+            // Try WiFi MQTT first if WiFi is available
+            if (DeviceConfigState.wifiConnected && WiFi.status() == WL_CONNECTED)
             {
-                Serial.println("MQTT credentials not set. Skipping telemetry send.");
-                boot_telemetry_sent = true;
-                time_to_send_telemetry = false;
+                Serial.println("Sending telemetry via WiFi MQTT");
+                telemetry_sent = sendWiFiMQTTTelemetry(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MQTT_USERNAME, MQTT_PASSWORD);
+            }
+            // Fall back to GSM MQTT if WiFi is not available but GSM is
+            else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
+            {
+                Serial.println("Sending telemetry via GSM MQTT");
+                telemetry_sent = initAndSendMQTTTelemetry(MQTT_BROKER, MQTT_PORT, MQTT_TELEMETRY_TOPIC, MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, false);
             }
             else
             {
-                bool telemetry_sent = false;
-                // Try WiFi MQTT first if WiFi is available
-                if (DeviceConfigState.wifiConnected && WiFi.status() == WL_CONNECTED)
-                {
-                    Serial.println("Sending telemetry via WiFi MQTT");
-                    telemetry_sent = sendWiFiMQTTTelemetry(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MQTT_USERNAME, MQTT_PASSWORD);
-                }
-                // Fall back to GSM MQTT if WiFi is not available but GSM is
-                else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
-                {
-                    Serial.println("Sending telemetry via GSM MQTT");
-                    telemetry_sent = initAndSendMQTTTelemetry(MQTT_BROKER, MQTT_PORT, MQTT_TELEMETRY_TOPIC, MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, false);
-                }
-                else
-                {
-                    Serial.println("No internet connectivity available for MQTT telemetry");
-                }
-
-                // Update telemetry tracking
-                if (is_boot_telemetry && telemetry_sent)
-                {
-                    boot_telemetry_sent = true;
-                    Serial.println("Boot telemetry sent successfully");
-                }
+                Serial.println("No internet connectivity available for MQTT telemetry");
             }
-            // Always update the timestamp when time to send telemetry, regardless of credentials status
+
+            // Update telemetry tracking
+            if (is_boot_telemetry && telemetry_sent)
+            {
+                boot_telemetry_sent = true;
+                Serial.println("Boot telemetry sent successfully");
+            }
+
+            if (telemetry_sent)
+                last_send_telemetry = millis();
             time_to_send_telemetry = false;
-            last_send_telemetry = millis();
         }
     }
     if (CommsManagerState.message_received)
     {
         processIncomingData();
     }
-    checkIncomingMQTTMessages();
+    if (DeviceConfigState.isMQTTConfigured)
+        checkIncomingMQTTMessages();
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
     {
@@ -1667,7 +1659,7 @@ void loadInitialConfigs()
     strcpy(DeviceConfig.active_api_host, DeviceConfig.staging_host);
 #endif
 
-    Serial.println("DeviceConfig loaded:");
+    Serial.println("Firmware Device Configs:");
     Serial.print("  wifi_sta_ssid: ");
     Serial.println(DeviceConfig.wifi_sta_ssid);
     Serial.print("  wifi_sta_pwd: ");
