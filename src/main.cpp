@@ -978,7 +978,7 @@ bool sendDataViaGSM(const char *data, const int _pin, const char *url)
     itoa(_pin, pin, 10);
 
 #ifdef QUECTEL
-    uint8_t statuscode = 0;
+    int statuscode = 0;
 
     char http_headers[3][256] = {};
     strcat(http_headers[0], "X-PIN: ");
