@@ -1332,7 +1332,7 @@ void readSendDelete(const char *datafile)
             }
             // Attempt send payload
             // Serial.println("Attempting to send data from SD card: " + data);
-            if (!sendData(data.c_str(), api_pin, DeviceConfig.active_api_host, URL_CFA))
+            if (!sendData(data.c_str(), api_pin, DeviceConfig.active_api_url))
             {
                 // store data in temp file
                 appendFile(SD, tempFile, data.c_str(), true);
@@ -1474,7 +1474,7 @@ void sendFromMemoryLog(LOGGER &logger)
             int api_pin = doc["API_PIN"] | -1;
             if (api_pin != -1)
             {
-                if (!sendData(logger.DATA_STORE[i], api_pin, DeviceConfig.active_api_host, URL_CFA))
+                if (!sendData(logger.DATA_STORE[i], api_pin, DeviceConfig.active_api_url))
                 {
                     // Append to file for sending later // ToDo: Check the state of DeviceConfigState.sdCardInitialized before attempting to write to SD card
                     appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
@@ -1678,22 +1678,22 @@ void loadInitialConfigs()
     }
 #endif
 
-    strcpy(DeviceConfig.production_host, PRODUCTION_HOST_CFA);
-    strcpy(DeviceConfig.staging_host, STAGING_HOST_CFA);
+    strcpy(DeviceConfig.production_url, PRODUCTION_URL);
+    strcpy(DeviceConfig.staging_url, STAGING_URL);
 
 #if defined(IS_LIVE)
     DeviceConfig.isLive = (IS_LIVE != 0);
     if (DeviceConfig.isLive)
     {
-        strcpy(DeviceConfig.active_api_host, DeviceConfig.production_host);
+        strcpy(DeviceConfig.active_api_url, DeviceConfig.production_url);
     }
     else
     {
-        strcpy(DeviceConfig.active_api_host, DeviceConfig.staging_host);
+        strcpy(DeviceConfig.active_api_url, DeviceConfig.staging_url);
     }
 #else
     DeviceConfig.isLive = false;
-    strcpy(DeviceConfig.active_api_host, DeviceConfig.staging_host);
+    strcpy(DeviceConfig.active_api_url, DeviceConfig.staging_url);
 #endif
 
     Serial.println("Firmware Device Configs:");
@@ -1715,12 +1715,12 @@ void loadInitialConfigs()
     Serial.println(DeviceConfig.useGSM ? "true" : "false");
     Serial.print("  isLive: ");
     Serial.println(DeviceConfig.isLive ? "true" : "false");
-    Serial.print("  active_api_host: ");
-    Serial.println(DeviceConfig.active_api_host);
-    Serial.print("  staging_host: ");
-    Serial.println(DeviceConfig.staging_host);
-    Serial.print("  production_host: ");
-    Serial.println(DeviceConfig.production_host);
+    Serial.print("  active_api_url: ");
+    Serial.println(DeviceConfig.active_api_url);
+    Serial.print("  staging_url: ");
+    Serial.println(DeviceConfig.staging_url);
+    Serial.print("  production_url: ");
+    Serial.println(DeviceConfig.production_url);
 
     // if (DeviceConfig.power_saving_mode)
     //     {

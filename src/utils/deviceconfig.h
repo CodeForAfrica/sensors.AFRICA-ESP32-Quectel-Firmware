@@ -56,9 +56,9 @@ struct DeviceConfig
     bool useWiFi;
     bool useGSM;
     bool isLive;
-    char active_api_host[64] = {};
-    char staging_host[64] = {};
-    char production_host[64] = {};
+    char active_api_url[64] = {};
+    char staging_url[64] = {};
+    char production_url[64] = {};
 };
 
 extern struct DeviceConfig DeviceConfig;
@@ -84,8 +84,8 @@ static JsonDocument getRuntimeDeviceConfig()
     doc["apn"] = DeviceConfig.gsm_apn;
     doc["apnPwd"] = DeviceConfig.gsm_apn_pwd;
     doc["powerSaver"] = DeviceConfig.power_saving_mode ? "on" : "off";
-    doc["stagingHost"] = DeviceConfig.staging_host;
-    doc["productionHost"] = DeviceConfig.production_host;
+    doc["stagingUrl"] = DeviceConfig.staging_url;
+    doc["productionUrl"] = DeviceConfig.production_url;
     doc["isLive"] = DeviceConfig.isLive;
     return doc;
 }
@@ -253,21 +253,21 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
         useWiFiUpdated = (DeviceConfig.useWiFi != val);
         DeviceConfig.useWiFi = val;
     }
-    if (hasString(config["stagingHost"]))
+    if (hasString(config["stagingUrl"]))
     {
-        strcpy(DeviceConfig.staging_host, config["stagingHost"]);
+        strcpy(DeviceConfig.staging_url, config["stagingUrl"]);
     }
     else
     {
-        strcpy(DeviceConfig.staging_host, STAGING_HOST_CFA);
+        strcpy(DeviceConfig.staging_url, STAGING_URL);
     }
-    if (hasString(config["productionHost"]))
+    if (hasString(config["productionUrl"]))
     {
-        strcpy(DeviceConfig.production_host, config["productionHost"]);
+        strcpy(DeviceConfig.production_url, config["productionUrl"]);
     }
     else
     {
-        strcpy(DeviceConfig.production_host, PRODUCTION_HOST_CFA);
+        strcpy(DeviceConfig.production_url, PRODUCTION_URL);
     }
     if (hasString(config["isLive"]))
     {
@@ -275,11 +275,11 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
         DeviceConfig.isLive = val;
         if (val)
         {
-            strcpy(DeviceConfig.active_api_host, DeviceConfig.production_host);
+            strcpy(DeviceConfig.active_api_url, DeviceConfig.production_url);
         }
         else
         {
-            strcpy(DeviceConfig.active_api_host, DeviceConfig.staging_host);
+            strcpy(DeviceConfig.active_api_url, DeviceConfig.staging_url);
         }
     }
 
