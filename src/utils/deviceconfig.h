@@ -56,9 +56,9 @@ struct DeviceConfig
     bool useWiFi;
     bool useGSM;
     bool isLive;
-    char active_api_url[64] = {};
-    char staging_url[64] = {};
-    char production_url[64] = {};
+    char active_api_url[128] = {};
+    char staging_url[128] = {};
+    char production_url[128] = {};
 };
 
 extern struct DeviceConfig DeviceConfig;
