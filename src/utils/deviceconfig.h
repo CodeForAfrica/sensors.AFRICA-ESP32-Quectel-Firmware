@@ -184,7 +184,26 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
 
     auto hasString = [&](JsonVariant v)
     {
-        return !v.isNull() && v.is<const char *>() && v.as<const char *>()[0] != '\0';
+        if (v.isNull())
+            return false;
+
+        // Handle strings: not null and not empty
+        if (v.is<const char *>())
+        {
+            const char *str = v.as<const char *>();
+            return str != nullptr && str[0] != '\0';
+        }
+
+        // Handle booleans
+        if (v.is<bool>())
+            return true;
+
+        // Handle numbers (integers and floats)
+        if (v.is<int>() || v.is<float>() || v.is<double>() || v.is<unsigned int>())
+            return true;
+
+        // Any other non-null type is considered valid
+        return true;
     };
 
     bool wiFiUpdated = false, wifiSSIDUpdated = false, wifiPwdUpdated = false, gsmUpdated = false, apnUpdated = false, apnPwdUpdated = false, pinUpdated = false, useGSMUpdated = false, useWiFiUpdated = false;
@@ -218,7 +237,8 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
 
     if (hasString(config["powerSaver"]))
     {
-        DeviceConfig.power_saving_mode = (config["powerSaver"] == "on") ? true : false;
+        bool val = config["powerSaver"].as<bool>();
+        DeviceConfig.power_saving_mode = val;
         Serial.printf("Power saving mode updated to: %d\n", DeviceConfig.power_saving_mode);
     }
     if (hasString(config["useGSM"]))
@@ -229,29 +249,37 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
     }
     if (hasString(config["useWiFi"]))
     {
-        bool val = (config["useWifFi"] == "true");
+        bool val = (config["useWiFi"] == "true");
         useWiFiUpdated = (DeviceConfig.useWiFi != val);
         DeviceConfig.useWiFi = val;
     }
     if (hasString(config["stagingHost"]))
     {
+        strcpy(DeviceConfig.staging_host, config["stagingHost"]);
+    }
+    else
+    {
         strcpy(DeviceConfig.staging_host, STAGING_HOST_CFA);
     }
     if (hasString(config["productionHost"]))
+    {
+        strcpy(DeviceConfig.production_host, config["productionHost"]);
+    }
+    else
     {
         strcpy(DeviceConfig.production_host, PRODUCTION_HOST_CFA);
     }
     if (hasString(config["isLive"]))
     {
-        bool val = (config["isLive"] == "true");
+        bool val = config["isLive"].as<bool>();
         DeviceConfig.isLive = val;
         if (val)
         {
-            strcpy(DeviceConfig.active_api_host, PRODUCTION_HOST_CFA);
+            strcpy(DeviceConfig.active_api_host, DeviceConfig.production_host);
         }
         else
         {
-            strcpy(DeviceConfig.active_api_host, STAGING_HOST_CFA);
+            strcpy(DeviceConfig.active_api_host, DeviceConfig.staging_host);
         }
     }
 
