@@ -4,6 +4,7 @@
 static const char STAGING_HOST_CFA[] = "staging.api.sensors.africa";
 static const char URL_CFA[] = "/v1/push-sensor-data/";
 static const char PRODUCTION_HOST_CFA[] = "api.sensors.africa";
+static const char CFA_URL[] = "http://staging.api.sensors.africa/v1/push-sensor-data/";
 #define PORT_CFA 80
 #define IS_LIVE false
 
