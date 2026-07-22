@@ -1580,28 +1580,21 @@ void initializeAndConfigGSM()
     // GSM initialization successful
     GSM_CONNECTED = true; // TODO: Refactor to remove global variable and use state struct instead
 
+    NetMode modes[] = {NetMode::AUTO, NetMode::_2G, NetMode::_4G};
     bool network_registered = false;
 
-    if (setNetworkMode(NetMode::AUTO))
-    {
-        network_registered = register_to_network();
-    }
-    else if (setNetworkMode(NetMode::_2G))
-    {
-        network_registered = register_to_network();
-    }
-    else if (setNetworkMode(NetMode::_4G))
-    {
-        network_registered = register_to_network();
-    }
-    else
-    {
-        if (!network_registered)
-        {
-            Serial.println("Failed to register to GSM network");
-            return;
+    for (auto mode : modes) {
+        if (setNetworkMode(mode) && register_to_network()) {
+            network_registered = true;
+            break;
         }
     }
+
+    if (!network_registered) {
+        Serial.println("Failed to register to GSM network");
+        return;
+    }
+    
 
     // GPRS initialization
     DeviceConfigState.gsmInternetAvailable = GPRS_init();
