@@ -832,6 +832,10 @@ String formatDateTime(time_t t, String timezone)
 
 String getRTCdatetimetz(const char *format, char *timezone)
 {
+    if(!DeviceConfigState.timeSet)
+    {
+        return "";
+    }
     String datetimetz = RTC.getTime(format);
     datetimetz += timezone;
     return datetimetz;
