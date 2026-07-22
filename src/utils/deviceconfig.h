@@ -9,6 +9,7 @@
 #include "../global_configs.h"
 
 static JsonDocument getDeviceConfig();
+static JsonDocument getRuntimeDeviceConfig();
 static void updateDeviceConfig();
 static void saveConfig(JsonDocument &doc);
 static void loadSavedDeviceConfigs(bool setConfigStates = true);
@@ -54,6 +55,10 @@ struct DeviceConfig
     bool power_saving_mode = false;
     bool useWiFi;
     bool useGSM;
+    bool isLive;
+    char active_api_url[128] = {};
+    char staging_url[128] = {};
+    char production_url[128] = {};
 };
 
 extern struct DeviceConfig DeviceConfig;
@@ -68,6 +73,20 @@ static JsonDocument getDeviceConfig()
         return doc;
     }
 
+    return doc;
+}
+
+static JsonDocument getRuntimeDeviceConfig()
+{
+    JsonDocument doc;
+    doc["ssid"] = DeviceConfig.wifi_sta_ssid;
+    doc["wifiPwd"] = DeviceConfig.wifi_sta_pwd;
+    doc["apn"] = DeviceConfig.gsm_apn;
+    doc["apnPwd"] = DeviceConfig.gsm_apn_pwd;
+    doc["powerSaver"] = DeviceConfig.power_saving_mode ? "on" : "off";
+    doc["stagingUrl"] = DeviceConfig.staging_url;
+    doc["productionUrl"] = DeviceConfig.production_url;
+    doc["isLive"] = DeviceConfig.isLive;
     return doc;
 }
 
@@ -165,7 +184,26 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
 
     auto hasString = [&](JsonVariant v)
     {
-        return !v.isNull() && v.is<const char *>() && v.as<const char *>()[0] != '\0';
+        if (v.isNull())
+            return false;
+
+        // Handle strings: not null and not empty
+        if (v.is<const char *>())
+        {
+            const char *str = v.as<const char *>();
+            return str != nullptr && str[0] != '\0';
+        }
+
+        // Handle booleans
+        if (v.is<bool>())
+            return true;
+
+        // Handle numbers (integers and floats)
+        if (v.is<int>() || v.is<float>() || v.is<double>() || v.is<unsigned int>())
+            return true;
+
+        // Any other non-null type is considered valid
+        return true;
     };
 
     bool wiFiUpdated = false, wifiSSIDUpdated = false, wifiPwdUpdated = false, gsmUpdated = false, apnUpdated = false, apnPwdUpdated = false, pinUpdated = false, useGSMUpdated = false, useWiFiUpdated = false;
@@ -199,7 +237,8 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
 
     if (hasString(config["powerSaver"]))
     {
-        DeviceConfig.power_saving_mode = (config["powerSaver"] == "on") ? true : false;
+        bool val = config["powerSaver"].as<bool>();
+        DeviceConfig.power_saving_mode = val;
         Serial.printf("Power saving mode updated to: %d\n", DeviceConfig.power_saving_mode);
     }
     if (hasString(config["useGSM"]))
@@ -210,9 +249,38 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
     }
     if (hasString(config["useWiFi"]))
     {
-        bool val = (config["useWifFi"] == "true");
+        bool val = (config["useWiFi"] == "true");
         useWiFiUpdated = (DeviceConfig.useWiFi != val);
         DeviceConfig.useWiFi = val;
+    }
+    if (hasString(config["stagingUrl"]))
+    {
+        strcpy(DeviceConfig.staging_url, config["stagingUrl"]);
+    }
+    else
+    {
+        strcpy(DeviceConfig.staging_url, STAGING_URL);
+    }
+    if (hasString(config["productionUrl"]))
+    {
+        strcpy(DeviceConfig.production_url, config["productionUrl"]);
+    }
+    else
+    {
+        strcpy(DeviceConfig.production_url, PRODUCTION_URL);
+    }
+    if (hasString(config["isLive"]))
+    {
+        bool val = config["isLive"].as<bool>();
+        DeviceConfig.isLive = val;
+        if (val)
+        {
+            strcpy(DeviceConfig.active_api_url, DeviceConfig.production_url);
+        }
+        else
+        {
+            strcpy(DeviceConfig.active_api_url, DeviceConfig.staging_url);
+        }
     }
 
     gsmUpdated = apnPwdUpdated || apnPwdUpdated || pinUpdated;

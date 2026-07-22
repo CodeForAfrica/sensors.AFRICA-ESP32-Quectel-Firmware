@@ -19,7 +19,7 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gideon Maina
- * @date 2026-03-03
+ * @date 2026-07-05
  * @version 1.4.1
  *
  * @dependencies
@@ -89,6 +89,7 @@ bool SD_Attached = false;
 
 char ROOT_DIR[24] = {};
 char BASE_SENSORS_DATA_DIR[20] = "/SENSORSDATA";
+const char TESTING_SENSORS_DATA_DIR[] = "/TESTING";
 char CURRENT_SENSORS_DATA_DIR[128] = {};
 char SENSORS_JSON_DATA_PATH[128] = {};
 char SENSORS_CSV_DATA_PATH[128] = {};
@@ -415,6 +416,7 @@ void loop()
     if (send_now && CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE)
     {
 
+        init_SD_loggers(); // Refresh SD paths in case DeviceConfig.isLive changed at runtime.
         // Send data from memory loggers
         sendFromMemoryLog(JSON_PAYLOAD_LOGGER);
         // send payloads from the files that stores data that failed posting previously
@@ -446,50 +448,42 @@ void loop()
 
         if (time_to_send_telemetry && (CommsManagerState.preferredComm != CommsManagerState.PreferredComm::NONE))
         {
-            // Check if MQTT credentials are set
-            if (MQTT_BROKER[0] == '\0' || MQTT_USERNAME[0] == '\0' || MQTT_PASSWORD[0] == '\0') //! Refactor as this check is repeated.
+            bool telemetry_sent = false;
+            // Try WiFi MQTT first if WiFi is available
+            if (DeviceConfigState.wifiConnected && WiFi.status() == WL_CONNECTED)
             {
-                Serial.println("MQTT credentials not set. Skipping telemetry send.");
-                boot_telemetry_sent = true;
-                time_to_send_telemetry = false;
+                Serial.println("Sending telemetry via WiFi MQTT");
+                telemetry_sent = sendWiFiMQTTTelemetry(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MQTT_USERNAME, MQTT_PASSWORD);
+            }
+            // Fall back to GSM MQTT if WiFi is not available but GSM is
+            else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
+            {
+                Serial.println("Sending telemetry via GSM MQTT");
+                telemetry_sent = initAndSendMQTTTelemetry(MQTT_BROKER, MQTT_PORT, MQTT_TELEMETRY_TOPIC, MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, false);
             }
             else
             {
-                bool telemetry_sent = false;
-                // Try WiFi MQTT first if WiFi is available
-                if (DeviceConfigState.wifiConnected && WiFi.status() == WL_CONNECTED)
-                {
-                    Serial.println("Sending telemetry via WiFi MQTT");
-                    telemetry_sent = sendWiFiMQTTTelemetry(MQTT_BROKER, MQTT_PORT, esp_chipid, MQTT_TELEMETRY_TOPIC, MQTT_USERNAME, MQTT_PASSWORD);
-                }
-                // Fall back to GSM MQTT if WiFi is not available but GSM is
-                else if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
-                {
-                    Serial.println("Sending telemetry via GSM MQTT");
-                    telemetry_sent = initAndSendMQTTTelemetry(MQTT_BROKER, MQTT_PORT, MQTT_TELEMETRY_TOPIC, MQTT_CLIENT_ID, MQTT_USERNAME, MQTT_PASSWORD, false);
-                }
-                else
-                {
-                    Serial.println("No internet connectivity available for MQTT telemetry");
-                }
-
-                // Update telemetry tracking
-                if (is_boot_telemetry && telemetry_sent)
-                {
-                    boot_telemetry_sent = true;
-                    Serial.println("Boot telemetry sent successfully");
-                }
+                Serial.println("No internet connectivity available for MQTT telemetry");
             }
-            // Always update the timestamp when time to send telemetry, regardless of credentials status
+
+            // Update telemetry tracking
+            if (is_boot_telemetry && telemetry_sent)
+            {
+                boot_telemetry_sent = true;
+                Serial.println("Boot telemetry sent successfully");
+            }
+
+            if (telemetry_sent)
+                last_send_telemetry = millis();
             time_to_send_telemetry = false;
-            last_send_telemetry = millis();
         }
     }
     if (CommsManagerState.message_received)
     {
         processIncomingData();
     }
-    checkIncomingMQTTMessages();
+    if (DeviceConfigState.isMQTTConfigured)
+        checkIncomingMQTTMessages();
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
     {
@@ -838,6 +832,10 @@ String formatDateTime(time_t t, String timezone)
 
 String getRTCdatetimetz(const char *format, char *timezone)
 {
+    if(!DeviceConfigState.timeSet)
+    {
+        return "";
+    }
     String datetimetz = RTC.getTime(format);
     datetimetz += timezone;
     return datetimetz;
@@ -984,7 +982,7 @@ bool sendDataViaGSM(const char *data, const int _pin, const char *url)
     itoa(_pin, pin, 10);
 
 #ifdef QUECTEL
-    uint8_t statuscode = 0;
+    int statuscode = 0;
 
     char http_headers[3][256] = {};
     strcat(http_headers[0], "X-PIN: ");
@@ -1137,23 +1135,53 @@ void init_memory_loggers()
     CSV_PAYLOAD_LOGGER.type = DATA_LOGGERS::CSV;
 }
 
+static bool shouldUseTestingDataDir()
+{
+    return !DeviceConfig.isLive;
+}
+
 /// @brief Init directories for logging files
 void init_SD_loggers()
 {
     // Root directory
     createDir(SD, ROOT_DIR);
 
+    char sensors_data_root_dir[128] = {};
+    snprintf(sensors_data_root_dir, sizeof(sensors_data_root_dir), "%s%s", ROOT_DIR, BASE_SENSORS_DATA_DIR);
+    createDir(SD, sensors_data_root_dir); // Create base sensor directory "/ESP_CHIP_ID/SENSORSDATA"
+
+    bool use_testing_data_dir = shouldUseTestingDataDir();
+    char sensors_data_parent_dir[128] = {};
+    strcpy(sensors_data_parent_dir, sensors_data_root_dir);
+
+    if (use_testing_data_dir)
+    {
+        strcat(sensors_data_parent_dir, TESTING_SENSORS_DATA_DIR);
+        createDir(SD, sensors_data_parent_dir); // Create testing directory "/ESP_CHIP_ID/SENSORSDATA/TESTING"
+    }
+
+    bool use_testing_failed_store = shouldUseTestingDataDir();
+    char failed_send_payloads_parent_dir[128] = {};
+
+    if (use_testing_failed_store)
+    {
+        snprintf(failed_send_payloads_parent_dir, sizeof(failed_send_payloads_parent_dir), "%s%s", sensors_data_root_dir, TESTING_SENSORS_DATA_DIR);
+        createDir(SD, failed_send_payloads_parent_dir);
+    }
+    else
+    {
+        strcpy(failed_send_payloads_parent_dir, sensors_data_root_dir);
+    }
+
+    // Init failed-payload path before the calendar check so retry storage follows the runtime live/testing state.
+    snprintf(SENSORS_FAILED_DATA_SEND_STORE_PATH, sizeof(SENSORS_FAILED_DATA_SEND_STORE_PATH), "%s/%s",
+             failed_send_payloads_parent_dir, SENSORS_FAILED_DATA_SEND_STORE_FILE);
+
     if (current_year != 0 && current_month != 0)
     {
-        char _year[4] = {};
-        strcpy(CURRENT_SENSORS_DATA_DIR, ROOT_DIR);
-        strcat(CURRENT_SENSORS_DATA_DIR, BASE_SENSORS_DATA_DIR);
-
-        createDir(SD, CURRENT_SENSORS_DATA_DIR); // Create base sensor directory "/ESP_CHIP_ID/SENSORSDATA"
-
-        itoa(current_year, _year, 10);
-        strcat(CURRENT_SENSORS_DATA_DIR, "/");
-        strcat(CURRENT_SENSORS_DATA_DIR, _year);
+        char _year[5] = {};
+        snprintf(_year, sizeof(_year), "%d", current_year);
+        snprintf(CURRENT_SENSORS_DATA_DIR, sizeof(CURRENT_SENSORS_DATA_DIR), "%s/%s", sensors_data_parent_dir, _year);
 
         createDir(SD, CURRENT_SENSORS_DATA_DIR); // Create year directory "/ESP_CHIP_ID/SENSORSDATA/2025"
     }
@@ -1165,20 +1193,15 @@ void init_SD_loggers()
     }
 
     memset(SENSORS_JSON_DATA_PATH, 0, sizeof(SENSORS_JSON_DATA_PATH));
-    char month[3] = {};
+    memset(SENSORS_CSV_DATA_PATH, 0, sizeof(SENSORS_CSV_DATA_PATH));
+    char month[4] = {};
     getMonthName(current_month, month);
 
     // Update sensors JSON data path
-    strcpy(SENSORS_JSON_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
-    strcat(SENSORS_JSON_DATA_PATH, "/");
-    strcat(SENSORS_JSON_DATA_PATH, month);
-    strcat(SENSORS_JSON_DATA_PATH, ".txt");
+    snprintf(SENSORS_JSON_DATA_PATH, sizeof(SENSORS_JSON_DATA_PATH), "%s/%s.txt", CURRENT_SENSORS_DATA_DIR, month);
 
     // Update sensors CSV data path
-    strcpy(SENSORS_CSV_DATA_PATH, CURRENT_SENSORS_DATA_DIR);
-    strcat(SENSORS_CSV_DATA_PATH, "/");
-    strcat(SENSORS_CSV_DATA_PATH, month);
-    strcat(SENSORS_CSV_DATA_PATH, ".csv");
+    snprintf(SENSORS_CSV_DATA_PATH, sizeof(SENSORS_CSV_DATA_PATH), "%s/%s.csv", CURRENT_SENSORS_DATA_DIR, month);
 
     int _from = 0;
     int _to = 0;
@@ -1187,18 +1210,30 @@ void init_SD_loggers()
         appendFile(SD, SENSORS_CSV_DATA_PATH, csv_header);
     }
 
-    // Init logger paths
-    strcpy(SENSORS_FAILED_DATA_SEND_STORE_PATH, ROOT_DIR);
-    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, BASE_SENSORS_DATA_DIR);
-    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, "/");
-    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, SENSORS_FAILED_DATA_SEND_STORE_FILE);
-    strcat(SENSORS_FAILED_DATA_SEND_STORE_PATH, "\0");
-
     // write files to SD
     // writeFile(SD, SENSORS_JSON_DATA_PATH, "");                   // create file if it does not exist
     // writeFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, ""); // create file if it does not exist
 
     // Debug runtime logger;
+}
+
+static void updateLoggerPath(LOGGER &logger)
+{
+    switch (logger.type)
+    {
+    case DATA_LOGGERS::JSON:
+        logger.path = SENSORS_JSON_DATA_PATH;
+        break;
+    case DATA_LOGGERS::CSV:
+        logger.path = SENSORS_CSV_DATA_PATH;
+        break;
+    }
+}
+
+static void refreshLoggerPath(LOGGER &logger)
+{
+    init_SD_loggers();
+    updateLoggerPath(logger);
 }
 
 /**
@@ -1301,7 +1336,7 @@ void readSendDelete(const char *datafile)
             }
             // Attempt send payload
             // Serial.println("Attempting to send data from SD card: " + data);
-            if (!sendData(data.c_str(), api_pin, CFA_URL))
+            if (!sendData(data.c_str(), api_pin, DeviceConfig.active_api_url))
             {
                 // store data in temp file
                 appendFile(SD, tempFile, data.c_str(), true);
@@ -1403,6 +1438,7 @@ void memoryDataLog(LOGGER &logger, const char *data)
 **/
 void fileDataLog(LOGGER &logger)
 {
+    refreshLoggerPath(logger);
     Serial.println("Logging data to file: " + String(logger.path));
     for (int i = 0; i < logger.MAX_ENTRIES; i++)
     {
@@ -1442,7 +1478,7 @@ void sendFromMemoryLog(LOGGER &logger)
             int api_pin = doc["API_PIN"] | -1;
             if (api_pin != -1)
             {
-                if (!sendData(logger.DATA_STORE[i], api_pin, CFA_URL))
+                if (!sendData(logger.DATA_STORE[i], api_pin, DeviceConfig.active_api_url))
                 {
                     // Append to file for sending later // ToDo: Check the state of DeviceConfigState.sdCardInitialized before attempting to write to SD card
                     appendFile(SD, SENSORS_FAILED_DATA_SEND_STORE_PATH, logger.DATA_STORE[i]);
@@ -1548,28 +1584,21 @@ void initializeAndConfigGSM()
     // GSM initialization successful
     GSM_CONNECTED = true; // TODO: Refactor to remove global variable and use state struct instead
 
+    NetMode modes[] = {NetMode::AUTO, NetMode::_2G, NetMode::_4G};
     bool network_registered = false;
 
-    if (setNetworkMode(NetMode::AUTO))
-    {
-        network_registered = register_to_network();
-    }
-    else if (setNetworkMode(NetMode::_2G))
-    {
-        network_registered = register_to_network();
-    }
-    else if (setNetworkMode(NetMode::_4G))
-    {
-        network_registered = register_to_network();
-    }
-    else
-    {
-        if (!network_registered)
-        {
-            Serial.println("Failed to register to GSM network");
-            return;
+    for (auto mode : modes) {
+        if (setNetworkMode(mode) && register_to_network()) {
+            network_registered = true;
+            break;
         }
     }
+
+    if (!network_registered) {
+        Serial.println("Failed to register to GSM network");
+        return;
+    }
+    
 
     // GPRS initialization
     DeviceConfigState.gsmInternetAvailable = GPRS_init();
@@ -1611,19 +1640,24 @@ void loadInitialConfigs()
     DeviceConfig.power_saving_mode = POWER_SAVING_MODE;
 #endif
 #if defined(GSM_APN)
-    DeviceConfig.gsm_apn = GSM_APN;
+    strncpy(DeviceConfig.gsm_apn, GSM_APN, sizeof(DeviceConfig.gsm_apn) - 1);
+    DeviceConfig.gsm_apn[sizeof(DeviceConfig.gsm_apn) - 1] = '\0';
 #endif
 #if defined(GSM_APN_PWD)
-    DeviceConfig.gsm_apn_pwd = GSM_APN_PWD;
+    strncpy(DeviceConfig.gsm_apn_pwd, GSM_APN_PWD, sizeof(DeviceConfig.gsm_apn_pwd) - 1);
+    DeviceConfig.gsm_apn_pwd[sizeof(DeviceConfig.gsm_apn_pwd) - 1] = '\0';
 #endif
 #if defined(WIFI_STA_SSID)
-    DeviceConfig.wifi_sta_ssid = WIFI_STA_SSID;
+    strncpy(DeviceConfig.wifi_sta_ssid, WIFI_STA_SSID, sizeof(DeviceConfig.wifi_sta_ssid) - 1);
+    DeviceConfig.wifi_sta_ssid[sizeof(DeviceConfig.wifi_sta_ssid) - 1] = '\0';
 #endif
 #if defined(WIFI_STA_PWD)
-    DeviceConfig.wifi_sta_pwd = WIFI_STA_PWD;
+    strncpy(DeviceConfig.wifi_sta_pwd, WIFI_STA_PWD, sizeof(DeviceConfig.wifi_sta_pwd) - 1);
+    DeviceConfig.wifi_sta_pwd[sizeof(DeviceConfig.wifi_sta_pwd) - 1] = '\0';
 #endif
 #if defined(SIM_PIN)
-    DeviceConfig.sim_pin = SIM_PIN;
+    strncpy(DeviceConfig.sim_pin, SIM_PIN, sizeof(DeviceConfig.sim_pin) - 1);
+    DeviceConfig.sim_pin[sizeof(DeviceConfig.sim_pin) - 1] = '\0';
 #endif
 
     if (gsm_capable)
@@ -1637,10 +1671,53 @@ void loadInitialConfigs()
 #if defined(MQTT_BROKER) && defined(MQTT_USERNAME) && defined(MQTT_PASSWORD)
     if (MQTT_BROKER[0] != '\0' && MQTT_USERNAME[0] != '\0' && MQTT_PASSWORD[0] != '\0')
     {
-
         DeviceConfigState.isMQTTConfigured = true;
     }
 #endif
+
+    strcpy(DeviceConfig.production_url, PRODUCTION_URL);
+    strcpy(DeviceConfig.staging_url, STAGING_URL);
+
+#if defined(IS_LIVE)
+    DeviceConfig.isLive = (IS_LIVE != 0);
+    if (DeviceConfig.isLive)
+    {
+        strcpy(DeviceConfig.active_api_url, DeviceConfig.production_url);
+    }
+    else
+    {
+        strcpy(DeviceConfig.active_api_url, DeviceConfig.staging_url);
+    }
+#else
+    DeviceConfig.isLive = false;
+    strcpy(DeviceConfig.active_api_url, DeviceConfig.staging_url);
+#endif
+
+    Serial.println("Firmware Device Configs:");
+    Serial.print("  wifi_sta_ssid: ");
+    Serial.println(DeviceConfig.wifi_sta_ssid);
+    Serial.print("  wifi_sta_pwd: ");
+    Serial.println(DeviceConfig.wifi_sta_pwd);
+    Serial.print("  gsm_apn: ");
+    Serial.println(DeviceConfig.gsm_apn);
+    Serial.print("  gsm_apn_pwd: ");
+    Serial.println(DeviceConfig.gsm_apn_pwd);
+    Serial.print("  sim_pin: ");
+    Serial.println(DeviceConfig.sim_pin);
+    Serial.print("  power_saving_mode: ");
+    Serial.println(DeviceConfig.power_saving_mode ? "true" : "false");
+    Serial.print("  useWiFi: ");
+    Serial.println(DeviceConfig.useWiFi ? "true" : "false");
+    Serial.print("  useGSM: ");
+    Serial.println(DeviceConfig.useGSM ? "true" : "false");
+    Serial.print("  isLive: ");
+    Serial.println(DeviceConfig.isLive ? "true" : "false");
+    Serial.print("  active_api_url: ");
+    Serial.println(DeviceConfig.active_api_url);
+    Serial.print("  staging_url: ");
+    Serial.println(DeviceConfig.staging_url);
+    Serial.print("  production_url: ");
+    Serial.println(DeviceConfig.production_url);
 
     // if (DeviceConfig.power_saving_mode)
     //     {
@@ -1757,7 +1834,7 @@ void updateCommsPreference()
     unsigned long now = millis();
 
     // Determine if we should attempt to reconnect to failed comms
-    bool attemptWiFi = DeviceConfig.useWiFi &&
+    bool attemptWiFi = (DeviceConfig.wifi_sta_ssid[0] != '\0') && DeviceConfig.useWiFi &&
                        (CommsManagerState.wifiFailCount < CommsManagerState.MAX_RETRY_ATTEMPTS) &&
                        (now - CommsManagerState.lastWiFiAttempt > CommsManagerState.reconnectInterval);
 
@@ -1966,6 +2043,10 @@ void initComms()
         if (DeviceConfig.wifi_sta_ssid[0] == '\0')
         {
             Serial.println("DeviceConfig wifi ssid empty!");
+            if (DeviceConfig.useGSM)
+            {
+                CommsManagerState.preferredComm = CommsManagerState.PreferredComm::GSM;
+            }
         }
         else
         {
@@ -2000,7 +2081,7 @@ void initComms()
         }
     }
 
-    if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0 || (DeviceConfig.useGSM && !DeviceConfig.useWiFi))
+    if (DeviceConfig.useGSM && CommunicationPriority::GSM == 0 || (DeviceConfig.useGSM && !DeviceConfig.useWiFi) || DeviceConfig.useGSM && CommsManagerState.preferredComm == CommsManagerState.PreferredComm::GSM)
     {
         initializeAndConfigGSM();
     }
