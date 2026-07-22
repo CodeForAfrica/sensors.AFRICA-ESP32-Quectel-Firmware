@@ -19,8 +19,6 @@
  * and GSM module. It also assumes that the GSM module supports GPRS and can fetch network time.
  *
  * @author Gideon Maina
- * @date 2026-07-05
- * @version 1.4.1
  *
  * @dependencies
  * - ArduinoJson
