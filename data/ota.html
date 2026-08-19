@@ -246,7 +246,7 @@
             msgLogger("Upload timeout", "error");
           };
 
-          xhr.open("POST", "/ota_upload");
+          xhr.open("POST", "/upload-firmware");
           xhr.send(files);
         }
 
@@ -259,7 +259,7 @@
         //       "bin" !== extension)
         //     )
         //       return void console.log("Sending form data");
-        //     const o = "/ota_upload",
+        //     const o = "/upload-firmware",
         //       t = "POST";
         //     let r = new XMLHttpRequest();
         //     const n = new FormData(form),
