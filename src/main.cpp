@@ -255,6 +255,8 @@ int current_year, current_month = 0;
 JsonDocument current_sensor_data;
 bool time_to_send_telemetry = false;
 bool is_boot_telemetry = false;
+bool ha_pending_publish_data = false;
+
 void setup()
 {
     Serial.begin(115200);
@@ -349,7 +351,6 @@ void setup()
         haManager.setConfig(DeviceConfig.ha_mqtt_broker, DeviceConfig.ha_mqtt_port,
                             DeviceConfig.ha_mqtt_username, DeviceConfig.ha_mqtt_password);
         haManager.begin();
-
         DeviceConfigState.isHAConnected = haManager.connect();
     }
 
@@ -401,14 +402,6 @@ void loop()
     // Manage communication device and connectivity state
     commsManager();
 
-    // Maintain the Home Assistant MQTT connection before sensor reads so
-    // freshly sampled values can be published immediately.
-    if (DeviceConfigState.wifiConnected && DeviceConfigState.isHAConfigured && DeviceConfig.ha_enabled)
-    {
-        haManager.loop();
-        DeviceConfigState.isHAConnected = haManager.isConnected();
-    }
-
     act_milli = millis();
 
     if (DeviceConfig.power_saving_mode)
@@ -429,6 +422,7 @@ void loop()
             getPMSREADINGS();
             readDHT();
             last_read_sensors_data = millis();
+            ha_pending_publish_data = true;
         }
     }
 
@@ -504,6 +498,32 @@ void loop()
     if (DeviceConfigState.isMQTTConfigured)
         checkIncomingMQTTMessages();
 
+    // Maintain the Home Assistant MQTT connection and publish current sensor data if connected
+    if (DeviceConfigState.wifiConnected && DeviceConfigState.isHAConfigured && DeviceConfig.ha_enabled)
+    {
+        haManager.loop();
+        DeviceConfigState.isHAConnected = haManager.isConnected();
+
+        if (ha_pending_publish_data)
+        {
+            JsonVariantConst dht = current_sensor_data["DHT"];
+            if (!dht.isNull())
+            {
+                haManager.publishState("temperature", dht["temperature"]);
+                haManager.publishState("humidity", dht["humidity"]);
+            }
+
+            JsonVariantConst pm = current_sensor_data["PM"];
+            if (!pm.isNull())
+            {
+                haManager.publishState("pm1", pm["PM1"]);
+                haManager.publishState("pm25", pm["PM2.5"]);
+                haManager.publishState("pm10", pm["PM10"]);
+            }
+            ha_pending_publish_data = false;
+        }
+    }
+
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
     {
         ESP.restart();
@@ -557,9 +577,6 @@ void readDHT()
             dht_obj["humidity"] = humidity;
             current_sensor_data["DHT"] = dht_obj;
             serializeJsonPretty(current_sensor_data, Serial);
-
-            // Publish the latest temperature/humidity to Home Assistant
-            haManager.publishClimate(temperature, humidity);
         }
 
         break;
@@ -649,9 +666,6 @@ void getPMSREADINGS()
             pm_obj["PM1"] = pms.pm01;
 
             current_sensor_data["PM"] = pm_obj;
-
-            // Publish the latest particulate readings to Home Assistant
-            haManager.publishParticulates(pms.pm01, pms.pm25, pms.pm10);
         }
     }
     else // something went wrong
