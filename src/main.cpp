@@ -58,6 +58,7 @@
 #include "utils/deviceconfig.h"
 #include "webserver/asyncserver.h"
 #include "utils/mqtt_wifi.h"
+#include "utils/homeassistant.h"
 #include "utils/mozilla_ca_bundle.h"
 
 size_t max_wifi_hotspots_size = sizeof(struct_wifiInfo) * 20;
@@ -339,6 +340,13 @@ void setup()
     }
 
     initComms();
+    // ToDO: Add a check to ensure that WiFi is available before proceeding with HA
+    // Home Assistant integration (MQTT Discovery over WiFi)
+    haBegin();
+    if (DeviceConfigState.wifiConnected && haConnect())
+    {
+        haPublishDiscovery(); // publish retained discovery configs as soon as WiFi is up
+    }
 
 // SD INIT
 #ifdef REASSIGN_PINS
@@ -482,6 +490,9 @@ void loop()
     }
     if (DeviceConfigState.isMQTTConfigured)
         checkIncomingMQTTMessages();
+    // TODO: Add a check to ensure HA is connected/configured.
+    // Maintain the Home Assistant MQTT connection
+    haLoop();
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
     {
@@ -536,6 +547,9 @@ void readDHT()
             dht_obj["humidity"] = humidity;
             current_sensor_data["DHT"] = dht_obj;
             serializeJsonPretty(current_sensor_data, Serial);
+
+            // Publish the latest temperature/humidity to Home Assistant
+            haPublishClimate(temperature, humidity);
         }
 
         break;
@@ -625,6 +639,9 @@ void getPMSREADINGS()
             pm_obj["PM1"] = pms.pm01;
 
             current_sensor_data["PM"] = pm_obj;
+
+            // Publish the latest particulate readings to Home Assistant
+            haPublishParticulates(pms.pm01, pms.pm25, pms.pm10);
         }
     }
     else // something went wrong
@@ -915,7 +932,7 @@ bool sendDataViaWiFi(const char *data, const int _pin, const char *url)
 
     // Wait for response and check status code
     unsigned long timeout = millis() + 10000; // 10 second timeout
-    uint8_t statuscode = 0;
+    uint16_t statuscode = 0;
     bool parsing_status = false;
 
     while (client.connected() && millis() < timeout)

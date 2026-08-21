@@ -36,6 +36,13 @@ Open the project using PlatformIO and wait for PlatformIO to configure the envir
 ## API integration
 Open serial monitor to capture the device id which bears the format `<prefix>-<chip id>` e.g. `ESP32-19271G2328BE`. Navigate to [sensors.AFRICA API docs](https://api.sensors.africa/docs) to learn how to use the API and onboard the device via the admin dashboard (*Admin access will be required for this*).
 
+## Home Assistant integration
+The firmware can publish PM, temperature and humidity readings to a
+[Home Assistant](https://www.home-assistant.io/) instance over MQTT (WiFi)
+using MQTT Discovery. See [HOME_ASSISTANT.md](HOME_ASSISTANT.md) for the full
+setup procedure, including connecting to a Home Assistant server hosted on a
+Raspberry Pi.
+
 ## Debugging
 Debugging is available via the USB-UART interface. To enable debugging, uncomment the debug options in platformio.ini file. On VS code, hit the debug icon and select the `PIO Debug` option.
 
