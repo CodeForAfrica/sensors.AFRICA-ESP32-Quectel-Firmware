@@ -41,6 +41,8 @@ struct DeviceConfigState
     bool sdCardInitialized = false;
     bool isMQTTConfigured = false;
     bool restartRequired = false;
+    bool isHAConfigured = false;
+    bool isHAConnected = false;
 };
 
 extern struct DeviceConfigState DeviceConfigState;
@@ -59,6 +61,11 @@ struct DeviceConfig
     char active_api_url[128] = {};
     char staging_url[128] = {};
     char production_url[128] = {};
+    bool ha_enabled = false; // Home Assistant integration
+    char ha_mqtt_broker[64] = {};
+    int ha_mqtt_port = 1883;
+    char ha_mqtt_username[32] = {};
+    char ha_mqtt_password[32] = {};
 };
 
 extern struct DeviceConfig DeviceConfig;
@@ -87,6 +94,11 @@ static JsonDocument getRuntimeDeviceConfig()
     doc["stagingUrl"] = DeviceConfig.staging_url;
     doc["productionUrl"] = DeviceConfig.production_url;
     doc["isLive"] = DeviceConfig.isLive;
+    doc["haEnabled"] = DeviceConfig.ha_enabled;
+    doc["haBroker"] = DeviceConfig.ha_mqtt_broker;
+    doc["haPort"] = DeviceConfig.ha_mqtt_port;
+    doc["haUsername"] = DeviceConfig.ha_mqtt_username;
+    doc["haPassword"] = DeviceConfig.ha_mqtt_password;
     return doc;
 }
 
@@ -282,6 +294,30 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
             strcpy(DeviceConfig.active_api_url, DeviceConfig.staging_url);
         }
     }
+
+    // Home Assistant connection settings (persisted via the captive portal)
+    if (hasString(config["haEnabled"]))
+    {
+        DeviceConfig.ha_enabled = config["haEnabled"].as<bool>();
+    }
+    if (hasString(config["haBroker"]))
+    {
+        strcpy(DeviceConfig.ha_mqtt_broker, config["haBroker"]);
+    }
+    if (hasString(config["haPort"]))
+    {
+        DeviceConfig.ha_mqtt_port = config["haPort"].as<int>();
+    }
+    if (hasString(config["haUsername"]))
+    {
+        strcpy(DeviceConfig.ha_mqtt_username, config["haUsername"]);
+    }
+    if (hasString(config["haPassword"]))
+    {
+        strcpy(DeviceConfig.ha_mqtt_password, config["haPassword"]);
+    }
+
+    DeviceConfigState.isHAConfigured = DeviceConfig.ha_enabled && DeviceConfig.ha_mqtt_broker[0] != '\0';
 
     gsmUpdated = apnPwdUpdated || apnPwdUpdated || pinUpdated;
     wiFiUpdated = wifiSSIDUpdated || wifiPwdUpdated;
