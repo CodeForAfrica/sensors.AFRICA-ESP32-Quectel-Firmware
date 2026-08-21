@@ -5,8 +5,8 @@
  * Publishes sensor readings (PM1, PM2.5, PM10, temperature and humidity)
  * to a Home Assistant instance using the standard MQTT Discovery protocol.
  *
- * The integration uses its own dedicated PubSubClient/WiFiClient so it does
- * not interfere with the sensors.AFRICA telemetry MQTT client.
+ * The integration uses a dedicated PubSubClient/WiFiClient so it does not
+ * interfere with the sensors.AFRICA telemetry MQTT client.
  *
  * Flow:
  *   1. On boot (after WiFi connects) discovery config messages are published
@@ -14,7 +14,9 @@
  *   2. Every time sensor data is read, the value is published to the entity's
  *      state topic.
  *
- * Configuration lives in src/global_configs.h (HA_* macros).
+ * HomeAssistantManager owns the connection strings (broker, username,
+ * password, port) and the connection status. It does not read the HA_* global
+ * config macros - feed it with setConfig() using values from DeviceConfig.
  * See HOME_ASSISTANT.md for full setup instructions.
  */
 
@@ -25,31 +27,12 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <math.h>
-#include "../global_configs.h"
+#include <string.h>
+#include "../global_configs.h" // SENSOR_PREFIX (device naming)
 
 // ---------------------------------------------------------------------------
-// Home Assistant MQTT configuration defaults (override in global_configs.h)
+// Identity / topic defaults (these are NOT connection settings)
 // ---------------------------------------------------------------------------
-#ifndef HA_ENABLE
-#define HA_ENABLE 0
-#endif
-
-#ifndef HA_MQTT_BROKER
-#define HA_MQTT_BROKER "" // e.g. "192.168.1.50" or "homeassistant.local"
-#endif
-
-#ifndef HA_MQTT_PORT
-#define HA_MQTT_PORT 1883
-#endif
-
-#ifndef HA_MQTT_USERNAME
-#define HA_MQTT_USERNAME ""
-#endif
-
-#ifndef HA_MQTT_PASSWORD
-#define HA_MQTT_PASSWORD ""
-#endif
-
 #ifndef HA_DISCOVERY_PREFIX
 #define HA_DISCOVERY_PREFIX "homeassistant"
 #endif
@@ -66,243 +49,312 @@
 #define HA_DEVICE_MODEL "ESP32-S3 Sensor Node"
 #endif
 
-// ---------------------------------------------------------------------------
-// Dedicated MQTT client for Home Assistant
-// ---------------------------------------------------------------------------
 extern char esp_chipid[];
 
-static WiFiClient haWifiClient;
-static PubSubClient haMqttClient(haWifiClient);
-
-static bool ha_configured = false;
-static bool ha_discovery_published = false;
-static unsigned long ha_last_reconnect_attempt = 0;
-static const unsigned long HA_RECONNECT_INTERVAL_MS = 30000; // throttle reconnect attempts
-
-/// @brief Stable, lowercase node identifier used in topics and unique IDs
-static String haNodeId()
+/**
+ * @brief Home Assistant MQTT manager.
+ *
+ * Tracks the connection status and the connection strings (broker, username,
+ * password and port) in its own state instead of relying on global configs.
+ */
+class HomeAssistantManager
 {
-    String id = String(SENSOR_PREFIX) + String(esp_chipid);
-    id.toLowerCase();
-    return id;
-}
-
-/// @brief Base topic for this node's Home Assistant sensors
-static String haBaseTopic()
-{
-    return String(HA_DISCOVERY_PREFIX) + "/sensor/" + haNodeId();
-}
-
-static String haDiscoveryTopic(const char *sensor_key)
-{
-    return haBaseTopic() + "/" + sensor_key + "/config";
-}
-
-static String haStateTopic(const char *sensor_key)
-{
-    return haBaseTopic() + "/" + sensor_key + "/state";
-}
-
-/// @brief Publish a single Home Assistant MQTT discovery config (retained)
-static bool haPublishDiscoveryFor(const char *sensor_key, const char *name,
-                                  const char *device_class, const char *unit,
-                                  const char *icon = nullptr)
-{
-    if (!haMqttClient.connected())
-        return false;
-
-    JsonDocument doc;
-    doc["name"] = name;
-    doc["unique_id"] = haNodeId() + "_" + sensor_key;
-    doc["state_topic"] = haStateTopic(sensor_key);
-    doc["state_class"] = "measurement";
-
-    if (device_class != nullptr && device_class[0] != '\0')
-        doc["device_class"] = device_class;
-    if (unit != nullptr && unit[0] != '\0')
-        doc["unit_of_measurement"] = unit;
-    if (icon != nullptr && icon[0] != '\0')
-        doc["icon"] = icon;
-
-    JsonObject device = doc["device"].to<JsonObject>();
-    JsonArray identifiers = device["identifiers"].to<JsonArray>();
-    identifiers.add(haNodeId());
-
-    String deviceName = String(HA_DEVICE_NAME) + " " + String(esp_chipid);
-    device["name"] = deviceName;
-    device["manufacturer"] = HA_DEVICE_MANUFACTURER;
-    device["model"] = HA_DEVICE_MODEL;
-
-    char payload[512];
-    if (serializeJson(doc, payload, sizeof(payload)) == 0)
-        return false;
-
-    String topic = haDiscoveryTopic(sensor_key);
-    if (haMqttClient.publish(topic.c_str(), payload, true))
+public:
+    enum class Status : uint8_t
     {
-        Serial.printf("[HA] Discovery published: %s -> %s\n", topic.c_str(), payload);
-        return true;
-    }
-    return false;
-}
+        Disabled = 0, // no broker configured / integration disabled
+        Disconnected, // configured but not connected to the broker
+        Connecting,   // a connection attempt is in progress
+        Connected     // connected to the broker
+    };
 
-/// @brief Publish discovery configs for every supported entity
-static void haPublishDiscovery()
-{
-    if (!haMqttClient.connected())
-        return;
-
-    haPublishDiscoveryFor("temperature", "Temperature", "temperature", "°C", "mdi:thermometer");
-    haPublishDiscoveryFor("humidity", "Humidity", "humidity", "%", "mdi:water-percent");
-    haPublishDiscoveryFor("pm1", "PM1", "pm1", "µg/m³", "mdi:blur");
-    haPublishDiscoveryFor("pm25", "PM2.5", "pm25", "µg/m³", "mdi:blur");
-    haPublishDiscoveryFor("pm10", "PM10", "pm10", "µg/m³", "mdi:blur");
-
-    ha_discovery_published = true;
-    Serial.println("[HA] Discovery configs published");
-}
-
-/// @brief Connect the dedicated HA MQTT client to the Home Assistant broker
-static bool haConnect()
-{
-    if (haMqttClient.connected())
-        return true;
-
-    if (WiFi.status() != WL_CONNECTED)
+    HomeAssistantManager()
     {
-        Serial.println("[HA] WiFi not connected, cannot connect to MQTT broker");
-        return false;
+        _broker[0] = '\0';
+        _username[0] = '\0';
+        _password[0] = '\0';
+        _port = 1883;
+        _status = Status::Disabled;
+        _discoveryPublished = false;
+        _lastReconnectAttempt = 0;
+        _mqtt.setClient(_wifi);
     }
 
-    if (HA_MQTT_BROKER[0] == '\0')
+    /// @brief Set the connection strings tracked by the manager.
+    /// @param broker MQTT broker hostname/IP (empty disables the integration)
+    /// @param port MQTT broker port
+    /// @param username MQTT username (optional)
+    /// @param password MQTT password (optional)
+    void setConfig(const char *broker, uint16_t port = 1883,
+                   const char *username = nullptr, const char *password = nullptr)
     {
-        ha_configured = false;
-        return false;
+        const char *b = broker ? broker : "";
+        const char *u = username ? username : "";
+        const char *p = password ? password : "";
+
+        bool changed = false;
+        changed |= strcmp(_broker, b) != 0;
+        changed |= _port != port;
+        changed |= strcmp(_username, u) != 0;
+        changed |= strcmp(_password, p) != 0;
+
+        strncpy(_broker, b, sizeof(_broker) - 1);
+        _broker[sizeof(_broker) - 1] = '\0';
+        _port = port;
+        strncpy(_username, u, sizeof(_username) - 1);
+        _username[sizeof(_username) - 1] = '\0';
+        strncpy(_password, p, sizeof(_password) - 1);
+        _password[sizeof(_password) - 1] = '\0';
+
+        if (changed)
+        {
+            if (_mqtt.connected())
+                _mqtt.disconnect();
+            _discoveryPublished = false;
+            _lastReconnectAttempt = 0;
+            _status = (_broker[0] == '\0') ? Status::Disabled : Status::Disconnected;
+        }
     }
 
-    haMqttClient.setBufferSize(1024);
-    haMqttClient.setServer(HA_MQTT_BROKER, HA_MQTT_PORT);
-
-    String clientId = haNodeId() + "-ha";
-    bool connected = false;
-
-    if (HA_MQTT_USERNAME[0] != '\0')
-        connected = haMqttClient.connect(clientId.c_str(), HA_MQTT_USERNAME, HA_MQTT_PASSWORD);
-    else
-        connected = haMqttClient.connect(clientId.c_str());
-
-    if (connected)
+    /// @brief (Re)initialise the manager from its stored connection strings
+    bool begin()
     {
-        Serial.printf("[HA] Connected to MQTT broker %s:%d as %s\n",
-                      HA_MQTT_BROKER, HA_MQTT_PORT, clientId.c_str());
-        ha_discovery_published = false;
+        _status = (_broker[0] == '\0') ? Status::Disabled : Status::Disconnected;
+
+        if (_status == Status::Disabled)
+        {
+            Serial.println("[HA] Home Assistant integration disabled (no broker configured)");
+            return false;
+        }
+
+        Serial.printf("[HA] Home Assistant enabled -> broker %s:%u\n", _broker, _port);
         return true;
     }
 
-    Serial.printf("[HA] MQTT connect failed, rc=%d\n", haMqttClient.state());
-    return false;
-}
-
-/// @brief Make sure the HA MQTT connection is alive and discovery was sent
-static bool haEnsureConnected()
-{
-    if (!ha_configured)
-        return false;
-
-    if (haMqttClient.connected())
+    /// @brief Connect to the broker and publish discovery configs on success
+    bool connect()
     {
-        if (!ha_discovery_published)
-            haPublishDiscovery();
-        return true;
+        if (_mqtt.connected())
+        {
+            _status = Status::Connected;
+            if (!_discoveryPublished)
+                publishDiscovery();
+            return true;
+        }
+
+        if (WiFi.status() != WL_CONNECTED)
+        {
+            _status = Status::Disconnected;
+            Serial.println("[HA] WiFi not connected, cannot connect to MQTT broker");
+            return false;
+        }
+
+        if (_broker[0] == '\0')
+        {
+            _status = Status::Disabled;
+            return false;
+        }
+
+        _status = Status::Connecting;
+        _mqtt.setBufferSize(1024);
+        _mqtt.setServer(_broker, _port);
+
+        String clientId = nodeId() + "-ha";
+        bool ok = false;
+        if (_username[0] != '\0')
+            ok = _mqtt.connect(clientId.c_str(), _username, _password);
+        else
+            ok = _mqtt.connect(clientId.c_str());
+
+        if (ok)
+        {
+            _status = Status::Connected;
+            _discoveryPublished = false;
+            Serial.printf("[HA] Connected to MQTT broker %s:%u as %s\n",
+                          _broker, _port, clientId.c_str());
+            publishDiscovery();
+        }
+        else
+        {
+            _status = Status::Disconnected;
+            Serial.printf("[HA] MQTT connect failed, rc=%d\n", _mqtt.state());
+        }
+
+        return ok;
     }
 
-    unsigned long now = millis();
-    if (now - ha_last_reconnect_attempt < HA_RECONNECT_INTERVAL_MS)
-        return false;
-
-    ha_last_reconnect_attempt = now;
-    if (haConnect())
+    /// @brief Service routine - call from loop() to keep the connection alive
+    void loop()
     {
-        haPublishDiscovery();
-        return true;
-    }
-    return false;
-}
+        if (_status == Status::Disabled)
+            return;
 
-/// @brief Initialise the Home Assistant integration.
-/// @return true if HA is enabled in firmware config and a broker is set
-static bool haBegin()
-{
-    ha_configured = (HA_ENABLE != 0) && (HA_MQTT_BROKER[0] != '\0');
+        if (_mqtt.connected())
+        {
+            _status = Status::Connected;
+            _mqtt.loop();
+            if (!_discoveryPublished)
+                publishDiscovery();
+            return;
+        }
 
-    if (!ha_configured)
-    {
-        Serial.println("[HA] Home Assistant integration disabled (set HA_ENABLE=1 and HA_MQTT_BROKER in global_configs.h)");
-        return false;
-    }
+        _status = Status::Disconnected;
 
-    Serial.printf("[HA] Home Assistant integration enabled -> broker %s:%d\n",
-                  HA_MQTT_BROKER, HA_MQTT_PORT);
-    return true;
-}
-
-/// @brief Publish a single sensor value to its Home Assistant state topic
-static bool haPublishState(const char *sensor_key, float value)
-{
-    if (!haEnsureConnected())
-        return false;
-
-    if (isnan(value))
-        return false;
-
-    String topic = haStateTopic(sensor_key);
-    char payload[32];
-    snprintf(payload, sizeof(payload), "%.2f", value);
-
-    if (haMqttClient.publish(topic.c_str(), payload))
-    {
-        Serial.printf("[HA] %s -> %s\n", sensor_key, payload);
-        return true;
+        unsigned long now = millis();
+        if (now - _lastReconnectAttempt >= RECONNECT_INTERVAL_MS)
+        {
+            _lastReconnectAttempt = now;
+            connect();
+        }
     }
 
-    Serial.printf("[HA] Failed to publish %s\n", sensor_key);
-    return false;
-}
-
-/// @brief Publish temperature and humidity readings to Home Assistant
-static void haPublishClimate(float temperature, float humidity)
-{
-    if (!ha_configured)
-        return;
-    haPublishState("temperature", temperature);
-    haPublishState("humidity", humidity);
-}
-
-/// @brief Publish particulate matter readings to Home Assistant
-static void haPublishParticulates(float pm1, float pm25, float pm10)
-{
-    if (!ha_configured)
-        return;
-    haPublishState("pm1", pm1);
-    haPublishState("pm25", pm25);
-    haPublishState("pm10", pm10);
-}
-
-/// @brief Service routine - call from loop() to keep the HA client healthy
-static void haLoop()
-{
-    if (!ha_configured)
-        return;
-
-    if (haMqttClient.connected())
+    /// @brief Publish a single sensor value to its Home Assistant state topic
+    bool publishState(const char *sensor_key, float value)
     {
-        haMqttClient.loop();
-        if (!ha_discovery_published)
-            haPublishDiscovery();
-        return;
+        if (_status != Status::Connected || !_mqtt.connected())
+            return false;
+
+        if (isnan(value))
+            return false;
+
+        String topic = stateTopic(sensor_key);
+        char payload[32];
+        snprintf(payload, sizeof(payload), "%.2f", value);
+
+        if (_mqtt.publish(topic.c_str(), payload))
+        {
+            Serial.printf("[HA] %s -> %s\n", sensor_key, payload);
+            return true;
+        }
+
+        Serial.printf("[HA] Failed to publish %s\n", sensor_key);
+        return false;
     }
 
-    haEnsureConnected();
-}
+    /// @brief Publish temperature and humidity readings
+    void publishClimate(float temperature, float humidity)
+    {
+        if (_status != Status::Connected)
+            return;
+        publishState("temperature", temperature);
+        publishState("humidity", humidity);
+    }
+
+    /// @brief Publish particulate matter readings
+    void publishParticulates(float pm1, float pm25, float pm10)
+    {
+        if (_status != Status::Connected)
+            return;
+        publishState("pm1", pm1);
+        publishState("pm25", pm25);
+        publishState("pm10", pm10);
+    }
+
+    /// @brief Publish retained discovery configs for all entities
+    void publishDiscovery()
+    {
+        if (!_mqtt.connected())
+            return;
+
+        publishDiscoveryFor("temperature", "Temperature", "temperature", "°C", "mdi:thermometer");
+        publishDiscoveryFor("humidity", "Humidity", "humidity", "%", "mdi:water-percent");
+        publishDiscoveryFor("pm1", "PM1", "pm1", "µg/m³", "mdi:blur");
+        publishDiscoveryFor("pm25", "PM2.5", "pm25", "µg/m³", "mdi:blur");
+        publishDiscoveryFor("pm10", "PM10", "pm10", "µg/m³", "mdi:blur");
+
+        _discoveryPublished = true;
+        Serial.println("[HA] Discovery configs published");
+    }
+
+    // Accessors
+    Status status() const { return _status; }
+    bool isConfigured() const { return _status != Status::Disabled; }
+    bool isConnected() { return _status == Status::Connected && _mqtt.connected(); }
+    const char *broker() const { return _broker; }
+    uint16_t port() const { return _port; }
+    const char *username() const { return _username; }
+    const char *password() const { return _password; }
+
+private:
+    String nodeId() const
+    {
+        String id = String(SENSOR_PREFIX) + String(esp_chipid);
+        id.toLowerCase();
+        return id;
+    }
+
+    String baseTopic() const
+    {
+        return String(HA_DISCOVERY_PREFIX) + "/sensor/" + nodeId();
+    }
+
+    String discoveryTopic(const char *sensor_key) const
+    {
+        return baseTopic() + "/" + sensor_key + "/config";
+    }
+
+    String stateTopic(const char *sensor_key) const
+    {
+        return baseTopic() + "/" + sensor_key + "/state";
+    }
+
+    bool publishDiscoveryFor(const char *sensor_key, const char *name,
+                             const char *device_class, const char *unit,
+                             const char *icon = nullptr)
+    {
+        if (!_mqtt.connected())
+            return false;
+
+        JsonDocument doc;
+        doc["name"] = name;
+        doc["unique_id"] = nodeId() + "_" + sensor_key;
+        doc["state_topic"] = stateTopic(sensor_key);
+        doc["state_class"] = "measurement";
+
+        if (device_class != nullptr && device_class[0] != '\0')
+            doc["device_class"] = device_class;
+        if (unit != nullptr && unit[0] != '\0')
+            doc["unit_of_measurement"] = unit;
+        if (icon != nullptr && icon[0] != '\0')
+            doc["icon"] = icon;
+
+        JsonObject device = doc["device"].to<JsonObject>();
+        JsonArray identifiers = device["identifiers"].to<JsonArray>();
+        identifiers.add(nodeId());
+
+        String deviceName = String(HA_DEVICE_NAME) + " " + String(esp_chipid);
+        device["name"] = deviceName;
+        device["manufacturer"] = HA_DEVICE_MANUFACTURER;
+        device["model"] = HA_DEVICE_MODEL;
+
+        char payload[512];
+        if (serializeJson(doc, payload, sizeof(payload)) == 0)
+            return false;
+
+        String topic = discoveryTopic(sensor_key);
+        if (_mqtt.publish(topic.c_str(), payload, true))
+        {
+            Serial.printf("[HA] Discovery published: %s -> %s\n", topic.c_str(), payload);
+            return true;
+        }
+        return false;
+    }
+
+    // Connection strings and status - owned by the manager
+    char _broker[64];
+    char _username[32];
+    char _password[32];
+    uint16_t _port;
+    Status _status;
+
+    WiFiClient _wifi;
+    PubSubClient _mqtt;
+    bool _discoveryPublished;
+    unsigned long _lastReconnectAttempt;
+
+    static const unsigned long RECONNECT_INTERVAL_MS = 30000;
+};
+
+static HomeAssistantManager haManager;
 
 #endif // HOMEASSISTANT_H

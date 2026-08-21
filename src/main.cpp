@@ -340,12 +340,15 @@ void setup()
     }
 
     initComms();
-    // ToDO: Add a check to ensure that WiFi is available before proceeding with HA
-    // Home Assistant integration (MQTT Discovery over WiFi)
-    haBegin();
-    if (DeviceConfigState.wifiConnected && haConnect())
+
+    if (DeviceConfigState.wifiConnected && DeviceConfigState.isHAConfigured && DeviceConfig.ha_enabled)
     {
-        haPublishDiscovery(); // publish retained discovery configs as soon as WiFi is up
+        // Home Assistant integration (MQTT Discovery over WiFi)
+        haManager.setConfig(DeviceConfig.ha_mqtt_broker, DeviceConfig.ha_mqtt_port,
+                            DeviceConfig.ha_mqtt_username, DeviceConfig.ha_mqtt_password);
+        haManager.begin();
+
+        DeviceConfigState.isHAConnected = haManager.connect();
     }
 
 // SD INIT
@@ -395,6 +398,14 @@ void loop()
     }
     // Manage communication device and connectivity state
     commsManager();
+
+    // Maintain the Home Assistant MQTT connection before sensor reads so
+    // freshly sampled values can be published immediately.
+    if (DeviceConfigState.wifiConnected && DeviceConfigState.isHAConfigured && DeviceConfig.ha_enabled)
+    {
+        haManager.loop();
+        DeviceConfigState.isHAConnected = haManager.isConnected();
+    }
 
     act_milli = millis();
 
@@ -490,9 +501,6 @@ void loop()
     }
     if (DeviceConfigState.isMQTTConfigured)
         checkIncomingMQTTMessages();
-    // TODO: Add a check to ensure HA is connected/configured.
-    // Maintain the Home Assistant MQTT connection
-    haLoop();
 
     if (millis() - boottime > DURATION_BEFORE_FORCED_RESTART_MS)
     {
@@ -549,7 +557,7 @@ void readDHT()
             serializeJsonPretty(current_sensor_data, Serial);
 
             // Publish the latest temperature/humidity to Home Assistant
-            haPublishClimate(temperature, humidity);
+            haManager.publishClimate(temperature, humidity);
         }
 
         break;
@@ -641,7 +649,7 @@ void getPMSREADINGS()
             current_sensor_data["PM"] = pm_obj;
 
             // Publish the latest particulate readings to Home Assistant
-            haPublishParticulates(pms.pm01, pms.pm25, pms.pm10);
+            haManager.publishParticulates(pms.pm01, pms.pm25, pms.pm10);
         }
     }
     else // something went wrong
@@ -847,7 +855,7 @@ String formatDateTime(time_t t, String timezone)
 
 String getRTCdatetimetz(const char *format, char *timezone)
 {
-    if(!DeviceConfigState.timeSet)
+    if (!DeviceConfigState.timeSet)
     {
         return "";
     }
@@ -1602,18 +1610,20 @@ void initializeAndConfigGSM()
     NetMode modes[] = {NetMode::AUTO, NetMode::_2G, NetMode::_4G};
     bool network_registered = false;
 
-    for (auto mode : modes) {
-        if (setNetworkMode(mode) && register_to_network()) {
+    for (auto mode : modes)
+    {
+        if (setNetworkMode(mode) && register_to_network())
+        {
             network_registered = true;
             break;
         }
     }
 
-    if (!network_registered) {
+    if (!network_registered)
+    {
         Serial.println("Failed to register to GSM network");
         return;
     }
-    
 
     // GPRS initialization
     DeviceConfigState.gsmInternetAvailable = GPRS_init();
@@ -1708,6 +1718,26 @@ void loadInitialConfigs()
     strcpy(DeviceConfig.active_api_url, DeviceConfig.staging_url);
 #endif
 
+#if defined(HA_ENABLE)
+    DeviceConfig.ha_enabled = (HA_ENABLE != 0);
+#endif
+#if defined(HA_MQTT_BROKER)
+    strncpy(DeviceConfig.ha_mqtt_broker, HA_MQTT_BROKER, sizeof(DeviceConfig.ha_mqtt_broker) - 1);
+    DeviceConfig.ha_mqtt_broker[sizeof(DeviceConfig.ha_mqtt_broker) - 1] = '\0';
+#endif
+#if defined(HA_MQTT_PORT)
+    DeviceConfig.ha_mqtt_port = HA_MQTT_PORT;
+#endif
+#if defined(HA_MQTT_USERNAME)
+    strncpy(DeviceConfig.ha_mqtt_username, HA_MQTT_USERNAME, sizeof(DeviceConfig.ha_mqtt_username) - 1);
+    DeviceConfig.ha_mqtt_username[sizeof(DeviceConfig.ha_mqtt_username) - 1] = '\0';
+#endif
+#if defined(HA_MQTT_PASSWORD)
+    strncpy(DeviceConfig.ha_mqtt_password, HA_MQTT_PASSWORD, sizeof(DeviceConfig.ha_mqtt_password) - 1);
+    DeviceConfig.ha_mqtt_password[sizeof(DeviceConfig.ha_mqtt_password) - 1] = '\0';
+#endif
+
+    DeviceConfigState.isHAConfigured = (DeviceConfig.ha_enabled && DeviceConfig.ha_mqtt_broker[0] != '\0');
     Serial.println("Firmware Device Configs:");
     Serial.print("  wifi_sta_ssid: ");
     Serial.println(DeviceConfig.wifi_sta_ssid);
