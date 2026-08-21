@@ -167,6 +167,7 @@ public:
 
         _status = Status::Connecting;
         _mqtt.setBufferSize(1024);
+        _mqtt.setKeepAlive(60); //? Doesn't really help if time between publishes is > 60s, but it doesn't hurt either
         _mqtt.setServer(_broker, _port);
 
         String clientId = nodeId() + "-ha";
@@ -244,8 +245,11 @@ public:
     /// @brief Publish temperature and humidity readings
     void publishClimate(float temperature, float humidity)
     {
-        if (_status != Status::Connected)
+        if (!ensureConnected())
+        {
+            Serial.println("[HA] Not connected to MQTT broker, cannot publish climate readings");
             return;
+        }
         publishState("temperature", temperature);
         publishState("humidity", humidity);
     }
@@ -253,8 +257,11 @@ public:
     /// @brief Publish particulate matter readings
     void publishParticulates(float pm1, float pm25, float pm10)
     {
-        if (_status != Status::Connected)
+        if (!ensureConnected())
+        {
+            Serial.println("[HA] Not connected to MQTT broker, cannot publish particulate readings");
             return;
+        }
         publishState("pm1", pm1);
         publishState("pm25", pm25);
         publishState("pm10", pm10);
@@ -286,6 +293,23 @@ public:
     const char *password() const { return _password; }
 
 private:
+    /// @brief Make sure the MQTT connection is usable before publishing.
+    /// Reconnects on demand so a single dropped connection does not lose a
+    /// reading.
+    bool ensureConnected()
+    {
+        if (_mqtt.connected())
+        {
+            _status = Status::Connected;
+            return true;
+        }
+
+        if (_status == Status::Disabled || WiFi.status() != WL_CONNECTED)
+            return false;
+
+        return connect();
+    }
+
     String nodeId() const
     {
         return String(_nodeId);
