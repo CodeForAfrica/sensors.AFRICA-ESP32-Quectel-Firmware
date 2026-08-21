@@ -341,9 +341,11 @@ void setup()
 
     initComms();
 
+    // Home Assistant integration (MQTT Discovery over WiFi)
+
     if (DeviceConfigState.wifiConnected && DeviceConfigState.isHAConfigured && DeviceConfig.ha_enabled)
     {
-        // Home Assistant integration (MQTT Discovery over WiFi)
+        haManager.setNodeId(SENSOR_PREFIX, esp_chipid);
         haManager.setConfig(DeviceConfig.ha_mqtt_broker, DeviceConfig.ha_mqtt_port,
                             DeviceConfig.ha_mqtt_username, DeviceConfig.ha_mqtt_password);
         haManager.begin();

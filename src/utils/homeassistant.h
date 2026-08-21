@@ -28,7 +28,6 @@
 #include <ArduinoJson.h>
 #include <math.h>
 #include <string.h>
-#include "../global_configs.h" // SENSOR_PREFIX (device naming)
 
 // ---------------------------------------------------------------------------
 // Identity / topic defaults (these are NOT connection settings)
@@ -49,8 +48,6 @@
 #define HA_DEVICE_MODEL "ESP32-S3 Sensor Node"
 #endif
 
-extern char esp_chipid[];
-
 /**
  * @brief Home Assistant MQTT manager.
  *
@@ -70,6 +67,7 @@ public:
 
     HomeAssistantManager()
     {
+        _nodeId[0] = '\0';
         _broker[0] = '\0';
         _username[0] = '\0';
         _password[0] = '\0';
@@ -78,6 +76,18 @@ public:
         _discoveryPublished = false;
         _lastReconnectAttempt = 0;
         _mqtt.setClient(_wifi);
+    }
+
+    /// @brief Set the node identifier used in topics and unique IDs.
+    /// The node id is built from the device prefix and chip id, both passed
+    /// in by the caller instead of being read from global configs.
+    void setNodeId(const char *prefix, const char *chipId)
+    {
+        String id = String(prefix ? prefix : "") + String(chipId ? chipId : "");
+        id.toLowerCase();
+
+        strncpy(_nodeId, id.c_str(), sizeof(_nodeId) - 1);
+        _nodeId[sizeof(_nodeId) - 1] = '\0';
     }
 
     /// @brief Set the connection strings tracked by the manager.
@@ -278,9 +288,7 @@ public:
 private:
     String nodeId() const
     {
-        String id = String(SENSOR_PREFIX) + String(esp_chipid);
-        id.toLowerCase();
-        return id;
+        return String(_nodeId);
     }
 
     String baseTopic() const
@@ -322,7 +330,7 @@ private:
         JsonArray identifiers = device["identifiers"].to<JsonArray>();
         identifiers.add(nodeId());
 
-        String deviceName = String(HA_DEVICE_NAME) + " " + String(esp_chipid);
+        String deviceName = String(HA_DEVICE_NAME) + " " + nodeId();
         device["name"] = deviceName;
         device["manufacturer"] = HA_DEVICE_MANUFACTURER;
         device["model"] = HA_DEVICE_MODEL;
@@ -340,7 +348,8 @@ private:
         return false;
     }
 
-    // Connection strings and status - owned by the manager
+    // Node id + connection strings and status - owned by the manager
+    char _nodeId[48];
     char _broker[64];
     char _username[32];
     char _password[32];
