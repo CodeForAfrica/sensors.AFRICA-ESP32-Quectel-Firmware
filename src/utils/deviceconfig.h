@@ -66,6 +66,9 @@ struct DeviceConfig
     int ha_mqtt_port = 1883;
     char ha_mqtt_username[32] = {};
     char ha_mqtt_password[32] = {};
+    char ha_device_name[32] = {};
+    char ha_device_manufacturer[32] = {};
+    char ha_device_model[32] = {};
 };
 
 extern struct DeviceConfig DeviceConfig;
@@ -95,10 +98,13 @@ static JsonDocument getRuntimeDeviceConfig()
     doc["productionUrl"] = DeviceConfig.production_url;
     doc["isLive"] = DeviceConfig.isLive;
     doc["haEnabled"] = DeviceConfig.ha_enabled;
-    doc["haBroker"] = DeviceConfig.ha_mqtt_broker;
-    doc["haPort"] = DeviceConfig.ha_mqtt_port;
-    doc["haUsername"] = DeviceConfig.ha_mqtt_username;
-    doc["haPassword"] = DeviceConfig.ha_mqtt_password;
+    doc["haMqttBroker"] = DeviceConfig.ha_mqtt_broker;
+    doc["haMqttPort"] = DeviceConfig.ha_mqtt_port;
+    doc["haMqttUsername"] = DeviceConfig.ha_mqtt_username;
+    doc["haMqttPassword"] = DeviceConfig.ha_mqtt_password;
+    doc["haDeviceName"] = DeviceConfig.ha_device_name;
+    doc["haDeviceManufacturer"] = DeviceConfig.ha_device_manufacturer;
+    doc["haDeviceModel"] = DeviceConfig.ha_device_model;
     return doc;
 }
 
@@ -300,21 +306,33 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
     {
         DeviceConfig.ha_enabled = config["haEnabled"].as<bool>();
     }
-    if (hasString(config["haBroker"]))
+    if (hasString(config[" haMqttBroker"]))
     {
-        strcpy(DeviceConfig.ha_mqtt_broker, config["haBroker"]);
+        strcpy(DeviceConfig.ha_mqtt_broker, config[" haMqttBroker"]);
     }
-    if (hasString(config["haPort"]))
+    if (hasString(config["haMqttPort"]))
     {
-        DeviceConfig.ha_mqtt_port = config["haPort"].as<int>();
+        DeviceConfig.ha_mqtt_port = config["haMqttPort"].as<int>();
     }
-    if (hasString(config["haUsername"]))
+    if (hasString(config["haMqttUsername"]))
     {
-        strcpy(DeviceConfig.ha_mqtt_username, config["haUsername"]);
+        strcpy(DeviceConfig.ha_mqtt_username, config["haMqttUsername"]);
     }
-    if (hasString(config["haPassword"]))
+    if (hasString(config["haMqttPassword"]))
     {
-        strcpy(DeviceConfig.ha_mqtt_password, config["haPassword"]);
+        strcpy(DeviceConfig.ha_mqtt_password, config["haMqttPassword"]);
+    }
+    if (hasString(config["haDeviceName"]))
+    {
+        strcpy(DeviceConfig.ha_device_name, config["haDeviceName"]);
+    }
+    if (hasString(config["haDeviceManufacturer"]))
+    {
+        strcpy(DeviceConfig.ha_device_manufacturer, config["haDeviceManufacturer"]);
+    }
+    if (hasString(config["haDeviceModel"]))
+    {
+        strcpy(DeviceConfig.ha_device_model, config["haDeviceModel"]);
     }
 
     DeviceConfigState.isHAConfigured = DeviceConfig.ha_enabled && DeviceConfig.ha_mqtt_broker[0] != '\0';
