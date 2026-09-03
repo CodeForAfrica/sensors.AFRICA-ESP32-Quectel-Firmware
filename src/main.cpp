@@ -520,20 +520,20 @@ void loop()
             JsonVariantConst dht = current_sensor_data["DHT"];
             if (!dht.isNull())
             {
-                if (dht.containsKey("temperature"))
+                if (!dht["temperature"].isNull())
                     published |= haManager.publishState("temperature", dht["temperature"].as<float>());
-                if (dht.containsKey("humidity"))
+                if (!dht["humidity"].isNull())
                     published |= haManager.publishState("humidity", dht["humidity"].as<float>());
             }
 
             JsonVariantConst pm = current_sensor_data["PM"];
             if (!pm.isNull())
             {
-                if (pm.containsKey("PM1"))
+                if (!pm["PM1"].isNull())
                     published |= haManager.publishState("pm1", pm["PM1"].as<float>());
-                if (pm.containsKey("PM2.5"))
+                if (!pm["PM2.5"].isNull())
                     published |= haManager.publishState("pm25", pm["PM2.5"].as<float>());
-                if (pm.containsKey("PM10"))
+                if (!pm["PM10"].isNull())
                     published |= haManager.publishState("pm10", pm["PM10"].as<float>());
             }
 
@@ -2466,6 +2466,21 @@ void buildDeviceInfoJSON()
                 wifi["Signal Strength"] = wifi_info["Signal Strength"];
             if (wifi_info["IP Address"].as<String>().length() > 0)
                 wifi["IP Address"] = wifi_info["IP Address"];
+        }
+
+        // Add Home Assistant configuration if enabled and has valid data
+        if (DeviceConfigState.isHAConfigured)
+        {
+            JsonObject ha = device_info["HomeAssistant"].to<JsonObject>();
+
+            ha["Enabled"] = DeviceConfig.ha_enabled;
+            ha["Connected"] = DeviceConfigState.isHAConnected;
+            if (DeviceConfig.ha_mqtt_broker[0] != '\0')
+                ha["MQTT Broker"] = DeviceConfig.ha_mqtt_broker;
+            if (DeviceConfig.ha_mqtt_port > 0)
+                ha["MQTT Port"] = DeviceConfig.ha_mqtt_port;
+            if (DeviceConfig.ha_mqtt_username[0] != '\0')
+                ha["MQTT Username"] = DeviceConfig.ha_mqtt_username;
         }
 
         Serial.println("buildDeviceInfoJSON: Device info JSON built successfully");
