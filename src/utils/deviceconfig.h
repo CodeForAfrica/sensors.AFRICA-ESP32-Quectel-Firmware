@@ -302,13 +302,13 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
     }
 
     // Home Assistant connection settings (persisted via the captive portal)
-    if (hasString(config["haEnabled"]))
+    if (hasString(config["haEnable"]))
     {
-        DeviceConfig.ha_enabled = config["haEnabled"].as<bool>();
+        DeviceConfig.ha_enabled = config["haEnable"].as<bool>();
     }
-    if (hasString(config[" haMqttBroker"]))
+    if (hasString(config["haMqttBroker"]))
     {
-        strcpy(DeviceConfig.ha_mqtt_broker, config[" haMqttBroker"]);
+        strcpy(DeviceConfig.ha_mqtt_broker, config["haMqttBroker"]);
     }
     if (hasString(config["haMqttPort"]))
     {
@@ -326,15 +326,6 @@ static void loadSavedDeviceConfigs(bool setConfigStates)
     {
         strcpy(DeviceConfig.ha_device_name, config["haDeviceName"]);
     }
-    if (hasString(config["haDeviceManufacturer"]))
-    {
-        strcpy(DeviceConfig.ha_device_manufacturer, config["haDeviceManufacturer"]);
-    }
-    if (hasString(config["haDeviceModel"]))
-    {
-        strcpy(DeviceConfig.ha_device_model, config["haDeviceModel"]);
-    }
-
     DeviceConfigState.isHAConfigured = DeviceConfig.ha_enabled && DeviceConfig.ha_mqtt_broker[0] != '\0';
 
     gsmUpdated = apnPwdUpdated || apnPwdUpdated || pinUpdated;
