@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.0](https://github.com/CodeForAfrica/sensors.AFRICA-ESP32-Quectel-Firmware/releases/tag/v1.5.0) 2026-09-03
+
+### Added
+- **Home Assistant integration over MQTT (WiFi)** — PM1/PM2.5/PM10, temperature and humidity readings are now published to a Home Assistant instance using the standard MQTT Discovery protocol
+- `HomeAssistantManager` (`src/utils/homeassistant.h`) — a self-contained, sensor-agnostic MQTT manager:
+  - dedicated `PubSubClient`/`WiFiClient` so it does not interfere with the sensors.AFRICA telemetry MQTT client
+  - tracks the connection strings (broker, port, username, password) and connection status (`Disabled`/`Disconnected`/`Connecting`/`Connected`) in its own state instead of reading global configs
+  - generic entity registry (`addSensor()`, `clearSensors()`) and generic discovery/state publishing, so the module is reusable for other sensor types
+  - automatic reconnection with a keepalive tuned to survive blocking sensor warm-up
+- HA MQTT Discovery — retained entity discovery configs are announced on connect and re-published after reconnects
+- Home Assistant config block in `src/global_configs.h` (`HA_ENABLE`, `HA_MQTT_BROKER`, `HA_MQTT_PORT`, `HA_MQTT_USERNAME`, `HA_MQTT_PASSWORD`, discovery prefix, device identity)
+- HA connection settings + device identity on `DeviceConfig` (`src/utils/deviceconfig.h`) — persisted via the captive portal `config.json` and exposed through `getRuntimeDeviceConfig()`/`/device-config.json`
+- `HOME_ASSISTANT.md` — step-by-step setup guide for connecting to a Home Assistant server (e.g. Raspberry Pi running HA + Mosquitto broker)
+- README section linking to the new Home Assistant guide
+
+### Changed
+- Decoupled HA publishing from the sensor read routines — sensor values are now published from the main loop using the latest `current_sensor_data` (behind a pending-sample flag) instead of inside `readDHT()`/`getPMSREADINGS()`
+- Node ID is passed into the manager (`setNodeId()`) rather than read from `global_configs.h` / `main.cpp` declarations
+
+### Fixed
+- Sensor state not reaching Home Assistant — MQTT keepalive raised above the 30 s PMS5003 warm-up delay that let the broker drop the connection mid-read; publish paths now reconnect on demand
+- ArduinoJson `containsKey` deprecation warnings replaced with null checks
+
 ## [v1.4.0](https://github.com/CodeForAfrica/sensors.AFRICA-ESP32-Quectel-Firmware/releases/tag/v1.4.0) 2026-07-22
 
 ### Added
