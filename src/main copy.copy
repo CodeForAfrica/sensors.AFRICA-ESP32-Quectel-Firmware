@@ -247,6 +247,7 @@ enum Month
     _OCT = 10,
     _NOV = 11,
     _DEC = 12
+
 };
 
 int current_year, current_month = 0;
@@ -343,21 +344,12 @@ void setup()
     initComms();
 
     // Home Assistant integration (MQTT Discovery over WiFi)
+
     if (DeviceConfigState.wifiConnected && DeviceConfigState.isHAConfigured && DeviceConfig.ha_enabled)
     {
-        Serial.println("Initializing Home Assistant integration");
         haManager.setNodeId(SENSOR_PREFIX, esp_chipid);
         haManager.setConfig(DeviceConfig.ha_mqtt_broker, DeviceConfig.ha_mqtt_port,
                             DeviceConfig.ha_mqtt_username, DeviceConfig.ha_mqtt_password);
-
-        // Register the sensor entities this firmware exposes. The manager stays
-        // generic: it only stores keys/names/units, not what they measure.
-        haManager.addSensor("temperature", "Temperature", "temperature", "°C", "mdi:thermometer");
-        haManager.addSensor("humidity", "Humidity", "humidity", "%", "mdi:water-percent");
-        haManager.addSensor("pm1", "PM1", "pm1", "µg/m³", "mdi:blur");
-        haManager.addSensor("pm25", "PM2.5", "pm25", "µg/m³", "mdi:blur");
-        haManager.addSensor("pm10", "PM10", "pm10", "µg/m³", "mdi:blur");
-
         haManager.begin();
         DeviceConfigState.isHAConnected = haManager.connect();
     }
@@ -514,30 +506,21 @@ void loop()
 
         if (ha_pending_publish_data)
         {
-            bool published = false;
-
             JsonVariantConst dht = current_sensor_data["DHT"];
             if (!dht.isNull())
             {
-                if (dht.containsKey("temperature"))
-                    published |= haManager.publishState("temperature", dht["temperature"].as<float>());
-                if (dht.containsKey("humidity"))
-                    published |= haManager.publishState("humidity", dht["humidity"].as<float>());
+                haManager.publishState("temperature", dht["temperature"]);
+                haManager.publishState("humidity", dht["humidity"]);
             }
 
             JsonVariantConst pm = current_sensor_data["PM"];
             if (!pm.isNull())
             {
-                if (pm.containsKey("PM1"))
-                    published |= haManager.publishState("pm1", pm["PM1"].as<float>());
-                if (pm.containsKey("PM2.5"))
-                    published |= haManager.publishState("pm25", pm["PM2.5"].as<float>());
-                if (pm.containsKey("PM10"))
-                    published |= haManager.publishState("pm10", pm["PM10"].as<float>());
+                haManager.publishState("pm1", pm["PM1"]);
+                haManager.publishState("pm25", pm["PM2.5"]);
+                haManager.publishState("pm10", pm["PM10"]);
             }
-
-            if (published)
-                ha_pending_publish_data = false;
+            ha_pending_publish_data = false;
         }
     }
 

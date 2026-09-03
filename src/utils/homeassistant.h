@@ -2,8 +2,9 @@
  * @file homeassistant.h
  * @brief Home Assistant integration over MQTT (WiFi first).
  *
- * Publishes sensor readings (PM1, PM2.5, PM10, temperature and humidity)
- * to a Home Assistant instance using the standard MQTT Discovery protocol.
+ * Publishes arbitrary sensor readings to a Home Assistant instance using the
+ * standard MQTT Discovery protocol. The manager is sensor-agnostic: the caller
+ * registers entity metadata and supplies the values to publish.
  *
  * The integration uses a dedicated PubSubClient/WiFiClient so it does not
  * interfere with the sensors.AFRICA telemetry MQTT client.
@@ -222,7 +223,7 @@ public:
     /// @brief Publish a single sensor value to its Home Assistant state topic
     bool publishState(const char *sensor_key, float value)
     {
-        if (_status != Status::Connected || !_mqtt.connected())
+        if (!ensureConnected())
             return false;
 
         if (isnan(value))
@@ -242,45 +243,92 @@ public:
         return false;
     }
 
-    /// @brief Publish temperature and humidity readings
-    void publishClimate(float temperature, float humidity)
+    /// @brief Register a sensor entity for MQTT discovery.
+    /// The manager stays generic: it only stores the metadata and publishes it;
+    /// it has no knowledge of what the values actually measure.
+    void addSensor(const char *key, const char *name, const char *deviceClass,
+                   const char *unit, const char *icon = nullptr)
     {
-        if (!ensureConnected())
+        if (_sensorCount >= MAX_SENSORS)
         {
-            Serial.println("[HA] Not connected to MQTT broker, cannot publish climate readings");
+            Serial.println("[HA] Sensor registry is full");
             return;
         }
-        publishState("temperature", temperature);
-        publishState("humidity", humidity);
+
+        Sensor &s = _sensors[_sensorCount++];
+        s.key = key;
+        s.name = name;
+        s.deviceClass = deviceClass;
+        s.unit = unit;
+        s.icon = icon;
     }
 
-    /// @brief Publish particulate matter readings
-    void publishParticulates(float pm1, float pm25, float pm10)
+    /// @brief Clear all registered sensors (useful when the sensor set changes)
+    void clearSensors()
     {
-        if (!ensureConnected())
-        {
-            Serial.println("[HA] Not connected to MQTT broker, cannot publish particulate readings");
-            return;
-        }
-        publishState("pm1", pm1);
-        publishState("pm25", pm25);
-        publishState("pm10", pm10);
+        _sensorCount = 0;
     }
 
-    /// @brief Publish retained discovery configs for all entities
+    /// @brief Publish retained discovery configs for every registered entity
     void publishDiscovery()
     {
         if (!_mqtt.connected())
             return;
 
-        publishDiscoveryFor("temperature", "Temperature", "temperature", "°C", "mdi:thermometer");
-        publishDiscoveryFor("humidity", "Humidity", "humidity", "%", "mdi:water-percent");
-        publishDiscoveryFor("pm1", "PM1", "pm1", "µg/m³", "mdi:blur");
-        publishDiscoveryFor("pm25", "PM2.5", "pm25", "µg/m³", "mdi:blur");
-        publishDiscoveryFor("pm10", "PM10", "pm10", "µg/m³", "mdi:blur");
+        for (int i = 0; i < _sensorCount; i++)
+        {
+            const Sensor &s = _sensors[i];
+            publishSensorDiscovery(s.key, s.name, s.deviceClass, s.unit, s.icon);
+        }
 
         _discoveryPublished = true;
         Serial.println("[HA] Discovery configs published");
+    }
+
+    /// @brief Publish the retained discovery config for a single entity
+    bool publishSensorDiscovery(const char *sensor_key, const char *name,
+                                const char *device_class, const char *unit,
+                                const char *icon = nullptr,
+                                const char *device_name = nullptr)
+    {
+        if (!_mqtt.connected())
+            return false;
+
+        JsonDocument doc;
+        doc["name"] = name;
+        doc["unique_id"] = nodeId() + "_" + sensor_key;
+        doc["state_topic"] = stateTopic(sensor_key);
+        doc["state_class"] = "measurement";
+
+        if (device_class != nullptr && device_class[0] != '\0')
+            doc["device_class"] = device_class;
+        if (unit != nullptr && unit[0] != '\0')
+            doc["unit_of_measurement"] = unit;
+        if (icon != nullptr && icon[0] != '\0')
+            doc["icon"] = icon;
+
+        JsonObject device = doc["device"].to<JsonObject>();
+        JsonArray identifiers = device["identifiers"].to<JsonArray>();
+        identifiers.add(nodeId());
+
+        if (device_name != nullptr && device_name[0] != '\0')
+            device["name"] = device_name;
+        else
+            device["name"] = String(HA_DEVICE_NAME) + " " + nodeId();
+        device["manufacturer"] = HA_DEVICE_MANUFACTURER;
+        device["model"] = HA_DEVICE_MODEL;
+
+        char payload[512];
+        if (serializeJson(doc, payload, sizeof(payload)) == 0)
+            return false;
+
+        String topic = discoveryTopic(sensor_key);
+        if (_mqtt.publish(topic.c_str(), payload, true))
+        {
+            // Serial.printf("[HA] Discovery published: %s -> %s\n", topic.c_str(), payload);
+            return true;
+        }
+        return false;
     }
 
     // Accessors
@@ -330,47 +378,19 @@ private:
         return baseTopic() + "/" + sensor_key + "/state";
     }
 
-    bool publishDiscoveryFor(const char *sensor_key, const char *name,
-                             const char *device_class, const char *unit,
-                             const char *icon = nullptr)
+    // Generic sensor metadata registry - definitions are supplied by the caller
+    struct Sensor
     {
-        if (!_mqtt.connected())
-            return false;
+        const char *key;
+        const char *name;
+        const char *deviceClass;
+        const char *unit;
+        const char *icon;
+    };
 
-        JsonDocument doc;
-        doc["name"] = name;
-        doc["unique_id"] = nodeId() + "_" + sensor_key;
-        doc["state_topic"] = stateTopic(sensor_key);
-        doc["state_class"] = "measurement";
-
-        if (device_class != nullptr && device_class[0] != '\0')
-            doc["device_class"] = device_class;
-        if (unit != nullptr && unit[0] != '\0')
-            doc["unit_of_measurement"] = unit;
-        if (icon != nullptr && icon[0] != '\0')
-            doc["icon"] = icon;
-
-        JsonObject device = doc["device"].to<JsonObject>();
-        JsonArray identifiers = device["identifiers"].to<JsonArray>();
-        identifiers.add(nodeId());
-
-        String deviceName = String(HA_DEVICE_NAME) + " " + nodeId();
-        device["name"] = deviceName;
-        device["manufacturer"] = HA_DEVICE_MANUFACTURER;
-        device["model"] = HA_DEVICE_MODEL;
-
-        char payload[512];
-        if (serializeJson(doc, payload, sizeof(payload)) == 0)
-            return false;
-
-        String topic = discoveryTopic(sensor_key);
-        if (_mqtt.publish(topic.c_str(), payload, true))
-        {
-            Serial.printf("[HA] Discovery published: %s -> %s\n", topic.c_str(), payload);
-            return true;
-        }
-        return false;
-    }
+    static const int MAX_SENSORS = 8;
+    Sensor _sensors[MAX_SENSORS];
+    int _sensorCount = 0;
 
     // Node id + connection strings and status - owned by the manager
     char _nodeId[48];
