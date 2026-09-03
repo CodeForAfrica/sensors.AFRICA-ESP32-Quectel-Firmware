@@ -346,6 +346,7 @@ void setup()
     if (DeviceConfigState.wifiConnected && DeviceConfigState.isHAConfigured && DeviceConfig.ha_enabled)
     {
         Serial.println("Initializing Home Assistant integration");
+        haManager.setDeviceName(DeviceConfig.ha_device_name);
         haManager.setNodeId(SENSOR_PREFIX, esp_chipid);
         haManager.setConfig(DeviceConfig.ha_mqtt_broker, DeviceConfig.ha_mqtt_port,
                             DeviceConfig.ha_mqtt_username, DeviceConfig.ha_mqtt_password);

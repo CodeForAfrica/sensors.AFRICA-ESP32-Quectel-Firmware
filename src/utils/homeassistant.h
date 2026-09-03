@@ -68,6 +68,7 @@ public:
 
     HomeAssistantManager()
     {
+        _deviceName[0] = '\0';
         _nodeId[0] = '\0';
         _broker[0] = '\0';
         _username[0] = '\0';
@@ -89,6 +90,15 @@ public:
 
         strncpy(_nodeId, id.c_str(), sizeof(_nodeId) - 1);
         _nodeId[sizeof(_nodeId) - 1] = '\0';
+    }
+
+    /// @brief Set the device name used in discovery configs and topics.
+    /// @param deviceName  The device name to use in discovery configs and topics. If null, an empty string is used.
+    void setDeviceName(const char *deviceName)
+    {
+        String name = String(deviceName ? deviceName : "");
+        strncpy(_deviceName, name.c_str(), sizeof(_deviceName) - 1);
+        _deviceName[sizeof(_deviceName) - 1] = '\0';
     }
 
     /// @brief Set the connection strings tracked by the manager.
@@ -278,7 +288,7 @@ public:
         for (int i = 0; i < _sensorCount; i++)
         {
             const Sensor &s = _sensors[i];
-            publishSensorDiscovery(s.key, s.name, s.deviceClass, s.unit, s.icon);
+            publishSensorDiscovery(s.key, s.name, s.deviceClass, s.unit, s.icon, _deviceName);
         }
 
         _discoveryPublished = true;
@@ -397,6 +407,7 @@ private:
     char _broker[64];
     char _username[32];
     char _password[32];
+    char _deviceName[32];
     uint16_t _port;
     Status _status;
 

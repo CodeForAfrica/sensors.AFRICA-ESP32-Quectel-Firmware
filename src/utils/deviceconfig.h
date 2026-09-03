@@ -97,7 +97,7 @@ static JsonDocument getRuntimeDeviceConfig()
     doc["stagingUrl"] = DeviceConfig.staging_url;
     doc["productionUrl"] = DeviceConfig.production_url;
     doc["isLive"] = DeviceConfig.isLive;
-    doc["haEnabled"] = DeviceConfig.ha_enabled;
+    doc["haEnable"] = DeviceConfig.ha_enabled;
     doc["haMqttBroker"] = DeviceConfig.ha_mqtt_broker;
     doc["haMqttPort"] = DeviceConfig.ha_mqtt_port;
     doc["haMqttUsername"] = DeviceConfig.ha_mqtt_username;
