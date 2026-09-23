@@ -50,6 +50,8 @@ State payloads are plain numbers, e.g. `23.50`, `45.10`, `12.30`.
 - A configured MQTT broker reachable from the node.
 - PlatformIO (VS Code) with this project open.
 
+> P.S. This integration was done on a Raspberry PI 3 and Home Assistant UI may differ among Raspberry PI models or with subsequent updates.
+
 ## Step 1 — Install Home Assistant on a Raspberry Pi
 
 The easiest method is **Home Assistant OS**:
@@ -80,28 +82,14 @@ Home Assistant needs an MQTT broker to receive the node's messages.
 
 4. Set **Network → Host** or keep the default (the add-on usually exposes port
    `1883`).
-5. Start the add-on and enable **Start on boot** and **Watchdog**.
+5. **Start** the add-on and enable **Start on boot** and **Watchdog**.
 
 > Prefer a strong password and keep it secret. You will enter the same
-> username/password in the firmware configuration in Step 4.
+> username/password in the firmware configuration in Step 3.
 
-## Step 3 — Enable the MQTT integration in Home Assistant
+## Step 3 — Configure the firmware
 
-1. Go to **Settings → Devices & Services → Add Integration**.
-2. Search for and select **MQTT**.
-3. Enter the broker details:
-
-   | Field               | Value                                  |
-   |---------------------|----------------------------------------|
-   | Broker              | `homeassistant.local` or the Pi IP     |
-   | Port                | `1883`                                 |
-   | Username            | `esp32` (from Step 2)                  |
-   | Password            | your password from Step 2              |
-
-4. Click **Submit**. The integration should connect immediately.
-
-## Step 4 — Configure the firmware
-
+### Global defaults
 Edit `src/global_configs.h` and update the **Home Assistant** section:
 
 ```cpp
@@ -123,7 +111,10 @@ Edit `src/global_configs.h` and update the **Home Assistant** section:
 > `WIFI_STA_SSID` / `WIFI_STA_PWD` (compile-time) or through the device's
 > captive portal on first boot.
 
-## Step 5 — Build and flash
+### Firmware overrides
+- With the ESP webserver up and running, navigate to `192.168.4.1/config` Home Assistant Settings step to override the firmware global defaults.
+
+## Step 4 — Build and flash
 
 1. Connect the ESP32-S3 to your computer.
 2. In PlatformIO, select the `esp32_s3_quectel_v4` environment.
@@ -141,7 +132,7 @@ Once flashed, the serial monitor should show:
 [HA] pm25 -> 12.30
 ```
 
-## Step 6 — Verify entities in Home Assistant
+## Step 5 — Verify entities in Home Assistant
 
 1. Go to **Settings → Devices & Services**.
 2. Open the **MQTT** integration.
@@ -153,7 +144,7 @@ Once flashed, the serial monitor should show:
 Entities are created once from the retained discovery messages and persist
 across node restarts. If they do not appear, see Troubleshooting below.
 
-## Step 7 — Add the sensors to a dashboard
+## Step 6 — Add the sensors to a dashboard
 
 1. Go to **Overview → Edit Dashboard → Add Card**.
 2. Choose **Entities** (or **Gauge** for PM values).
@@ -163,7 +154,9 @@ You can now build automations, alerts and history graphs on top of these
 entities.
 
 ## Troubleshooting
-
+- Installation steps not matching your Home Assistant UI.
+  - Follow the [official Home Assistant guideline](https://www.home-assistant.io/installation) in case of new UI updates or configuration steps.
+  
 - **No `[HA] ...` messages on the serial monitor**
   - Confirm `HA_ENABLE 1` and `HA_MQTT_BROKER` are set in
     `src/global_configs.h` and the firmware was re-flashed.
@@ -179,7 +172,7 @@ entities.
   - `rc=5` = not authorised, `rc=4` = bad client ID/protocol.
 
 - **Entities don't appear in Home Assistant**
-  - Make sure the **MQTT integration** is enabled and connected (Step 3).
+  - Make sure the **MQTT integration** is enabled and connected.
   - Discovery messages are retained; restart the node to re-publish them, or
     reboot Home Assistant.
   - Confirm the discovery prefix matches: firmware `HA_DISCOVERY_PREFIX`
