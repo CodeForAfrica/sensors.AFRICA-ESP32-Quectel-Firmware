@@ -406,6 +406,11 @@ void loop()
             Serial.println("New config(s) requries a restart. Restarting...\n\n");
             ESP.restart();
         }
+        if (DeviceConfig.ha_enabled)
+        {
+            haManager.setConfig(DeviceConfig.ha_mqtt_broker, DeviceConfig.ha_mqtt_port,
+                                DeviceConfig.ha_mqtt_username, DeviceConfig.ha_mqtt_password);
+        }
         DeviceConfigState.configurationRequired = false;
     }
     // Manage communication device and connectivity state
