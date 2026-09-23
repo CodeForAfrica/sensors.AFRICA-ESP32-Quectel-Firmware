@@ -1519,8 +1519,17 @@ void configDeviceFromWiFiConn()
 
     if (!DeviceConfigState.timeSet)
     {
-        // synchronise system clock over NTP
+        // configTime starts NTP asynchronously; wait for a valid clock before using it.
+        constexpr uint32_t NTP_TIMEOUT_MS = 10000;
         configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        struct tm timeInfo = {};
+        // getLocalTime rejects uninitialized dates (including 1970).
+        if (!getLocalTime(&timeInfo, NTP_TIMEOUT_MS))
+        {
+            Serial.println("NTP synchronization timed out; RTC and calendar not initialized.");
+            return;
+        }
+        Serial.println("NTP synchronized time: " + String(asctime(&timeInfo)));
         time_t now = time(nullptr);
         RTC.setTime(now);
         initCalender(RTC.getYear(), RTC.getMonth() + 1);
