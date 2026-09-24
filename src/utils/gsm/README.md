@@ -14,7 +14,7 @@ hardware, firmware, and an antenna.
 | `QuectelGnss` | GNSS power commands, engine state, validated location fixes |
 | `QuectelFileSystem` | Modem UFS metadata, binary transfers, handle cleanup |
 | `GsmMqttClient` | Existing MQTT protocol operations |
-| `GSM_handler` | Compatibility functions and legacy global-state snapshots |
+| `src/main.cpp` | Owns the UART and service instances; coordinates startup, telemetry and configuration subscriptions |
 
 Services borrow a single `AtClient`; it borrows an Arduino `Stream`. Dependencies
 must outlive their borrowers. Use one owner/task for the entire modem channel:
@@ -23,18 +23,26 @@ not queued. Do not interleave file transactions with MQTT/HTTP or direct UART
 commands. GNSS polling can consume unrelated URCs while awaiting its response;
 applications needing reliable asynchronous delivery need a URC dispatcher first.
 
-`AtClient::serial()` now returns `Stream&`. Board UART setup is explicit through
+`AtClient::serial()` returns `Stream&`. Board UART setup is explicit through
 `QuectelModem::beginSerial(HardwareSerial&)`, using the same UART passed to the AT
-client. The existing `GSM_Serial_begin()` wrapper handles this change.
+client. `main.cpp` constructs `modemSerial`, `modemAt`, `modem`, and `gsmMqtt` in
+dependency order, using board settings from `global_configs.h`. It reads modem
+state and errors from the objects and caches display metadata in `gsm::RuntimeInfo`.
+There is no default-modem singleton or handler include in the active application.
+
+The previous application is preserved exactly in
+[`src/main_legacy_reference.cpp.bak`](../../main_legacy_reference.cpp.bak), together
+with the unchanged [`src/utils/GSM_handler.h`](../GSM_handler.h). The `.bak` suffix
+keeps the old `setup()`/`loop()` out of PlatformIO's source discovery. See the
+[migration notes](../../../docs/gsm-main-migration.md) for the call mapping and
+backup restoration instructions.
 
 ## GNSS
 
-After the normal modem startup:
+Within `main.cpp`, after the normal modem startup, the owned modem exposes GNSS:
 
 ```cpp
-#include "utils/GSM_handler.h"
-
-auto &gnss = gsm::defaultModem().gnss();
+auto &gnss = modem.gnss();
 if (gnss.supported() && gnss.start()) {
     // Start the application acquisition deadline. A fix is not immediate.
 }
@@ -80,7 +88,7 @@ API supports **root files** with filenames up to 63 printable ASCII bytes. Both
 volumes, wildcard deletion and AT command delimiters are rejected.
 
 ```cpp
-auto &files = gsm::defaultModem().fileSystem();
+auto &files = modem.fileSystem();
 
 gsm::ModemStorageInfo storage;
 if (files.space(storage)) {
@@ -106,9 +114,11 @@ bool found = files.info("sample.bin", entry);
 bool removed = files.remove("sample.bin");
 ```
 
-`writeText` is the text convenience method. Existing `GsmFileCheck`, `GsmWriteFile`,
-`QuectelModem::fileExists`, and `QuectelModem::writeFile` delegate to the file
-service. Writes replace/truncate a file, including an empty replacement. They
+`writeText` is the text convenience method. `main.cpp` uses the file service
+directly for certificate storage. `QuectelModem::fileExists` and
+`QuectelModem::writeFile` also delegate to it. The old `GsmFileCheck` and
+`GsmWriteFile` functions remain only in the reference handler.
+Writes replace/truncate a file, including an empty replacement. They
 are not atomic: errors can leave a partial file. Each 512-byte block requires the
 modem's byte-count acknowledgement, and success also requires a confirmed close.
 
@@ -134,6 +144,9 @@ Run `bash scripts/test_gsm.sh` for scripted UART regression tests with the host
 C++ compiler and UndefinedBehaviorSanitizer. Optional AddressSanitizer:
 `GSM_SANITIZERS=address,undefined bash scripts/test_gsm.sh` on a host where that
 runtime is supported. Tests do not require PlatformIO downloads or a modem.
+The host runner requires `tests/gsm/test_gsm.cpp` and `tests/gsm/support/Arduino.h`;
+these files are absent from the current checkout, so host tests must be restored
+before using the runner.
 Run `pio run -e esp32_s3_quectel_v4` for the firmware build.
 
 Hardware validation remains necessary for GNSS acquisition/shutdown, antenna

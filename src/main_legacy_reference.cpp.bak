@@ -25,7 +25,7 @@
  * - TimeLib
  * - PMserial
  * - SD_handler
- * - gsm::QuectelModem and gsm::GsmMqttClient
+ * - GSM_handler
  * - dhtnew : https://github.com/RobTillaart/DHTNew
  *
  * @hardware
@@ -48,9 +48,7 @@
 #include "helpers.h"
 #include "PMserial.h"
 #include "utils/SD_handler.h"
-#include "utils/gsm/AtClient.h"
-#include "utils/gsm/QuectelModem.h"
-#include "utils/gsm/GsmMqttClient.h"
+#include "utils/GSM_handler.h"
 #include <TimeLib.h>
 #include <ESP32Time.h>
 #include <ArduinoJson.h>
@@ -61,39 +59,6 @@
 #include "webserver/asyncserver.h"
 #include "utils/mqtt_wifi.h"
 #include "utils/mozilla_ca_bundle.h"
-
-namespace
-{
-gsm::SerialConfig makeGsmSerialConfig()
-{
-    gsm::SerialConfig config;
-#ifdef QUECTEL_PWR_KEY
-    config.powerKeyPin = QUECTEL_PWR_KEY;
-#endif
-#ifdef GSM_RST_PIN
-    config.resetPin = GSM_RST_PIN;
-#endif
-#ifdef MCU_RXD
-    config.rxPin = MCU_RXD;
-#endif
-#ifdef MCU_TXD
-    config.txPin = MCU_TXD;
-#endif
-#ifdef GSM_DEBUG
-    config.debugEnabled = GSM_DEBUG;
-#endif
-    return config;
-}
-
-// One modem channel, owned by this translation unit and used from setup()/loop().
-// Construction order keeps each dependency alive for all of its consumers.
-HardwareSerial modemSerial(2);
-gsm::AtClient modemAt(modemSerial, Serial);
-gsm::QuectelModem modem(modemAt, Serial, makeGsmSerialConfig());
-gsm::GsmMqttClient gsmMqtt(modemAt, Serial, modem.failures());
-gsm::RuntimeInfo gsmRuntimeInfo;
-bool gsmMqttSubscriptionReady = false; // Configuration topic on MQTT_CLIENT_ID.
-} // namespace
 
 size_t max_wifi_hotspots_size = sizeof(struct_wifiInfo) * 20;
 struct struct_wifiInfo *wifiInfo = (struct_wifiInfo *)malloc(max_wifi_hotspots_size);
@@ -168,6 +133,7 @@ struct LOGGER
     int log_count = 0;
 } JSON_PAYLOAD_LOGGER, CSV_PAYLOAD_LOGGER;
 
+struct GSMRuntimeInfo GSMRuntimeInfo;
 JsonDocument gsm_info;
 JsonDocument device_info;
 struct DeviceConfigState DeviceConfigState;
@@ -456,7 +422,7 @@ void loop()
 
         if (DeviceConfigState.gsmConnected && DeviceConfigState.gsmInternetAvailable)
         {
-            modem.sleep();
+            GSM_sleep();
         }
 
         starttime = millis();
@@ -1004,7 +970,7 @@ bool sendDataViaWiFi(const char *data, const int _pin, const char *url)
 **/
 bool sendDataViaGSM(const char *data, const int _pin, const char *url)
 {
-    if (!gsm_capable || !DeviceConfigState.gsmInternetAvailable || !modem.state().gprsConnected)
+    if (!gsm_capable || !GPRS_CONNECTED)
     {
         Serial.println("GSM not capable or GPRS not connected");
         return false;
@@ -1014,6 +980,8 @@ bool sendDataViaGSM(const char *data, const int _pin, const char *url)
     itoa(_pin, pin, 10);
 
 #ifdef QUECTEL
+    int statuscode = 0;
+
     char http_headers[3][256] = {};
     strcat(http_headers[0], "X-PIN: ");
     strcat(http_headers[0], pin);
@@ -1023,7 +991,7 @@ bool sendDataViaGSM(const char *data, const int _pin, const char *url)
     strcat(http_headers[1], esp_chipid);
     strcat(http_headers[2], "Content-Type: application/json");
 
-    const int statuscode = modem.post(url, http_headers, 3, data, strlen(data));
+    QUECTEL_POST(url, http_headers, 3, data, strlen(data), statuscode);
 
     if (statuscode == 200 || statuscode == 201)
     {
@@ -1534,13 +1502,14 @@ JsonDocument getCurrentSensorData()
 void captureGSMInfo()
 {
     // ToDo: Reduce memory footprint by moving global gsm_info doc to  scoped local variable asyncwebserver
-    gsm_info["Network Name"] = gsmRuntimeInfo.operatorName = modem.networkName();
-    gsm_info["Signal Strength"] = gsmRuntimeInfo.signalStrength = modem.signalStrength();
-    strcpy(gsmRuntimeInfo.simCcid, modem.state().simCcid);
-    gsm_info["SIM ICCID"] = gsmRuntimeInfo.simCcid;
-    gsm_info["Model ID"] = gsmRuntimeInfo.modelId = modem.modelId();
-    gsm_info["Firmware Version"] = gsmRuntimeInfo.firmwareVersion = modem.firmwareVersion();
-    gsm_info["IMEI"] = gsmRuntimeInfo.imei = modem.imei();
+    gsm_info["Network Name"] = GSMRuntimeInfo.operator_name = getNetworkName();
+    // gsm_info["Network Band"] = GSMRuntimeInfo.network_band = getNetworkBand();
+    gsm_info["Signal Strength"] = GSMRuntimeInfo.signal_strength = getSignalStrength();
+    strcpy(GSMRuntimeInfo.sim_ccid, SIM_CCID);
+    gsm_info["SIM ICCID"] = GSMRuntimeInfo.sim_ccid;
+    gsm_info["Model ID"] = GSMRuntimeInfo.model_id = getModelID();
+    gsm_info["Firmware Version"] = GSMRuntimeInfo.firmware_version = getFirwmareVersion();
+    gsm_info["IMEI"] = GSMRuntimeInfo.imei = getIMEI();
 }
 
 void configDeviceFromWiFiConn()
@@ -1576,37 +1545,27 @@ void captureWiFiInfo()
 void initializeAndConfigGSM()
 {
     DeviceConfigState.state = ConfigurationState::CONFIG_GSM;
-    DeviceConfigState.gsmInternetAvailable = false;
-    CommsManagerState.gsmOnline = false;
-    CommsManagerState.allCommsUnavailable = !CommsManagerState.wifiOnline;
-    CommsManagerState.mqttConnectionInitialized = mqttClient.connected();
-    gsmMqttSubscriptionReady = false;
-
-    // A failed binary transfer requires a modem reset before more AT commands.
-    if (!modemAt.synchronized())
-        modem.hardwareReset(gsm::ResetSequence::LowHighLow);
-
-    DeviceConfigState.gsmConnected = modem.beginSerial(modemSerial);
+    DeviceConfigState.gsmConnected = GSM_Serial_begin();
 
     if (!DeviceConfigState.gsmConnected)
         return;
-    DeviceConfigState.gsmConnected = modem.initialize();
+    DeviceConfigState.gsmConnected = GSM_init();
     if (!DeviceConfigState.gsmConnected)
         return;
 
-    // Store the CA certificate in the modem's UFS.
-    if (!modem.fileSystem().exists(MOZILLA_PEM_FILENAME))
+    // Check if CA certificate is present in the filesytem
+    if (!GsmFileCheck(MOZILLA_PEM_FILENAME))
     {
         Serial.print("Writing modem file: ");
         Serial.println(MOZILLA_PEM_FILENAME);
 
-        if (!modem.fileSystem().writeText(MOZILLA_PEM_FILENAME, MOZILLA_CA_BUNDLE))
+        if (!GsmWriteFile(MOZILLA_PEM_FILENAME, MOZILLA_CA_BUNDLE))
         {
             Serial.println("Failed to write to file");
         }
         else
         {
-            if (!modem.setCaCertificate(MOZILLA_PEM_FILENAME))
+            if (!setCACert(MOZILLA_PEM_FILENAME))
             {
                 Serial.println("Failed to set CA certificate for secure connections");
             }
@@ -1614,46 +1573,40 @@ void initializeAndConfigGSM()
     }
     else
     {
-        if (!modem.setCaCertificate(MOZILLA_PEM_FILENAME))
+        if (!setCACert(MOZILLA_PEM_FILENAME))
         {
             Serial.println("Failed to set CA certificate for secure connections");
         }
     }
 
-    if (!modemAt.synchronized())
-    {
-        Serial.println("Modem file transfer lost synchronization; retry GSM initialization");
-        DeviceConfigState.gsmConnected = false;
-        return;
-    }
+    // GSM initialization successful
+    GSM_CONNECTED = true; // TODO: Refactor to remove global variable and use state struct instead
 
-    const gsm::NetworkMode modes[] = {gsm::NetworkMode::Auto, gsm::NetworkMode::G2, gsm::NetworkMode::G4};
+    NetMode modes[] = {NetMode::AUTO, NetMode::_2G, NetMode::_4G};
     bool network_registered = false;
 
-    for (auto mode : modes)
-    {
-        if (modem.setNetworkMode(mode) && modem.registerToNetwork())
-        {
+    for (auto mode : modes) {
+        if (setNetworkMode(mode) && register_to_network()) {
             network_registered = true;
             break;
         }
     }
 
-    if (!network_registered)
-    {
+    if (!network_registered) {
         Serial.println("Failed to register to GSM network");
         return;
     }
+    
 
     // GPRS initialization
-    DeviceConfigState.gsmInternetAvailable = modem.initializeGprs();
+    DeviceConfigState.gsmInternetAvailable = GPRS_init();
     CommsManagerState.gsmOnline = DeviceConfigState.gsmInternetAvailable;
-    CommsManagerState.allCommsUnavailable = !(CommsManagerState.wifiOnline || CommsManagerState.gsmOnline);
+    CommsManagerState.allCommsUnavailable = !DeviceConfigState.gsmInternetAvailable;
 
     // Fetch network time and update RTC
     if (!DeviceConfigState.timeSet)
     {
-        if (modem.getNetworkTime(time_buff, sizeof(time_buff)))
+        if (getNetworkTime(time_buff))
         {
             // Update RTC time and calendar
             Serial.println("GSM Network Time: " + String(time_buff));
@@ -1667,18 +1620,15 @@ void initializeAndConfigGSM()
             Serial.println("Failed to fetch time from network");
         }
     }
-    if (DeviceConfigState.gsmInternetAvailable && DeviceConfigState.isMQTTConfigured)
+    if (DeviceConfigState.gsmInternetAvailable && DeviceConfigState.isMQTTConfigured && !CommsManagerState.mqttConnectionInitialized)
     {
-        // initialize() reset the modem, so any previous GSM MQTT session is gone.
-        const bool mqttReady = gsmMqtt.configure(MQTT_CLIENT_ID, 1, 1) &&
-                               gsmMqtt.open(MQTT_CLIENT_ID, MQTT_BROKER, MQTT_PORT) &&
-                               gsmMqtt.connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD) &&
-                               gsmMqtt.subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
-        gsmMqttSubscriptionReady = mqttReady;
-        CommsManagerState.mqttConnectionInitialized = mqttClient.connected() || mqttReady;
+        MQTT_configure(MQTT_CLIENT_ID, 1, 1);
+        CommsManagerState.mqttConnectionInitialized = MQTT_open(MQTT_CLIENT_ID, MQTT_BROKER, MQTT_PORT);
+        MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+        MQTT_subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
     }
     captureGSMInfo();
-    modem.sleep();
+    GSM_sleep();
 }
 
 void loadInitialConfigs()
@@ -1703,8 +1653,8 @@ void loadInitialConfigs()
     strncpy(DeviceConfig.wifi_sta_pwd, WIFI_STA_PWD, sizeof(DeviceConfig.wifi_sta_pwd) - 1);
     DeviceConfig.wifi_sta_pwd[sizeof(DeviceConfig.wifi_sta_pwd) - 1] = '\0';
 #endif
-#if defined(GSM_PIN)
-    strncpy(DeviceConfig.sim_pin, GSM_PIN, sizeof(DeviceConfig.sim_pin) - 1);
+#if defined(SIM_PIN)
+    strncpy(DeviceConfig.sim_pin, SIM_PIN, sizeof(DeviceConfig.sim_pin) - 1);
     DeviceConfig.sim_pin[sizeof(DeviceConfig.sim_pin) - 1] = '\0';
 #endif
 
@@ -1803,9 +1753,9 @@ bool pingServer(const char *server, uint16_t port, uint16_t timeout_ms)
     }
 
     // Try GSM if WiFi failed and GSM is available
-    if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected && modem.state().gprsConnected)
+    if (DeviceConfig.useGSM && DeviceConfigState.gsmConnected && GPRS_CONNECTED)
     {
-        bool ping_success = modem.pingIp(server);
+        bool ping_success = pingIP(server);
 
         if (ping_success)
             return true;
@@ -2184,14 +2134,14 @@ bool buildMQTTTelemetryPayload(char *mqtt_payload, size_t payload_size)
         if (gsm_capable && DeviceConfigState.gsmConnected)
         {
             JsonObject gsm = telemetry_doc["gsm"].to<JsonObject>();
-            gsm["connected"] = modem.state().gprsConnected;
-            gsm["network_name"] = gsmRuntimeInfo.operatorName;
-            gsm["signal_strength"] = gsmRuntimeInfo.signalStrength;
-            gsm["imei"] = gsmRuntimeInfo.imei;
-            gsm["model"] = gsmRuntimeInfo.modelId;
-            gsm["firmware"] = gsmRuntimeInfo.firmwareVersion;
-            gsm["sim_ccid"] = gsmRuntimeInfo.simCcid;
-            gsm["battery_status"] = modem.batteryStatus();
+            gsm["connected"] = GPRS_CONNECTED;
+            gsm["network_name"] = GSMRuntimeInfo.operator_name;
+            gsm["signal_strength"] = GSMRuntimeInfo.signal_strength;
+            gsm["imei"] = GSMRuntimeInfo.imei;
+            gsm["model"] = GSMRuntimeInfo.model_id;
+            gsm["firmware"] = GSMRuntimeInfo.firmware_version;
+            gsm["sim_ccid"] = GSMRuntimeInfo.sim_ccid;
+            gsm["battery_status"] = getBatteryStatus();
         }
 
         // WiFi Information
@@ -2260,32 +2210,33 @@ bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, 
                           const char *username = nullptr, const char *password = nullptr)
 {
     // Check if GPRS is available (required for MQTT over GSM)
-    if (!CommsManagerState.gsmOnline || !modem.state().gprsConnected)
+    if (!CommsManagerState.gsmOnline)
     {
         Serial.println("sendMQTTTelemetry: GPRS not connected - cannot send telemetry");
         return false;
     }
-    const gsm::MqttConnectionStatus status = gsmMqtt.status(client_id);
-    if (status == gsm::MqttConnectionStatus::Disconnected)
+    bool isBrokerConnected = MQTT_isBrokerConnected(client_id);
+    bool isClientConneted = MQTT_isClientConnected(client_id);
+    // Open broker connection
+    if (!isBrokerConnected)
     {
         Serial.println("sendMQTTTelemetry: Opening MQTT broker connection...");
-        if (!gsmMqtt.configure(client_id, 1, 1) || !gsmMqtt.open(client_id, broker, port))
+        if (!MQTT_open(client_id, broker, port))
         {
             Serial.print("sendMQTTTelemetry: Failed to open MQTT broker - Error: ");
-            Serial.println(modem.failures().mqttInitError);
+            Serial.println(MQTT_INIT_ERROR);
             return false;
         }
+        MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+        MQTT_isBrokerConnected(client_id);
     }
-    // BrokerOpen still requires MQTT authentication; do not reopen the transport.
-    if (status != gsm::MqttConnectionStatus::Connected)
+    else if (!isClientConneted)
     {
-        if (client_id == MQTT_CLIENT_ID)
-            gsmMqttSubscriptionReady = false;
         Serial.println("sendMQTTTelemetry: Connecting MQTT client...");
-        if (!gsmMqtt.connect(client_id, esp_chipid, username, password))
+        if (!MQTT_connect(client_id, esp_chipid, username, password))
         {
             Serial.print("sendMQTTTelemetry: Failed to connect MQTT client - Error: ");
-            Serial.println(modem.failures().mqttInitError);
+            Serial.println(MQTT_INIT_ERROR);
             return false;
         }
     }
@@ -2306,7 +2257,7 @@ bool sendGsmMQTTTelemetry(const char *broker, uint16_t port, uint8_t client_id, 
     Serial.print("sendMQTTTelemetry: Publishing to topic: ");
     Serial.println(topic);
 
-    if (!gsmMqtt.publish(client_id, 1, topic, mqtt_payload, 1, 0))
+    if (!MQTT_publish(client_id, 1, topic, mqtt_payload, 1, 0))
     {
         Serial.println("sendMQTTTelemetry: Failed to publish telemetry");
         return false;
@@ -2332,13 +2283,11 @@ bool initAndSendMQTTTelemetry(const char *broker, uint16_t port, const char *top
 {
     bool result = sendGsmMQTTTelemetry(broker, port, client_id, topic, username, password);
 
-    if (disconnect_after && gsmMqtt.isBrokerConnected(client_id))
+    if (disconnect_after && MQTT_isBrokerConnected(client_id))
     {
         delay(500);
         Serial.println("initAndSendMQTTTelemetry: Disconnecting MQTT...");
-        gsmMqtt.disconnect(client_id);
-        if (client_id == MQTT_CLIENT_ID)
-            gsmMqttSubscriptionReady = false;
+        MQTT_disconnect(client_id);
     }
 
     return result;
@@ -2400,26 +2349,26 @@ void buildDeviceInfoJSON()
         device_info.clear();
 
         // Add GSM configuration if GSM is capable and has valid data
-        if (gsm_capable && (gsmRuntimeInfo.operatorName.length() > 0 ||
-                            gsmRuntimeInfo.imei.length() > 0 ||
-                            gsmRuntimeInfo.simCcid[0] != '\0'))
+        if (gsm_capable && (GSMRuntimeInfo.operator_name.length() > 0 ||
+                            GSMRuntimeInfo.imei.length() > 0 ||
+                            GSMRuntimeInfo.sim_ccid[0] != '\0'))
         {
             JsonObject gsm = device_info["GSM"].to<JsonObject>();
 
-            if (gsmRuntimeInfo.operatorName.length() > 0)
-                gsm["Operator Name"] = gsmRuntimeInfo.operatorName;
-            if (gsmRuntimeInfo.signalStrength > 0)
-                gsm["Signal Strength"] = gsmRuntimeInfo.signalStrength;
-            if (gsmRuntimeInfo.networkTechnology[0] != '\0')
-                gsm["Network Technology"] = gsmRuntimeInfo.networkTechnology;
-            if (gsmRuntimeInfo.imei.length() > 0)
-                gsm["IMEI"] = gsmRuntimeInfo.imei;
-            if (gsmRuntimeInfo.modelId.length() > 0)
-                gsm["Model"] = gsmRuntimeInfo.modelId;
-            if (gsmRuntimeInfo.firmwareVersion.length() > 0)
-                gsm["Firmware"] = gsmRuntimeInfo.firmwareVersion;
-            if (gsmRuntimeInfo.simCcid[0] != '\0')
-                gsm["SIM CCID"] = gsmRuntimeInfo.simCcid;
+            if (GSMRuntimeInfo.operator_name.length() > 0)
+                gsm["Operator Name"] = GSMRuntimeInfo.operator_name;
+            if (GSMRuntimeInfo.signal_strength > 0)
+                gsm["Signal Strength"] = GSMRuntimeInfo.signal_strength;
+            if (GSMRuntimeInfo.network_technology[0] != '\0')
+                gsm["Network Technology"] = GSMRuntimeInfo.network_technology;
+            if (GSMRuntimeInfo.imei.length() > 0)
+                gsm["IMEI"] = GSMRuntimeInfo.imei;
+            if (GSMRuntimeInfo.model_id.length() > 0)
+                gsm["Model"] = GSMRuntimeInfo.model_id;
+            if (GSMRuntimeInfo.firmware_version.length() > 0)
+                gsm["Firmware"] = GSMRuntimeInfo.firmware_version;
+            if (GSMRuntimeInfo.sim_ccid[0] != '\0')
+                gsm["SIM CCID"] = GSMRuntimeInfo.sim_ccid;
         }
 
         // Add WiFi configuration if WiFi is connected and has valid data
@@ -2464,43 +2413,33 @@ void checkIncomingMQTTMessages()
 
     else if (CommsManagerState.preferredComm == CommsManagerState::GSM && CommsManagerState.gsmOnline)
     {
-        const gsm::MqttConnectionStatus status = gsmMqtt.status(MQTT_CLIENT_ID);
-        if (status != gsm::MqttConnectionStatus::Connected)
-            gsmMqttSubscriptionReady = false;
-        if (status == gsm::MqttConnectionStatus::Disconnected)
+        if (!MQTT_isBrokerConnected(MQTT_CLIENT_ID))
         {
-            if (!gsmMqtt.configure(MQTT_CLIENT_ID, 1, 1) ||
-                !gsmMqtt.open(MQTT_CLIENT_ID, MQTT_BROKER, MQTT_PORT))
+            MQTT_configure(MQTT_CLIENT_ID, 1, 1);
+            if (!MQTT_open(MQTT_CLIENT_ID, MQTT_BROKER, MQTT_PORT))
             {
                 Serial.print("receiveMQTTTelemetry: Failed to open MQTT broker - Error: ");
-                Serial.println(modem.failures().mqttInitError);
+                Serial.println(MQTT_INIT_ERROR);
                 return;
             }
+            MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD);
+            MQTT_subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
         }
-        if (status != gsm::MqttConnectionStatus::Connected)
+        else if (!MQTT_isClientConnected(MQTT_CLIENT_ID))
         {
             Serial.println("receiveMQTTTelemetry: Connecting MQTT client...");
-            if (!gsmMqtt.connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD))
+            if (!MQTT_connect(MQTT_CLIENT_ID, esp_chipid, MQTT_USERNAME, MQTT_PASSWORD))
             {
                 Serial.print("receiveMQTTTelemetry: Failed to connect MQTT client - Error: ");
-                Serial.println(modem.failures().mqttInitError);
+                Serial.println(MQTT_INIT_ERROR);
                 return;
             }
+            MQTT_subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
         }
 
-        if (!gsmMqttSubscriptionReady)
+        if (MQTT_hasBufferedMessage(MQTT_CLIENT_ID))
         {
-            gsmMqttSubscriptionReady = gsmMqtt.subscribe(MQTT_CLIENT_ID, 1, MQTT_SUBSCRIBE_TOPIC, 0);
-            if (!gsmMqttSubscriptionReady)
-            {
-                Serial.println("receiveMQTTTelemetry: Failed to subscribe to configuration updates");
-                return;
-            }
-        }
-
-        if (gsmMqtt.hasBufferedMessage(MQTT_CLIENT_ID))
-        {
-            CommsManagerState.message_received = gsmMqtt.readBufferedMessage(MQTT_CLIENT_ID, incoming_topic_store, sizeof(incoming_topic_store), incoming_message_store, sizeof(incoming_message_store));
+            CommsManagerState.message_received = MQTT_readBufferedMessage(MQTT_CLIENT_ID, incoming_topic_store, sizeof(incoming_topic_store), incoming_message_store, sizeof(incoming_message_store));
         }
     }
 }
