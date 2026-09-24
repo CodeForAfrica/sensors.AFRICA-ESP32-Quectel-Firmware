@@ -64,4 +64,20 @@ static int SD_CS = 39;
 #define MQTT_PASSWORD "" // set to enable MQTT authentication
 #define MQTT_CLIENT_ID 5
 #define MQTT_SUBSCRIBE_TOPIC "devices/nodes/configuration"
+
+// ---------------------------------------------------------------------------
+// Home Assistant integration (MQTT Discovery over WiFi)
+// Set HA_ENABLE to 1 and point HA_MQTT_BROKER at your Home Assistant broker
+// (e.g. the IP address of a Raspberry Pi running Home Assistant).
+// Full setup instructions: see HOME_ASSISTANT.md
+// ---------------------------------------------------------------------------
+#define HA_ENABLE 0
+#define HA_MQTT_BROKER "" // e.g. "192.168.1.50" or "homeassistant.local"
+#define HA_MQTT_PORT 1883
+#define HA_MQTT_USERNAME "" // set if your HA MQTT broker requires authentication
+#define HA_MQTT_PASSWORD "" // set if your HA MQTT broker requires authentication
+#define HA_DISCOVERY_PREFIX "homeassistant"
+#define HA_DEVICE_NAME "Sensors Africa Node"
+#define HA_DEVICE_MANUFACTURER "Code for Africa"
+#define HA_DEVICE_MODEL "ESP32-S3 Sensor Node"
 #endif
