@@ -91,9 +91,7 @@ namespace gsm
         {
             // Preserve the board-tested startup sequence, including its final
             // held-HIGH level. Do not substitute modem-pin PWRKEY levels here.
-            digitalWrite(serialConfig_.powerKeyPin, LOW);
             pinMode(serialConfig_.powerKeyPin, OUTPUT);
-            delay(1000);
             digitalWrite(serialConfig_.powerKeyPin, LOW);
             delay(500);
             digitalWrite(serialConfig_.powerKeyPin, HIGH);
