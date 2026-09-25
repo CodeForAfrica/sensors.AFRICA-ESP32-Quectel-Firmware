@@ -65,35 +65,37 @@
 
 namespace
 {
-gsm::SerialConfig makeGsmSerialConfig()
-{
-    gsm::SerialConfig config;
+    gsm::SerialConfig makeGsmSerialConfig()
+    {
+        gsm::SerialConfig config;
 #ifdef QUECTEL_PWR_KEY
-    config.powerKeyPin = QUECTEL_PWR_KEY;
+        config.powerKeyPin = QUECTEL_PWR_KEY;
 #endif
 #ifdef GSM_RST_PIN
-    config.resetPin = GSM_RST_PIN;
+        config.resetPin = GSM_RST_PIN;
+        // Board-tested MCU waveform; the modem-side RESET_N polarity differs.
+        config.resetSequence = gsm::ResetSequence::LowHighLow;
 #endif
 #ifdef MCU_RXD
-    config.rxPin = MCU_RXD;
+        config.rxPin = MCU_RXD;
 #endif
 #ifdef MCU_TXD
-    config.txPin = MCU_TXD;
+        config.txPin = MCU_TXD;
 #endif
 #ifdef GSM_DEBUG
-    config.debugEnabled = GSM_DEBUG;
+        config.debugEnabled = GSM_DEBUG;
 #endif
-    return config;
-}
+        return config;
+    }
 
-// One modem channel, owned by this translation unit and used from setup()/loop().
-// Construction order keeps each dependency alive for all of its consumers.
-HardwareSerial modemSerial(2);
-gsm::AtClient modemAt(modemSerial, Serial);
-gsm::QuectelModem modem(modemAt, Serial, makeGsmSerialConfig());
-gsm::GsmMqttClient gsmMqtt(modemAt, Serial, modem.failures());
-gsm::RuntimeInfo gsmRuntimeInfo;
-bool gsmMqttSubscriptionReady = false; // Configuration topic on MQTT_CLIENT_ID.
+    // One modem channel, owned by this translation unit and used from setup()/loop().
+    // Construction order keeps each dependency alive for all of its consumers.
+    HardwareSerial modemSerial(2);
+    gsm::AtClient modemAt(modemSerial, Serial);
+    gsm::QuectelModem modem(modemAt, Serial, makeGsmSerialConfig());
+    gsm::GsmMqttClient gsmMqtt(modemAt, Serial, modem.failures());
+    gsm::RuntimeInfo gsmRuntimeInfo;
+    bool gsmMqttSubscriptionReady = false; // Configuration topic on MQTT_CLIENT_ID.
 } // namespace
 
 size_t max_wifi_hotspots_size = sizeof(struct_wifiInfo) * 20;
@@ -528,7 +530,7 @@ void loop()
             }
 
             // Update telemetry tracking
-            if (is_boot_telemetry && telemetry_sent)
+            if (is_boot_telemetry && telemetry_sent && !boot_telemetry_sent)
             {
                 boot_telemetry_sent = true;
                 Serial.println("Boot telemetry sent successfully");
@@ -1646,14 +1648,11 @@ void initializeAndConfigGSM()
     CommsManagerState.mqttConnectionInitialized = mqttClient.connected();
     gsmMqttSubscriptionReady = false;
 
-    // A failed binary transfer requires a modem reset before more AT commands.
-    if (!modemAt.synchronized())
-        modem.hardwareReset(gsm::ResetSequence::LowHighLow);
+    // The UART is shared with modemAt. initialize() owns software reset and
+    // hardware recovery, including when this initial AT probe fails.
+    if (!modem.beginSerial(modemSerial))
+        Serial.println("Initial modem communication unavailable; attempting recovery");
 
-    DeviceConfigState.gsmConnected = modem.beginSerial(modemSerial);
-
-    if (!DeviceConfigState.gsmConnected)
-        return;
     DeviceConfigState.gsmConnected = modem.initialize();
     if (!DeviceConfigState.gsmConnected)
         return;

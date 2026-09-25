@@ -60,6 +60,9 @@ struct SerialConfig
     uint32_t serialWarmupMs = 4000;
     uint32_t resetWarmupMs = 30000;
     bool debugEnabled = false;
+    // MCU GPIO sequence for this board's reset driver, not modem RESET_N levels.
+    ResetSequence resetSequence = ResetSequence::LowHighLow;
+    uint32_t resetPulseMs = 120;
 };
 
 struct ModemState

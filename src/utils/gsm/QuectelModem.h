@@ -19,6 +19,8 @@ public:
     FailureCounters &failures();
     const FailureCounters &failures() const;
 
+    // Configures the UART and attempts power-on. If AT is unavailable, initialize()
+    // can still recover using RESET; the supplied UART must match AtClient's UART.
     bool beginSerial(HardwareSerial &serial);
 
     QuectelGnss &gnss() { return gnss_; }
@@ -33,9 +35,12 @@ public:
     bool deactivateGprs();
     int8_t gprsStatus();
 
-    void softReset();
+    // Success requires AT communication to return after the reset.
+    bool softReset();
     void restart();
-    void hardwareReset(ResetSequence sequence, uint8_t timingDelayMs = 120);
+    // Pulse duration and subsequent boot wait are separate SerialConfig settings:
+    // resetPulseMs (120 ms) and resetWarmupMs (30 s).
+    bool hardwareReset(ResetSequence sequence);
     void sleep();
     void troubleshoot();
 
@@ -70,6 +75,10 @@ private:
     QuectelFileSystem fileSystem_;
     ModemState state_;
     FailureCounters failures_;
+
+    bool waitForReady(unsigned long timeoutMs = 60000);
+    void clearConnectionState();
+    bool configureCommands();
 
     bool readHttpPostStatus(const char *data, char *status, size_t statusSize);
     String trimmedResponseBody(const String &response, const char *terminator = "OK") const;

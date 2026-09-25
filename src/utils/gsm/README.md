@@ -37,6 +37,72 @@ keeps the old `setup()`/`loop()` out of PlatformIO's source discovery. See the
 [migration notes](../../../docs/gsm-main-migration.md) for the call mapping and
 backup restoration instructions.
 
+## Startup and reset
+
+Call `beginSerial(modemSerial)` before `initialize()`. The former opens the UART
+and probes AT. If the modem does not respond, it runs the board-tested power
+sequence: PWRKEY GPIO LOW, 1-second settle, LOW for 500 ms, then HIGH for
+2500 ms and held HIGH, followed by `serialWarmupMs` (4 seconds by default). A failed initial probe does not prevent calling `initialize()`
+for recovery, provided the UART supplied to `beginSerial` matches `AtClient`.
+
+`initialize()` attempts `AT+CFUN=1,1` first, allowing its documented 15-second
+response time. After acknowledgement it waits `resetWarmupMs` (30 seconds by
+default) and polls AT for up to 60 seconds. Failure triggers one hardware reset
+and another readiness check. An invalid binary session skips CFUN and proceeds
+directly to hardware recovery: AT text could otherwise become file contents.
+A timed-out CFUN command gets the reboot warmup interval before hardware
+recovery because its acknowledgement may have been lost during reboot.
+
+Both `softReset()` and `hardwareReset()` return `bool`; success requires AT
+communication after reboot. Reset clears cached SIM, GPRS and MQTT connection
+state while preserving configured SIM PIN and accumulated failure counts.
+`initialize()` reapplies command settings and validates the SIM after reboot;
+SIM/configuration errors return failure without another hardware reset.
+No reset pin means failed software recovery returns an error for the caller.
+
+The board's tested MCU levels take precedence over the active-low signals at the
+bare modem pins. GPIO 16 (PWRKEY) uses normal `OUTPUT` mode and the held-HIGH
+startup sequence above. GPIO 42 (reset control) uses normal `OUTPUT` mode and
+`LowHighLow`: LOW idle, HIGH for `resetPulseMs`, then LOW again. A responsive
+modem skips the PWRKEY sequence entirely. The earlier direct-pin/open-drain
+assumption was incorrect for this board and has been removed. The supplied tested
+firmware matches the inverting NPN drivers in the local
+`Resources/Quectel_EC200U_Series_Hardware_Design_V1.0.pdf`, Figures 10 and 14
+(printed pages 37 and 40; PDF pages 38 and 41). MCU HIGH turns the transistor on
+and pulls the modem pin LOW; MCU LOW turns it off and releases the modem pin.
+That document is Quectel's reference circuit, rather than a PCB-specific schematic.
+
+The legacy final PWRKEY GPIO HIGH keeps the modem's PWRKEY LOW through that driver.
+This preserves the tested always-on behavior, rather than a released power-on
+pulse. The manual notes that held-low PWRKEY prevents AT-command power-off.
+An orderly shutdown feature would need to release the control first; do not assume
+the present held-HIGH startup sequence supports `AT+QPOWD` shutdown unchanged.
+
+`resetPulseMs` defaults to 120 ms and is clamped to a minimum of 100 ms.
+`resetWarmupMs` defaults to 30000 ms and starts after reset is released. Both are
+32-bit millisecond settings. The reset API deliberately takes only the sequence:
+
+```cpp
+modem.hardwareReset(gsm::ResetSequence::LowHighLow);
+```
+
+Do not pass `resetWarmupMs` as a second argument. The former second argument was
+an 8-bit pulse duration, so 30000 converted to 48 ms (then clamped to 100 ms).
+Change `SerialConfig::resetPulseMs` explicitly when a different pulse is needed.
+
+CFUN is a firmware-requested reboot with full functionality restored. PWRKEY
+requests power-on or orderly shutdown, depending on state and pulse length.
+RESET_N forces a baseband reset; none of these commands directly switches the
+external VBAT_RF or VBAT_BB supply. Internal rail sequencing is modem-controlled.
+Quectel recommends RESET_N only when orderly shutdown through AT+QPOWD or PWRKEY
+is unavailable. This implementation uses RESET_N after failed software recovery;
+it does not implement a verified PWRKEY shutdown/power-on cycle or monitor STATUS.
+A responsive modem does not inherently need a reboot at every host startup;
+the explicit reboot here follows this application's requested startup policy.
+
+- [EC200U hardware design, sections 3.6–3.7](https://www.quectel.com/content/uploads/2024/02/Quectel_EC200U_Series_Hardware_Design_V1.2.pdf)
+- [EC200U AT commands, AT+CFUN](https://quectel.com/content/uploads/2024/02/Quectel_EC200UEG91xUEG915G_Series-AT-Commands-Manual_V1.1.pdf)
+
 ## GNSS
 
 Within `main.cpp`, after the normal modem startup, the owned modem exposes GNSS:
@@ -132,7 +198,7 @@ Handles are closed after completed transactions, including explicit modem errors
 An incomplete binary transfer, unknown handle, or failed close invalidates the AT
 session. Further `sendCommand` calls fail without sending bytes. Reset the modem
 to reclaim handles and restore framing; `hardwareReset` resets the transport
-session after its warmup delay. With no reset pin, use an external reset/power
+session after its warmup delay and checks AT readiness. With no reset pin, use an external reset/power
 cycle, then call `AtClient::resetSession()` after command mode is known to be
 restored. Do not clear the flag merely to retry: the modem could still be in data
 mode. The raw `serial()` accessor bypasses these guards and is for controlled
@@ -144,9 +210,9 @@ Run `bash scripts/test_gsm.sh` for scripted UART regression tests with the host
 C++ compiler and UndefinedBehaviorSanitizer. Optional AddressSanitizer:
 `GSM_SANITIZERS=address,undefined bash scripts/test_gsm.sh` on a host where that
 runtime is supported. Tests do not require PlatformIO downloads or a modem.
-The host runner requires `tests/gsm/test_gsm.cpp` and `tests/gsm/support/Arduino.h`;
-these files are absent from the current checkout, so host tests must be restored
-before using the runner.
+The current host suite covers 14 startup/reset scenarios using scripted UART
+responses and a virtual clock/GPIO recorder. It does not cover the older GNSS
+and file-transfer regression scenarios that were absent from this checkout.
 Run `pio run -e esp32_s3_quectel_v4` for the firmware build.
 
 Hardware validation remains necessary for GNSS acquisition/shutdown, antenna
