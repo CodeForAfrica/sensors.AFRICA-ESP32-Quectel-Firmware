@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.0](https://github.com/CodeForAfrica/sensors.AFRICA-ESP32-Quectel-Firmware/releases/tag/v1.6.0) Unreleased
+
+### Added
+
+- Optional Quectel GNSS support for engine control and parsed location fixes on compatible modem variants.
+- Modem UFS file services for storage information, file listing, binary reads/writes and deletion.
+
+### Changed
+
+- Refactored GSM handling into dedicated AT transport, modem, MQTT, GNSS and file-system classes with explicit dependencies and instance-owned state.
+- Migrated `main.cpp` to the GSM library while preserving the legacy application and handler as references.
+- Use software reset during normal modem initialization, with hardware reset as recovery and AT readiness checks after reboot.
+
+### Fixed
+
+- Block further AT commands after an incomplete file transfer or failed handle cleanup until modem recovery restores the session.
+
+## [v1.5.1](https://github.com/CodeForAfrica/sensors.AFRICA-ESP32-Quectel-Firmware/releases/tag/v1.5.1) 2026-09-24
+
+### Fixed
+
+- WiFi time configuration — require a connected WiFi network and wait up to 10 seconds for valid NTP time before setting the RTC and initializing the calendar, preventing initialization with the default year 1970.
+- Log NTP synchronization timeouts and leave `DeviceConfigState.timeSet` false when valid time is unavailable.
+
 ## [v1.5.0](https://github.com/CodeForAfrica/sensors.AFRICA-ESP32-Quectel-Firmware/releases/tag/v1.5.0) 2026-09-03
 
 ### Added
